@@ -36,6 +36,7 @@
         "bierner.markdown-preview-github-styles",
         "eamodio.gitlens",
         "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
         "ms-vscode.cmake-tools",
         "ms-vscode.makefile-tools",
         "tamasfe.even-better-toml"
@@ -56,25 +57,7 @@
         "files.watcherExclude": {
           "**/node_modules/**": true
         },
-        "scm.defaultViewMode": "tree",
-        "[javascript]": {
-          "editor.defaultFormatter": "biomejs.biome"
-        },
-        "[javascriptreact]": {
-          "editor.defaultFormatter": "biomejs.biome"
-        },
-        "[typescript]": {
-          "editor.defaultFormatter": "biomejs.biome"
-        },
-        "[typescriptreact]": {
-          "editor.defaultFormatter": "biomejs.biome"
-        },
-        "[json]": {
-          "editor.defaultFormatter": "biomejs.biome"
-        },
-        "[jsonc]": {
-          "editor.defaultFormatter": "biomejs.biome"
-        }
+        "scm.defaultViewMode": "tree"
       }
     }
   }
