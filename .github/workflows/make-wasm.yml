@@ -20,7 +20,7 @@ jobs:
     strategy:
       matrix:
         edition:
-          # - halfkp
+          - halfkp
           - halfkp.noeval
           # - halfkpe9.noeval
           # - halfkpvm.noeval
