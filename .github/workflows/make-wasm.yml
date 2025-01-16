@@ -24,8 +24,8 @@ jobs:
           - halfkp.noeval
           # - halfkpe9.noeval
           # - halfkpvm.noeval
-          # - k-p
-          # - k-p.noeval
+          - k-p
+          - k-p.noeval
           # - material
           # - material9
           - yaneuraou-mate
