@@ -268,7 +268,7 @@ export = ${pkgobj.exportname};
   // make
   await new Promise((resolve) => {
     let child = exec(
-      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} ${pkgobj.extra}`,
+      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} ${pkgobj.extra} -s EXPORT_ES6=1 -s ENVIRONMENT=web -s MODULARIZE=1`,
       { cwd: fpath.join(cwd, "source"), stdio: "inherit" },
       (_error, _stdout, _stderr) => { resolve(); },
     );

@@ -122,7 +122,7 @@ PYTHON = python
 CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
 NVCC_CPPFLAGS = -std=c++17 -x cu -maxrregcount=0 --machine 64 --compile -cudart static -DNDEBUG -Xcompiler "-Ofast"
 WCPPFLAGS     =
-LDFLAGS       = 
+LDFLAGS       =
 LIBS          =
 INCLUDE       = # -I../include
 
