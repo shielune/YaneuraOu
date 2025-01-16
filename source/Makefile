@@ -71,7 +71,7 @@ YO_CLUSTER = OFF
 #TARGET_CPU = AVX512VNNI
 #TARGET_CPU = AVX512
 #TARGET_CPU = AVXVNNI
-TARGET_CPU = AVX2
+# TARGET_CPU = AVX2
 #TARGET_CPU = SSE42
 #TARGET_CPU = SSE41
 #TARGET_CPU = SSSE3
@@ -84,7 +84,7 @@ TARGET_CPU = AVX2
 # -- ARMとか
 #TARGET_CPU = OTHER
 #TARGET_CPU = GRAVITON2
-#TARGET_CPU = WASM
+TARGET_CPU = WASM
 # -- macOS for Intel
 #TARGET_CPU = APPLEAVX2
 #TARGET_CPU = APPLESSE42
@@ -100,8 +100,8 @@ DEBUG = OFF
 # 使用するコンパイラ (compiler)
 # ※ clangでコンパイルしたほうがgccより数%速いっぽい。
 #COMPILER = g++
-COMPILER = clang++
-#COMPILER = em++
+# COMPILER = clang++
+COMPILER = em++
 
 # Python
 # ※ NNUEの未知なarchitectureの時にarchitecture headerを動的に生成するのに用いる。
@@ -222,7 +222,7 @@ else
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
-		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node
+		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker -s EXPORT_ES6=1 -s AUTO_NATIVE_LIBRARIES=0
 		LDFLAGS += -s PTHREAD_POOL_SIZE=32
 		# -s PTHREAD_POOL_SIZE_STRICT=32
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
