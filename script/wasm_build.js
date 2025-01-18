@@ -6,6 +6,8 @@ const os = require("os");
 const process = require("process");
 const zlib = require("zlib");
 
+const arch = execSync('uname -m').toString().trim();
+const version = execSync('em++ --version').toString().match(/(\d+\.\d+\.\d+)/)[1]
 const pkgobjs = [
   {
     name: "halfkp",
@@ -92,8 +94,8 @@ const cpus = os.cpus().length;
 
 (async () => {
 for(const pkgobj of pkglist) {
-  const builddirusi = `build/wasm/${pkgobj.name}/`;
-  const builddirlib = `build/wasm/${pkgobj.name}/lib/`;
+  const builddirusi = `build/${version}_${arch}/${pkgobj.name}/`;
+  const builddirlib = `build/${version}_${arch}/${pkgobj.name}/lib/`;
   const usijs_copy_dirs = [
   ];
   const dts_copy_dirs = [
