@@ -1,16 +1,26 @@
 {
   "name": "'YaneuraOu",
-  "dockerComposeFile": ["docker-compose.yaml"],
-  "service": "cpp",
+  "dockerComposeFile": [
+    "compose.yaml"
+  ],
+  "service": "app",
   "workspaceFolder": "/home/vscode/app",
   "shutdownAction": "stopCompose",
   "remoteUser": "vscode",
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+  },
   "mounts": [
-    "source=${env:HOME}/home/vscode/.ssh,target=/.ssh,type=bind,consistency=cached,readonly"
+    "source=${env:HOME}/.aws,target=/home/vscode/.aws,type=bind,consistency=cached,readonly",
+    "source=${env:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    "source=${env:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached,readonly"
   ],
+  "remoteEnv": {
+    "WAKATIME_API_KEY": "${localEnv:WAKATIME_API_KEY}"
+  },
   "features": {
     "ghcr.io/devcontainers/features/git:1": {
-      "version": "2.39.0"
+      "version": "2.52.0"
     },
     "ghcr.io/devcontainers/features/common-utils:2": {
       "configureZshAsDefaultShell": true
@@ -19,13 +29,18 @@
       "moby": false,
       "dockerDashComposeVersion": "v2"
     },
-    "ghcr.io/dhoeric/features/act:1": {}
+    "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {},
+    "ghcr.io/dhoeric/features/act:1": {},
+    "ghcr.io/ebaskoro/devcontainer-features/emscripten:1": {
+      "version": "3.1.43"
+    }
   },
   "postAttachCommand": "/bin/sh .devcontainer/postAttachCommand.sh",
   "postCreateCommand": "/bin/sh .devcontainer/postCreateCommand.sh",
   "customizations": {
     "vscode": {
       "extensions": [
+        "Anthropic.claude-code",
         "EditorConfig.EditorConfig",
         "GitHub.copilot",
         "GitHub.copilot-chat",
@@ -40,25 +55,7 @@
         "ms-vscode.cmake-tools",
         "ms-vscode.makefile-tools",
         "tamasfe.even-better-toml"
-      ],
-      "settings": {
-        "betterTypeScriptErrors.prettify": true,
-        "debug.internalConsoleOptions": "neverOpen",
-        "diffEditor.diffAlgorithm": "advanced",
-        "diffEditor.experimental.showMoves": true,
-        "diffEditor.renderSideBySide": false,
-        "editor.formatOnPaste": true,
-        "editor.guides.bracketPairs": "active",
-        "editor.codeActionsOnSave": {
-          "quickfix.biome": "explicit",
-          "source.organizeImports.biome": "explicit"
-        },
-        "editor.formatOnSave": true,
-        "files.watcherExclude": {
-          "**/node_modules/**": true
-        },
-        "scm.defaultViewMode": "tree"
-      }
+      ]
     }
   }
 }
