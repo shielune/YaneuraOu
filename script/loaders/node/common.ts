@@ -125,14 +125,40 @@ export function installWorkerPolyfill(
     private _messageHandlers: Array<(e: { data: unknown }) => void> = [];
     private _errorHandlers: Array<(e: unknown) => void> = [];
 
-    constructor(target: unknown) {
+    constructor(target: unknown, webOpts: WorkerOptions = {}) {
       const filepath = resolveWorkerPath(target);
       const wantsStdout = typeof hooks.onStdout === "function";
-      this._w = new NodeWorker(shimUrl, {
-        workerData: { workerFile: filepath, ...hooks.extraWorkerData },
-        stdout: wantsStdout,
-        stderr: wantsStdout,
-      });
+      const isClassicWorkerFile = filepath.endsWith(".worker.js");
+
+      if (isClassicWorkerFile) {
+        // emscripten 3.1.43 style — separate classic script. Route through
+        // worker_shim.ts so we can eval the classic script into a faked
+        // web-worker scope and forward postMessage in both directions.
+        this._w = new NodeWorker(shimUrl, {
+          workerData: { workerFile: filepath, ...hooks.extraWorkerData },
+          stdout: wantsStdout,
+          stderr: wantsStdout,
+        });
+      } else {
+        // emscripten 3.1.60+ style — the "worker" script is the main ES
+        // module itself, invoked with workerData = "em-pthread". We must
+        // NOT interpose the shim here, because the pthread handshake
+        // (shared memory import, transferred WebAssembly.Module, etc.)
+        // assumes the worker runs the engine's own runtime code directly.
+        // Pass the original web-style options through to NodeWorker — it
+        // accepts the same `workerData` / `name` keys, and `type:"module"`
+        // is ignored (Node always treats .js as module in worker_threads).
+        const nwOpts: Record<string, unknown> = {
+          ...(webOpts as unknown as Record<string, unknown>),
+          stdout: wantsStdout,
+          stderr: wantsStdout,
+        };
+        this._w = new NodeWorker(
+          target instanceof URL ? target : filepath,
+          nwOpts as ConstructorParameters<typeof NodeWorker>[1],
+        );
+      }
+
       if (wantsStdout && this._w.stdout) {
         pipeLines(this._w.stdout, hooks.onStdout!);
       }
