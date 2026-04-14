@@ -9,6 +9,7 @@
 - **5.0.5 は生成 JS そのものが構文エラー** で `<script>` 読み込み時点で即死する。
 - 現時点でのフロントエンド側観測 (「新 emscripten で評価値が誤る」) は、再検証すると**そもそも探索自体が走っていない**可能性が高い。誤評価ではなく起動不良。
 - 原因の第一容疑は **`INCOMING_MODULE_JS_API` のデフォルト変更** (3.1.74 で `print` / `printErr` / `postRun` / `preRun` が外された) で、`wasm_pre.js` が前提としている `Module.postRun` 登録・`Module.print` 差し替えが無視されるようになった。
+- **検証パイプラインは Node と Playwright の 2 経路でテストするようになった** (`script/wasm_eval_node.ts` + `script/wasm_eval_browser.ts`)。どちらも `script/loaders/` 配下の per-generation ローダー (`classic-worker` / `esmodule-worker` / `ccall-only`) を共有する。両者が一致して通れば verify 成功、片方だけ通れば差分が診断の手がかりになる。
 
 ## 検証条件
 
@@ -145,10 +146,37 @@ B = "function" == typeof importScripts;
 - [ ] 3.1.74 で直った後、改めて 30 秒探索で `cp 381 / G*9g / depth 24` と一致するか確認 (回帰の最終ゲート)
 - [ ] 3.1.50 の main `.js` 欠落再ビルド (優先度低)
 
+## dual-runner smoke test (2026-04-14)
+
+新しい `script/wasm_eval_node.ts` と `script/wasm_eval_browser.ts` を、
+`source/Makefile` を `-s ENVIRONMENT=web,worker,node` に切り替えて
+リビルドした k-p パッケージに対して実行した結果 (`--think-ms 5000`):
+
+| emscripten | node ランナー | browser ランナー | メモ |
+|-----------:|:--|:--|:--|
+| 3.1.43 | ✅ `cp 417 / G*9g` | ✅ `cp 417 / G*9g` | `classic-worker/*` ローダー経由。Node 側は `yaneuraou.k-p.worker.js` を `worker_shim.ts` で eval |
+| 3.1.70 | ❌ `usi timeout (tail=[])` | ✅ `cp 404 / G*9g` | `esmodule-worker/*` ローダー経由。Browser は動作。Node は pthread ハンドシェイクが成立せず、`ccall("usi_command", ..., ["usi"])` が永久に busy を返す |
+
+Node 側 3.1.70 の未解決問題:
+
+- emscripten 3.1.60+ の Node コードパスは `require("worker_threads").Worker` を直接使い `global.Worker = na.Worker` で上書きしてくる。
+- ローダーは `.worker.js` と ES module worker を分岐し、ES module 側は `NodeWorker` を直接通すようにしたが、それでも pthread pool の起動か `wasm_pre.js` の queue drain がどこかで stall する。
+- `wasm_pre.js` 側の Node 対応を見直すか、`INCOMING_MODULE_JS_API` に Node 固有の key を追加する必要があるかもしれない → `wasm-code-fixer` / `wasm-build-config` マターとして残す。
+
+Browser 側の 3.1.74+ と 5.0.5 の評価はこの再検証ではまだ実行していない。
+次のステップ:
+
+- [ ] 3.1.74 以降をリビルドして両ランナーで評価値を 30 秒探索で確認
+- [ ] 3.1.70 の Node stall を切り分け (pthread pool 起動ログ, wasm_pre.js の Module 形状ダンプ)
+- [ ] 5.0.5 の minifier バグを切り分け
+
 ## 参考ファイル
 
-- ランナー: `script/wasm_eval_browser.ts`
-- ランナー HTML: `script/wasm_eval_runner.html`
-- バッチ: `script/wasm_eval_all.sh`
+- Node ランナー: `script/wasm_eval_node.ts`
+- Browser ランナー: `script/wasm_eval_browser.ts`
+- Browser ランナー HTML: `script/wasm_eval_runner.html`
+- 共通 USI フロー: `script/wasm_eval_common.ts`
+- Per-generation ローダー: `script/loaders/{types,version,detect,retry}.ts` + `script/loaders/{node,browser}/*.ts`
+- バッチ: `script/wasm_eval_all.sh` (`RUNNERS=node,browser` で両経路を回す)
 - 計画 / 背景: `docs/wasm_eval_testing_plan.md`
 - ビルドログ: `build/multibuild_logs/<ver>_k-p.log`
