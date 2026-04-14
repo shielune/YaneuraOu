@@ -1,10 +1,9 @@
 
 # === ビルドターゲット (build target) ===
 
-# normal     : 通常使用用
+# normal     : 通常使用版(配布用の実行ファイルはこちら)
 # evallearn  : 教師局面からの学習用
-# tournament : 大会で使う用
-# gensfen    : 教師生成用(2019年版)
+# tournament : 大会で使う用(通常版よりややEloが高いが使える機能に制限がある)
 
 # === ビルドオプション (build options) ===
 
@@ -12,7 +11,14 @@
 # YANEURAOU_ENGINE_NNUE          : NNUE型評価関数(halfKP256),標準NNUE型
 # YANEURAOU_ENGINE_NNUE_KP256    : NNUE型評価関数(KP256)
 # YANEURAOU_ENGINE_NNUE_HALFKPE9 : NNUE型評価関数(halfKPE9)
+# YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32 : NNUE型評価関数(halfkp_512x2-16-32)
+# YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32 : NNUE型評価関数(halfkp_1024x2-8-32)
+# YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_64 : NNUE型評価関数(halfkp_1024x2-8-64)
 # YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32 : NNUE型評価関数(halfkp_vm_256x2-32-32)
+# // ⇨ 上記以外のアーキテクチャのNNUE評価関数用のやねうら王をビルドしたい時は、
+# //   やねうら王のビルド手順 - やねうら王 Wiki
+# //   https://github.com/yaneurao/YaneuraOu/wiki/%E3%82%84%E3%81%AD%E3%81%86%E3%82%89%E7%8E%8B%E3%81%AE%E3%83%93%E3%83%AB%E3%83%89%E6%89%8B%E9%A0%86
+# // の「NNUEの任意アーキテクチャのビルドについて」をご覧ください。
 # YANEURAOU_ENGINE_KPPT          : KPPT型評価関数
 # YANEURAOU_ENGINE_KPP_KKPT      : KPP_KKPT型評価関数
 # YANEURAOU_ENGINE_MATERIAL      : 駒得のみの評価関数(複数変種あり。MATERIAL_LEVELで選択できる)
@@ -20,13 +26,21 @@
 # YANEURAOU_MATE_ENGINE          : やねうら王 詰将棋solver (2020/12/29～)
 # USER_ENGINE                    : USER定義エンジン
 
+# YANEURAOU_ENGINE_DEEP_TENSOR_RT_UBUNTU : ふかうら王(dlshogi互換エンジン) , TensorRT使用 , Ubuntu用build。
+#                                  ビルドを確認したDocker image → nvcr.io/nvidia/tensorrt:22.12-py3
+
+
 YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_KP256
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKPE9
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_64
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPP_KKPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIAL
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_DEEP_TENSOR_RT_UBUNTU
 #YANEURAOU_EDITION = TANUKI_MATE_ENGINE
 #YANEURAOU_EDITION = YANEURAOU_MATE_ENGINE
 #YANEURAOU_EDITION = USER_ENGINE
@@ -49,10 +63,14 @@ YO_CLUSTER = OFF
 # AVX-512対応(サーバー向けSkylake以降)ならAVX512を指定する。
 # AVX-512対応でさらにVNNI命令対応(Cascade Lake以降)なら、AVX512VNNIを指定する。
 
+# macOSの場合、
+# 1. IntelMacでSSE4.2までしか対応していないなら、APPLESSE42 を指定。AVX2に対応しているなら APPLEAVX2を指定する。
+# 2. M1以降のCPUであれば、APPLEM1を指定する。(M2でもM3でもAPPLEM1を指定する。)
 
 # --- Intel/AMD系 (x86/x64 Platform)
 #TARGET_CPU = AVX512VNNI
 #TARGET_CPU = AVX512
+#TARGET_CPU = AVXVNNI
 TARGET_CPU = AVX2
 #TARGET_CPU = SSE42
 #TARGET_CPU = SSE41
@@ -67,6 +85,11 @@ TARGET_CPU = AVX2
 #TARGET_CPU = OTHER
 #TARGET_CPU = GRAVITON2
 #TARGET_CPU = WASM
+# -- macOS for Intel
+#TARGET_CPU = APPLEAVX2
+#TARGET_CPU = APPLESSE42
+# -- macOS for M1/M2/M3
+#TARGET_CPU = APPLEM1
 
 
 # デバッガーを使用するか (debugger)
@@ -80,6 +103,9 @@ DEBUG = OFF
 COMPILER = clang++
 #COMPILER = em++
 
+# Python
+# ※ NNUEの未知なarchitectureの時にarchitecture headerを動的に生成するのに用いる。
+PYTHON = python
 
 # エンジンの表示名 (engine displayname)
 # ("usi"コマンドに対して出力される)
@@ -93,15 +119,19 @@ COMPILER = clang++
 
 
 # 標準的なコンパイルオプション (standard compile options)
-CPPFLAGS   = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
+CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
 NVCC_CPPFLAGS = -std=c++17 -x cu -maxrregcount=0 --machine 64 --compile -cudart static -DNDEBUG -Xcompiler "-Ofast"
-WCPPFLAGS  =
-LDFLAGS  = $(EXTRA_LDFLAGS)
-LIBS     =
-INCLUDE  = # -I../include
+WCPPFLAGS     =
+LDFLAGS       = 
+LIBS          =
+INCLUDE       = # -I../include
 
-# makeするときにCPPFLAGSを追加で指定したいときはこれを用いる。
+# makeするときにCPPFLAGS,LDFLAGSを追加で指定したいときはこれを用いる。
 EXTRA_CPPFLAGS =
+EXTRA_LDFLAGS  =
+
+CPPFLAGS += $(EXTRA_CPPFLAGS)
+LDFLAGS  += $(EXTRA_LDFLAGS)
 
 # YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIALのときに指定できる、評価関数の通し番号
 #  1 : 普通の駒得のみの評価関数
@@ -144,6 +174,7 @@ endif
 
 # clang用にCPPFLAGSなどを変更
 ifneq (,$(findstring clang++,$(COMPILER)))
+
 	# stdlib
 	# CPPFLAGS += -stdlib=libstdc++
 
@@ -161,6 +192,16 @@ ifneq (,$(findstring clang++,$(COMPILER)))
 	# → 本当に消してしまっても大丈夫か？
 	WCPPFLAGS += -fno-threadsafe-statics
 
+	# note : clang++で-flto指定時に、LDFLAGSに -fuse-ld=lld を指定しないと
+	#      MSYS2、Ubuntu 24.04のclang-18でのlinkに失敗する。
+	#   ⇨ このオプションはそれ以前のclangでもつけて問題ないのでclangならば必ずつけるようにする。
+	#   ⇨ gccでコンパイルする時にこのオプションをつけるとエラーになるので、gccの時はつけてはいけない。
+	# note : macOSでは、デフォルトではclangのlinkerではなくld64を用いるので、この指定をするとエラーになる。(いまのところ)
+	#   ⇨ よってTARGET_CPUにAPPLEの文字が入っている場合は、これを付与してはならない。
+	ifeq (,$(findstring APPLE,$(TARGET_CPU)))
+		LDFLAGS       += -fuse-ld=lld
+	endif
+
 else
 	ifneq (,$(findstring g++,$(COMPILER)))
 		# mingw g++ で AVX512 向けビルドを行おうとするとエラーになる問題の回避
@@ -174,43 +215,28 @@ else
 	ifneq (,$(findstring em++,$(COMPILER)))
 		EM_EXPORT_NAME=YaneuraOu
 		EM_INITIAL_MEMORY_SIZE=$(shell if [ $(MATERIAL_LEVEL) -ge 5 ]; then echo 385875968; else echo 138412032; fi)
+		# web / node の 2 variant を同じ source から吐くので、ENVIRONMENT と
+		# EXPORTED_RUNTIME_METHODS は make 呼び出し側 (script/wasm_build.js)
+		# から上書きできるように ?= で default を置く。
+		EM_ENVIRONMENT ?= web,worker
+		EM_EXPORTED_RUNTIME_METHODS ?= ['FS','ccall']
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
-		# `-pthread` is the modern spelling; the legacy `-s USE_PTHREADS=1`
-		# that V7.61 originally shipped no longer compiles on emscripten 5.0.0.
 		CPPFLAGS += -pthread
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
-		# Two variants are produced from the same source by the outer
-		# driver (script/wasm_build.js): one with ENVIRONMENT=web,worker
-		# for Playwright + Chromium, and one with ENVIRONMENT=node for
-		# the wasm_eval_node.ts runner. EM_ENVIRONMENT is set per build
-		# by the driver. Node variant also adds `callMain` to the
-		# exported runtime methods so the Node loader can explicitly run
-		# main() after the factory resolves with noInitialRun=true.
-		EM_ENVIRONMENT ?= web,worker
-		EM_EXPORTED_RUNTIME_METHODS ?= ['FS','ccall']
-		# `-s EXPORT_ES6=1` must live in LDFLAGS; passing it via the
-		# outer make command line only sets a make variable that the
-		# em++ block does not reference, and the generated JS falls
-		# back to a CommonJS `module.exports = …` shape that the ESM
-		# dynamic-import path in script/loaders/{node,browser}/common.ts
-		# can't consume.
 		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s EXPORT_ES6=1 -s ENVIRONMENT=$(EM_ENVIRONMENT)
-		# emscripten 3.1.74 以降、INCOMING_MODULE_JS_API のデフォルトから
+		# emscripten >= 3.1.74 では INCOMING_MODULE_JS_API のデフォルトから
 		# print/printErr/postRun/preRun が外れ、wasm_pre.js の Module.print /
 		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの
-		# stdout もメインスレッドに届かなくなる)。明示的に指定して復活させる。
+		# stdout が吸い込まれる症状 B)。明示 whitelist で復活させる。
 		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
 		LDFLAGS += -s PTHREAD_POOL_SIZE=32
 		# -s PTHREAD_POOL_SIZE_STRICT=32
-		# EXPORTED_RUNTIME_METHODS is parameterised by EM_EXPORTED_RUNTIME_METHODS.
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
 		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=4294967296
-		# Newer emscripten renamed TOTAL_STACK to STACK_SIZE; STACK_SIZE
-		# also works on 3.1.43.
 		LDFLAGS += -s STACK_SIZE=67108864
 		# LDFLAGS += -s PROXY_TO_PTHREAD
 		# LDFLAGS += -s ALLOW_UNIMPLEMENTED_SYSCALLS
@@ -237,13 +263,6 @@ endif
 # CPPFLAGSとLDFLAGSの両方で-fltoを指定する必要がある。
 # cf. https://gcc.gnu.org/onlinedocs/gcc-6.3.0/gcc/Optimize-Options.html#Optimize-Options
 LTOFLAGS = -flto
-
-# MSYS2 clang++ で -flto 指定時にリンクを行えない問題の回避
-ifneq (,$(findstring clang++,$(COMPILER)))
-	ifeq ($(OS),Windows_NT)
-		LDFLAGS += -fuse-ld=lld
-	endif
-endif
 
 # wstringを使うためにこのシンボル定義が必要。
 CPPFLAGS  += -DUNICODE
@@ -332,8 +351,10 @@ SOURCES  = \
 	tt.cpp                                                                     \
 	movepick.cpp                                                               \
 	timeman.cpp                                                                \
+	memory.cpp                                                                 \
 	book/book.cpp                                                              \
 	book/apery_book.cpp                                                        \
+	book/policybook.cpp                                                        \
 	extra/bitop.cpp                                                            \
 	extra/long_effect.cpp                                                      \
 	extra/sfen_packer.cpp                                                      \
@@ -354,6 +375,8 @@ SOURCES  = \
 
 CUDA_SOURCES =
 
+OBJC_SOURCES =
+
 #ifneq (,$(findstring evallearn,$@))
 # →これこの時点で$@を取得できないのか…。なんぞこれ。
 
@@ -364,8 +387,7 @@ ifeq (,)
 	SOURCES  +=                                                                \
 		book/makebook.cpp                                                      \
 		book/makebook2015.cpp                                                  \
-		book/makebook2019.cpp                                                  \
-		book/makebook2021.cpp                                                  \
+		book/makebook2023.cpp                                                  \
 		learn/learner.cpp                                                      \
 		learn/learning_tools.cpp                                               \
 		learn/multi_think.cpp
@@ -400,28 +422,39 @@ ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 		# とりあえず"YANEURAOU_ENGINE_DEEP"というシンボルを定義してやる。
 		CPPFLAGS += -DYANEURAOU_ENGINE_DEEP
 
-		ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_TENSOR_RT)
-			CPPFLAGS += -DTENSOR_RT
+		ifneq (,$(findstring TENSOR_RT,$(YANEURAOU_EDITION)))
+			CPPFLAGS      += -DTENSOR_RT
 			NVCC_CPPFLAGS += -DTENSOR_RT
-			LDFLAGS += -lnvinfer -lnvonnxparser -lcudart
-			# CPPFLAGS += -I/usr/local/cuda/include
-			# LDFLAGS += -L/usr/local/cuda/lib64
-			# LDFLAGS += -L/usr/local/cuda/lib64/stubs
+			LDFLAGS       += -lnvinfer -lnvonnxparser -lcudart
+
+			# YANEURAOU_EDITIONのなかにUBUNTUと言う文字列が含まれているならlinkerなどの設定をしてやる。
+			ifneq (,$(findstring UBUNTU,$(YANEURAOU_EDITION)))
+				CPPFLAGS += -I/usr/local/cuda/include
+				LDFLAGS  += -L/usr/local/cuda/lib64
+				LDFLAGS  += -L/usr/local/cuda/lib64/stubs
+			endif
+
 			CUDA_SOURCES += eval/deep/unpack.cu
 
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_ORT_CPU)
-			CPPFLAGS += -DORT_CPU
+			CPPFLAGS += -DONNXRUNTIME -DORT_NO_EXCEPTIONS -DORT_CPU
+			LDFLAGS += -lonnxruntime
 
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_ORT_DML)
-			CPPFLAGS += -DORT_DML
-
-		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_ORT_MKL)
-			CPPFLAGS += -DORT_MKL
+			CPPFLAGS += -DONNXRUNTIME -DORT_NO_EXCEPTIONS -DORT_DML
+			LDFLAGS += -lonnxruntime
 
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_ORT_TRT)
-			CPPFLAGS += -DORT_TRT
+			CPPFLAGS += -DONNXRUNTIME -DORT_NO_EXCEPTIONS -DORT_TRT
+			LDFLAGS += -lonnxruntime
+
+		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_COREML)
+			CPPFLAGS += -DCOREML
+			LDFLAGS += -framework Foundation -framework CoreML
+			OBJC_SOURCES += eval/deep/nn_coreml.mm
 
 		endif
+
 	endif
 
 	# 大して大きなファイルではないので全部追加する。
@@ -434,6 +467,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 		engine/dlshogi-engine/PrintInfo.cpp                             \
 		engine/dlshogi-engine/UctSearch.cpp                             \
 		engine/dlshogi-engine/Node.cpp                                  \
+		engine/dlshogi-engine/PvMateSearch.cpp                          \
 		engine/dlshogi-engine/YaneuraOu_dlshogi_bridge.cpp
 endif
 
@@ -450,9 +484,20 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKPE9)
 			CPPFLAGS += -DEVAL_NNUE_HALFKPE9
 
+		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32)
+			CPPFLAGS += -DEVAL_NNUE_HALFKP_512X2_16_32
+
+		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32)
+			CPPFLAGS += -DEVAL_NNUE_HALFKP_1024X2_8_32
+
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_VM_256X2_32_32
 
+		else
+			# 知らないNNUEのarchitectureなので、architecture headerを動的に生成する。
+			ARCH_HEADER_FILE = \"architectures/$(subst YANEURAOU_ENGINE_NNUE_,,$(YANEURAOU_EDITION)).h\"
+			CPPFLAGS += -DNNUE_ARCHITECTURE_HEADER=$(ARCH_HEADER_FILE)
+			ARCH_GEN_SCRIPT = $(PYTHON) eval/nnue/architectures/nnue_arch_gen.py $(YANEURAOU_EDITION) eval/nnue/architectures
 		endif
 	endif
 
@@ -505,7 +550,11 @@ endif
 
 ifeq ($(YO_CLUSTER),ON)
 	SOURCES += \
-		engine/yo-cluster/yo_cluster.cpp
+		engine/yo-cluster/ClusterCommon.cpp       \
+		engine/yo-cluster/ProcessNegotiator.cpp   \
+		engine/yo-cluster/EngineNegotiator.cpp    \
+		engine/yo-cluster/ClusterObserver.cpp     \
+		engine/yo-cluster/ClusterStrategy.cpp
 	CPPFLAGS += -DUSE_YO_CLUSTER
 endif
 
@@ -558,7 +607,7 @@ else ifeq ($(TARGET_CPU),AVX512VNNI)
 	# cascadelakeとicelakeとの違いがあるのかは知らないので、cascadelakeのみでいいや。
 
 else ifeq ($(TARGET_CPU),AVXVNNI)
-	CPPFLAGS += -DUSE_AVX2 -DUSE_BMI2 -DUSE_VNNI -march=alderlake
+	CPPFLAGS += -DUSE_AVX2 -DUSE_BMI2 -DUSE_VNNI -DUSE_AVXVNNI -march=alderlake
 	# NNUEのコード、USE_VNNIが指定されているとVNNI対応のコードになる。
 	# Intel Alder Lake、Sapphire Rapids 以降追加の命令群。LLVM12, GCC11 以降。
 	# AVXVNNI (AVX2VNNI という表記も有り?) は AVX512VNNIの256bit幅以下限定版。
@@ -589,7 +638,7 @@ else ifeq ($(TARGET_CPU),NO_SSE)
 else ifeq ($(TARGET_CPU),GRAVITON2)
 	# for Amazon Web Servece EC2, the Graviton2 CPU [M6g/M6gd, C6g/C6gd/C6gn, R6g/R6gd, T4g, X2gd] instances
 	# https://github.com/aws/aws-graviton-getting-started/blob/main/c-c++.md
-	CPPFLAGS += -DIS_64BIT -DUSE_NEON -march=armv8.2-a+fp16+rcpc+dotprod+crypto
+	CPPFLAGS += -DIS_64BIT -DUSE_NEON=8 -march=armv8.2-a+fp16+rcpc+dotprod+crypto
 else ifeq ($(TARGET_CPU),APPLEAVX2)
 	CPPFLAGS += -DIS_64BIT -DUSE_AVX2 -DUSE_BMI2 -target x86_64-apple-macos11 -mbmi -mbmi2 -mavx2 -mpopcnt
 else ifeq ($(TARGET_CPU),APPLESSE42)
@@ -604,17 +653,18 @@ else ifeq ($(TARGET_CPU),OTHER)
 endif
 
 # YANEURAOU_EDITION , CPUターゲット名 などのシンボルをコンパイル時に定義してやる。
-CPPFLAGS += -D$(YANEURAOU_EDITION) -DTARGET_CPU=\"$(TARGET_CPU)\" $(EXTRA_CPPFLAGS)
+CPPFLAGS += -D$(YANEURAOU_EDITION) -DTARGET_CPU=\"$(TARGET_CPU)\"
 NVCC_CPPFLAGS += -D$(YANEURAOU_EDITION) -DTARGET_CPU=\"$(TARGET_CPU)\"
 
 OBJECTS  = $(addprefix $(OBJDIR)/, $(SOURCES:.cpp=.o))
 CUDA_OBJECTS = $(addprefix $(OBJDIR)/, $(CUDA_SOURCES:.cu=.o))
+OBJC_OBJECTS = $(addprefix $(OBJDIR)/, $(OBJC_SOURCES:.mm=.o))
 DEPENDS  = $(OBJECTS:.o=.d)
 
 all: clean $(TARGET)
 .PHONY : all normal evallearn tournament prof profgen profuse pgo clean
 
-$(TARGET): $(OBJECTS) $(CUDA_OBJECTS)
+$(TARGET): $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS)
 	$(COMPILER) -o $@ $^ $(LDFLAGS) $(CPPFLAGS) $(LIBS)
 
 $(OBJDIR)/%.o: %.cpp
@@ -624,27 +674,32 @@ $(OBJDIR)/%.o: %.cpp
 $(OBJDIR)/%.o: %.cu
 	nvcc $(NVCC_CPPFLAGS) $(INCLUDE) -o $@ $<
 
+$(OBJDIR)/%.o: %.mm
+	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	$(COMPILER) $(CPPFLAGS) -fobjc-arc $(INCLUDE) -o $@ -c $<
+
 # https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html
 
 
 # ビルドターゲット
 
+# Pythonスクリプトを実行する共通のターゲット
+run_python_script:
+ifneq ($(ARCH_GEN_SCRIPT),)
+	$(ARCH_GEN_SCRIPT)
+endif
+
 # 通常使用。
-normal:
+normal: run_python_script
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS)' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
 
 # 学習用。openmp , openblasなどを有効にする。
-evallearn:
+evallearn: run_python_script
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) $(OPENMP) $(BLAS_CPPFLAGS) -DEVAL_LEARN' LDFLAGS='$(LDFLAGS) $(OPENMP_LDFLAGS) $(BLAS_LDFLAGS) $(LTOFLAGS)' $(TARGET)
 
 # トーナメント用
-tournament:
+tournament: run_python_script
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
-
-# 教師棋譜生成用(開発用なので非公開) // currently private
-gensfen:
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) $(OPENMP) $(BLAS_CPPFLAGS) -DEVAL_LEARN -DGENSFEN2019' LDFLAGS='$(LDFLAGS) $(OPENMP_LDFLAGS) $(BLAS_LDFLAGS) $(LTOFLAGS)' $(TARGET)
-
 
 #　とりあえずPGOはAVX2とSSE4.2専用
 prof:
@@ -663,6 +718,6 @@ pgo:
 	$(MAKE) profuse
 
 clean:
-	rm -f $(OBJECTS) $(CUDA_OBJECTS) $(DEPENDS) $(TARGET) ${OBJECTS:.o=.gcda}
+	rm -f $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS) $(DEPENDS) $(TARGET) ${OBJECTS:.o=.gcda}
 
 -include $(DEPENDS)

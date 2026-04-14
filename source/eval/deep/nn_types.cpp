@@ -434,9 +434,9 @@ namespace Eval::dlshogi
 		// dlshogiのmake_move_label()
 		auto dl_make_move_label = [](Move16 move16, Color color)
 		{
-			Square   to =   to_sq(move16);
-			Square from = from_sq(move16);
-			bool   drop = is_drop(move16);
+			Square   to = move16.to_sq();
+			Square from = move16.from_sq();
+			bool   drop = move16.is_drop();
 
 			// move direction
 			int move_direction_label;
@@ -489,7 +489,7 @@ namespace Eval::dlshogi
 				}
 
 				// promote
-				if (is_promote(move16)) {
+				if (move16.is_promote()) {
 					move_direction = MOVE_DIRECTION_PROMOTED[move_direction];
 				}
 				move_direction_label = move_direction;
@@ -499,7 +499,7 @@ namespace Eval::dlshogi
 				// 後手の駒打ちなのでtoの場所だけを反転。
 				if (color == WHITE)
 					to = Flip(to);
-				PieceType pt = move_dropped_piece(move16);
+				PieceType pt = move16.move_dropped_piece();
 				const int hand_piece = int(pt - PAWN); // Aperyの駒打ち、駒の順番はPieceType順なのでPieceType2HandPiece[pt];は不要。
 				move_direction_label = MOVE_DIRECTION_NUM + hand_piece;
 			}
@@ -552,7 +552,7 @@ namespace Eval::dlshogi
 	// 指し手に対して、Policy Networkの返してくる配列のindexを返す。
 	int make_move_label(Move move, Color color)
 	{
-		return MoveLabel[move & 0xffff][color];
+		return MoveLabel[move.to_u16()][color];
 	}
 
 	// Boltzmann distribution
@@ -563,22 +563,52 @@ namespace Eval::dlshogi
 
 	// Softmaxの時の温度パラメーター。
 	// エンジンオプションの"Softmax_Temperature"で設定できる。
+
+	/*
+		softmax関数は⇓こう。
+			softmax(x_i)   = exp(x_i) / Σ exp(x_j) for j
+		ここに温度パラメーターTを導入。(これがSoftmax_Temparature)
+			softmax_T(x_i) = exp(x_i / T) / Σ exp(x_j / T) for j
+		そうすると分布の分散が変わる。
+		Tが大きいとx_iの範囲が縮まるため、分散は下がる。
+		Tが小さいと分散は広がる。
+
+		探索で読み抜けする時は、Tを下げるように調整する。
+	*/
+
 	constexpr float default_softmax_temperature = 1.0f;
 	float beta = 1.0f / default_softmax_temperature;
+
 	void set_softmax_temperature(const float temperature) {
 		beta = 1.0f / temperature;
 	}
 
 	void softmax_temperature_with_normalize(std::vector<float> &log_probabilities) {
+
 		// apply beta exponent to probabilities(in log space)
-		float max = 0.0f;
+
+		float max = numeric_limits<float>::min();
 		for (float& x : log_probabilities) {
 			x *= beta;
 			if (x > max) {
 				max = x;
 			}
 		}
+
 		// オーバーフローを防止するため最大値で引く
+
+		/*
+		note :
+			softmax関数の定義は⇓こうなので
+				softmax(x_i) = exp(x_i) / Σ exp(x_j) for j
+			x_i + cのように定数加算したところで
+				softmax(x_i + c) = exp(x_i + c) / Σ exp(x_j + c) for j
+								 = exp(x_i)exp(c) / Σ exp(x_j)exp(c) for j
+			でexp(c)で約分できて
+								 = softmax(x_i)
+			となるので分布は変わらない。
+		*/
+
 		float sum = 0.0f;
 		for (float& x : log_probabilities) {
 			x = expf(x - max);
@@ -592,12 +622,9 @@ namespace Eval::dlshogi
 
 	Result init_model_paths()
 	{
-		const std::string model_paths[max_gpu] = {
-			Options["DNN_Model1"], Options["DNN_Model2"], Options["DNN_Model3"], Options["DNN_Model4"],
-			Options["DNN_Model5"], Options["DNN_Model6"], Options["DNN_Model7"], Options["DNN_Model8"],
-			Options["DNN_Model9"], Options["DNN_Model10"], Options["DNN_Model11"], Options["DNN_Model12"],
-			Options["DNN_Model13"], Options["DNN_Model14"], Options["DNN_Model15"], Options["DNN_Model16"]
-		};
+		std::vector<string> model_paths;
+		for (int i = 1; i <= max_gpu ; ++i)
+			model_paths.emplace_back(Options["DNN_Model" + std::to_string(i)]);
 
 		string eval_dir = Options["EvalDir"];
 
@@ -610,7 +637,7 @@ namespace Eval::dlshogi
 
 		// モデルファイル存在チェック
 		bool is_err = false;
-		for (int i = 0; i < max_gpu; ++i) {
+		for (int i = 0; i < max_gpu ; ++i) {
 			if (model_paths[i] != "")
 			{
 				string path = Path::Combine(eval_dir, model_paths[i].c_str());
@@ -633,7 +660,7 @@ namespace Eval::dlshogi
 			}
 		}
 		if (is_err)
-			return ResultCode::FileOpenError;
+			return ResultCode::FileNotFound;
 
 		return ResultCode::Ok;
 	}

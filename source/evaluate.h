@@ -34,6 +34,7 @@ namespace Eval {
 	// このあとのdo_move()のあとのevaluate()で差分計算ができるように、
 	// 現在の前局面から差分計算ができるときだけ計算しておく。
 	// 評価値自体は返さない。
+	// 備考) 差分計算型の評価関数ではないときは、この関数は何もしなくて良い。
 	void evaluate_with_no_return(const Position& pos);
 
 	// 評価値の内訳表示(デバッグ用)
@@ -60,7 +61,7 @@ namespace Eval {
 	void print_softname(u64 check_sum);
 #else
 	static u64 calc_check_sum() { return 0; }
-	static void print_softname(u64 check_sum) {}
+	static void print_softname([[maybe_unused]] u64 check_sum) {}
 #endif
 
 #if defined (USE_PIECE_VALUE)
@@ -86,6 +87,7 @@ namespace Eval {
 	// 駒の価値のテーブル
 	// ※　後手の駒は負の値なので注意。
 	// →　後手の駒に対してプラスの値が欲しいなら、PieceValue[type_of(pc)]のようにする。
+	//   StockfishのPieceValue()は、負の値は返ってこないので注意。
 	extern int PieceValue[PIECE_NB];
 
 	// 駒の交換値(＝捕獲したときの価値の上昇値)
@@ -102,7 +104,9 @@ namespace Eval {
 
 	// 指し手moveによってtoの地点の駒が捕獲できることがわかっている時の、駒を捕獲する価値
 	// moveが成りの指し手である場合、その価値も上乗せして計算する。
-	extern Value CapturePieceValuePlusPromote(const Position& pos, Move move);
+	// ※　move.to_sq()に駒がない場合もこの関数の呼び出しは合法。(VALUE_NONEが返る)
+	// ※  後手の駒に対してもプラスの値が返るので注意。
+	Value CapturePieceValuePlusPromote(const Position& pos, Move move);
 
 #endif
 
@@ -387,10 +391,10 @@ namespace Eval {
 
 #if defined(USE_EVAL_HASH)
 	// EvalHashのリサイズ
-	extern void EvalHash_Resize(size_t mbSize);
+	void EvalHash_Resize(size_t mbSize);
 
 	// EvalHashのクリア
-	extern void EvalHash_Clear();
+	void EvalHash_Clear();
 #endif
 
 }
