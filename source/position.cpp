@@ -23,6 +23,9 @@ std::string SFEN_HIRATE = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGK
 namespace Zobrist {
 	HASH_KEY zero;							// ゼロ(==0)
 	HASH_KEY side;							// 手番(==1)
+#if defined(ENABLE_PAWN_HISTORY)
+	HASH_KEY noPawns;                       // 歩の陣形に関して盤上に歩が一枚もない時のhash key
+#endif
 	HASH_KEY psq[SQ_NB_PLUS1][PIECE_NB];	// 駒pcが盤上sqに配置されているときのZobrist Key
 	HASH_KEY hand[COLOR_NB][PIECE_HAND_NB];	// c側の手駒prが一枚増えるごとにこれを加算するZobristKey
 	HASH_KEY depth[MAX_PLY];				// 深さも考慮に入れたHASH KEYを作りたいときに用いる(実験用)
@@ -34,19 +37,14 @@ namespace Zobrist {
 
 // 王手情報の初期化
 template <bool doNullMove , Color Us>
-void Position::set_check_info(StateInfo* si) const {
+void Position::set_check_info() const {
 
-	//: si->blockersForKing[WHITE] = slider_blockers(pieces(BLACK), square<KING>(WHITE),si->pinners[WHITE]);
-	//: si->blockersForKing[BLACK] = slider_blockers(pieces(WHITE), square<KING>(BLACK),si->pinners[BLACK]);
-
-	// ↓Stockfishのこの部分の実装、将棋においては良くないので、以下のように変える。
-	// ※　将棋においては駒の動きが上下対称ではないので手番を引数で渡す必要がある。
-
+	// null moveのときは前の局面でこの情報は設定されているので更新する必要がない。
+	// ※　やねうら王独自の改良
 	if (!doNullMove)
 	{
-		// null moveのときは前の局面でこの情報は設定されているので更新する必要がない。
-		si->blockersForKing[WHITE] = slider_blockers(BLACK, king_square(WHITE), si->pinners[WHITE]);
-		si->blockersForKing[BLACK] = slider_blockers(WHITE, king_square(BLACK), si->pinners[BLACK]);
+		update_slider_blockers(WHITE);
+		update_slider_blockers(BLACK);
 	}
 
 	constexpr Color Them = ~Us;
@@ -61,27 +59,27 @@ void Position::set_check_info(StateInfo* si) const {
 	Bitboard occ = pieces();
 
 	// この指し手が二歩でないかは、この時点でテストしない。指し手生成で除外する。なるべくこの手のチェックは遅延させる。
-	si->checkSquares[PAWN]   = pawnEffect<Them>  (ksq);
-	si->checkSquares[KNIGHT] = knightEffect<Them>(ksq);
-	si->checkSquares[SILVER] = silverEffect<Them>(ksq);
-	si->checkSquares[BISHOP] = bishopEffect      (ksq, occ);
-	si->checkSquares[ROOK]   = rookEffect        (ksq, occ);
-	si->checkSquares[GOLD]   = goldEffect<Them>  (ksq);
+	st->checkSquares[PAWN]   = pawnEffect<Them>  (ksq);
+	st->checkSquares[KNIGHT] = knightEffect<Them>(ksq);
+	st->checkSquares[SILVER] = silverEffect<Them>(ksq);
+	st->checkSquares[BISHOP] = bishopEffect      (ksq, occ);
+	st->checkSquares[ROOK]   = rookEffect        (ksq, occ);
+	st->checkSquares[GOLD]   = goldEffect<Them>  (ksq);
 
 	// 香で王手になる升は利きを求め直さずに飛車で王手になる升を香のstep effectでマスクしたものを使う。
-	si->checkSquares[LANCE]  = si->checkSquares[ROOK] & lanceStepEffect<Them>(ksq);
+	st->checkSquares[LANCE]  = st->checkSquares[ROOK] & lanceStepEffect<Them>(ksq);
 
 	// 王を移動させて直接王手になることはない。それは自殺手である。
-	si->checkSquares[KING]   = Bitboard(ZERO);
+	st->checkSquares[KING]   = Bitboard(ZERO);
 
 	// 成り駒。この初期化は馬鹿らしいようだが、gives_check()は指し手ごとに呼び出されるので、その処理を軽くしたいので
 	// ここでの初期化は許容できる。(このコードはdo_move()に対して1回呼び出されるだけなので)
-	si->checkSquares[PRO_PAWN]   = si->checkSquares[GOLD];
-	si->checkSquares[PRO_LANCE]  = si->checkSquares[GOLD];
-	si->checkSquares[PRO_KNIGHT] = si->checkSquares[GOLD];
-	si->checkSquares[PRO_SILVER] = si->checkSquares[GOLD];
-	si->checkSquares[HORSE]      = si->checkSquares[BISHOP] | kingEffect(ksq);
-	si->checkSquares[DRAGON]     = si->checkSquares[ROOK]   | kingEffect(ksq);
+	st->checkSquares[PRO_PAWN]   = st->checkSquares[GOLD];
+	st->checkSquares[PRO_LANCE]  = st->checkSquares[GOLD];
+	st->checkSquares[PRO_KNIGHT] = st->checkSquares[GOLD];
+	st->checkSquares[PRO_SILVER] = st->checkSquares[GOLD];
+	st->checkSquares[HORSE]      = st->checkSquares[BISHOP] | kingEffect(ksq);
+	st->checkSquares[DRAGON]     = st->checkSquares[ROOK]   | kingEffect(ksq);
 }
 
 // ----------------------------------
@@ -112,6 +110,11 @@ void Position::init() {
 
 	for (int i = 0; i < MAX_PLY; ++i)
 		SET_HASH(Zobrist::depth[i], rng.rand<Key>() & ~1ULL, rng.rand<Key>(), rng.rand<Key>(), rng.rand<Key>());
+
+
+#if defined(ENABLE_PAWN_HISTORY)
+	SET_HASH(Zobrist::noPawns, rng.rand<Key>() & ~1ULL, rng.rand<Key>(), rng.rand<Key>(), rng.rand<Key>());
+#endif
 }
 
 // depthに応じたZobrist Hashを得る。depthを含めてhash keyを求めたいときに用いる。
@@ -289,7 +292,7 @@ void Position::set(std::string sfen , StateInfo* si , Thread* th)
 
 	// --- StateInfoの更新
 
-	set_state(st);
+	set_state();
 
 	// 現局面で王手がかかっているならst->continuous_check[them] = 1にしないと
 	// 連続王手の千日手の判定が不正確な気がするが、どのみち2回目の出現を負け扱いしているのでまあいいか..
@@ -390,15 +393,107 @@ const std::string Position::sfen(int gamePly_) const
 		}
 
 	// 手駒がない場合はハイフンを出力
-	ss << (found ? " " : "- ");
+	if (!found)
+		ss << '-';
 
 	// --- 初期局面からの手数
-	ss << gamePly_;
+
+	// ※　裏技 : gamePlyが負なら、sfen文字列末尾の手数を出力しない。
+	if (gamePly_ >= 0)
+		ss << ' ' << gamePly_;
 
 	return ss.str();
 }
 
-void Position::set_state(StateInfo* si) const {
+// 盤面を先後反転させた時のsfen文字列を取得する。
+const std::string Position::flipped_sfen(int gamePly_) const
+{
+	std::ostringstream ss;
+
+	// --- 盤面
+	int emptyCnt;
+	for (Rank r = RANK_9; r >= RANK_1; --r)
+	{
+		for (File f = FILE_1; f <= FILE_9; ++f)
+		{
+			// それぞれの升に対して駒がないなら
+			// その段の、そのあとの駒のない升をカウントする
+			for (emptyCnt = 0; f <= FILE_9 && piece_on(f | r) == NO_PIECE; ++f)
+				++emptyCnt;
+
+			// 駒のなかった升の数を出力
+			if (emptyCnt)
+				ss << emptyCnt;
+
+			// 駒があったなら、それに対応する駒文字列を出力
+			if (f <= FILE_9)
+				// ※　flippedなのでこの駒、先後逆にしないといけないので PIECE_WHITEのbitを反転させる。
+				ss << Piece(piece_on(f | r) ^ PIECE_WHITE);
+		}
+
+		// 最下段以外では次の行があるのでセパレーターである'/'を出力する。
+		if (r > RANK_1)
+			ss << '/';
+	}
+
+	// --- 手番
+	// ※　flippedなのでsideToMoveの逆を出力
+	ss << (~sideToMove == WHITE ? " w " : " b ");
+
+	// --- 手駒(UCIプロトコルにはないがUSIプロトコルにはある)
+	int n;
+	bool found = false;
+	for (Color c = BLACK; c <= WHITE; ++c)
+		for (int pn = 0 ; pn < 7; ++ pn)
+		{
+			// 手駒の出力順はUSIプロトコルでは規定されていないが、
+			// USI原案によると、飛、角、金、銀、桂、香、歩の順である。
+			// sfen文字列を一意にしておかないと定跡データーをsfen文字列で書き出したときに
+			// 他のソフトで文字列が一致しなくて困るので、この順に倣うことにする。
+
+			const PieceType USI_Hand[7] = { ROOK,BISHOP,GOLD,SILVER,KNIGHT,LANCE,PAWN };
+			auto p = USI_Hand[pn];
+
+			// その種類の手駒の枚数
+			// ※ flippedなので、ここをcではなく~c側を見ればflipしたことになる。
+			n = hand_count(hand[~c], p);
+			// その種類の手駒を持っているか
+			if (n != 0)
+			{
+				// 手駒が1枚でも見つかった
+				found = true;
+
+				// その種類の駒の枚数。1ならば出力を省略
+				if (n != 1)
+					ss << n;
+
+				ss << PieceToCharBW[make_piece(c, p)];
+			}
+		}
+
+	// 手駒がない場合はハイフンを出力
+	if (!found)
+		ss << '-';
+
+	// --- 初期局面からの手数
+
+	// ※　裏技 : gamePlyが負なら、sfen文字列末尾の手数を出力しない。
+	if (gamePly_ >= 0)
+		ss << ' ' << gamePly_;
+
+	return ss.str();
+}
+
+// sfen文字列を先後反転したsfen文字列に変換する。
+const std::string Position::sfen_to_flipped_sfen(std::string sfen)
+{
+	Position pos;
+	StateInfo si;
+	pos.set(sfen,&si,Threads.main());
+	return pos.flipped_sfen();
+}
+
+void Position::set_state() const {
 
 	// --- bitboard
 
@@ -406,22 +501,33 @@ void Position::set_state(StateInfo* si) const {
 	st->checkersBB = attackers_to(~sideToMove, king_square(sideToMove));
 
 	// 王手情報の初期化
-	set_check_info<false>(si);
+	set_check_info<false>();
 
 	// --- hash keyの計算
-	si->board_key_ = sideToMove == BLACK ? Zobrist::zero : Zobrist::side;
-	si->hand_key_ = Zobrist::zero;
+	st->board_key_ = sideToMove == BLACK ? Zobrist::zero : Zobrist::side;
+	st->hand_key_  = Zobrist::zero;
+#if defined(ENABLE_PAWN_HISTORY)
+	st->pawnKey_   = Zobrist::noPawns;
+#endif
 	for (auto sq : pieces())
 	{
 		auto pc = piece_on(sq);
-		si->board_key_ += Zobrist::psq[sq][pc];
+		st->board_key_ += Zobrist::psq[sq][pc];
+
+#if defined(ENABLE_PAWN_HISTORY)
+        if (type_of(pc) == PAWN)
+            st->pawnKey_ ^= Zobrist::psq[sq][pc];
+#endif
 	}
 	for (auto c : COLOR)
 		for (PieceType pr = PAWN; pr < PIECE_HAND_NB; ++pr)
-			si->hand_key_ += Zobrist::hand[c][pr] * (int64_t)hand_count(hand[c], pr); // 手駒はaddにする(差分計算が楽になるため)
+			st->hand_key_ += Zobrist::hand[c][pr] * (int64_t)hand_count(hand[c], pr); // 手駒はaddにする(差分計算が楽になるため)
+
+	// pawnKeyは、手駒の歩も考慮したほうがいいんだろうけど手駒に応じた更新が面倒なので端折っておく。
+	// TODO : あとで実装するかも。
 
 	// --- hand
-	si->hand = hand[sideToMove];
+	st->hand = hand[sideToMove];
 
 }
 
@@ -525,52 +631,54 @@ std::string Position::moves_from_start(bool is_pretty) const
 //      ある升へ利いている駒など
 // ----------------------------------
 
-// Position::slider_blockers() は、c側の長い利きを持つ駒(sliders)から、升sへの利きを
-// 遮っている先後の駒の位置をBitboardで返す。ただし、２重に遮っている場合はそれらの駒は返さない。
-// もし、この関数のこの返す駒を取り除いた場合、升sに対してsliderによって利きがある状態になる。
-// 升sにある玉に対してこの関数を呼び出した場合、それはpinされている駒と両王手の候補となる駒である。
-// また、升sにある玉は~c側のKINGであるとする。
+void Position::update_slider_blockers(Color c) const
+{
+	Square ksq =  king_square(c);
 
-Bitboard Position::slider_blockers(Color c, Square s , Bitboard& pinners) const {
+	st->blockersForKing[ c] = ZERO;
+	st->pinners        [~c] = ZERO;
 
-	Bitboard blockers(ZERO);
+	// Snipers are sliders that attack 's' when a piece and other snipers are removed
+	// snipersとは、pinされている駒が取り除かれたときに王の升に利きが発生する大駒である。
 
-	// pinnersは返し値。
-	pinners = Bitboard(ZERO);
-	
+	// Bitboard snipers = (  (attacks_bb<  ROOK>(ksq) & pieces(QUEEN, ROOK))
+	//                    | (attacks_bb<BISHOP>(ksq) & pieces(QUEEN, BISHOP))) & pieces(~c);
+
 	// cが与えられていないと香の利きの方向を確定させることが出来ない。
 	// ゆえに将棋では、この関数は手番を引数に取るべき。(チェスとはこの点において異なる。)
 
-	// snipersとは、pinされている駒が取り除かれたときに升sに利きが発生する大駒である。
 	Bitboard snipers =
-		( (pieces(ROOK_DRAGON)  & rookStepEffect(s))
-		| (pieces(BISHOP_HORSE) & bishopStepEffect(s))
-		// 香に関しては攻撃駒が先手なら、玉より下側をサーチして、そこにある先手の香を探す。
-		| (pieces(LANCE) & lanceStepEffect(~c, s))
-		) & pieces(c);
+		(
+		    (pieces(ROOK_DRAGON ) & rookStepEffect(ksq    ))
+		  | (pieces(BISHOP_HORSE) & bishopStepEffect(ksq  ))
+		  // 香に関しては先手玉へのsniperなら、玉より上側をサーチして、そこにある後手の香を探す必要がある。
+		  | (pieces(LANCE       ) & lanceStepEffect(c, ksq))
+		) & pieces(~c);
 
-	//Bitboard occupancy = pieces() ^ snipers;
+	// snipersを取り除いた障害物(駒)
+	Bitboard occupancy = pieces() ^ snipers;
 
-	// ↑このStockfishの元のコード、snipersを除いた盤上の駒で考えているが、
-	// ^王 歩 角 飛
-	// このような状況で飛車に対して角を取り除いてから敵玉への射線を考えるので、
-	// 歩がslider_blocker扱いになってしまう。つまり、このコードは間違っているのでは？
-	
+	// 1.
+	//   王 歩 ^角 ^飛
+	//   のようなケースはない(王から見て斜め方向にいる角しか列挙していないのでsnipersのbitboardは王の横方向に角がいることはない。)
+
+	// 2.
+	//    王 歩 ^飛 ^飛
+	//  のようなケースにおいては、この両方の飛車がpinnersとして列挙されて欲しい。(SEEの処理でこういう列挙がなされて欲しいので)
+
 	while (snipers)
 	{
 		Square sniperSq = snipers.pop();
-		Bitboard b = between_bb(s, sniperSq) & pieces() /* occupancy */;
+		Bitboard b = between_bb(ksq, sniperSq) & occupancy;
 
 		// snipperと玉との間にある駒が1個であるなら。
 		if (b && !b.more_than_one())
 		{
-			blockers |= b;
-			if (b & pieces(~c))
-				// sniperと玉に挟まれた駒が玉と同じ色の駒であるなら、pinnerに追加。
-				pinners |= sniperSq;
+			st->blockersForKing[c] |= b;
+			if (b & pieces(c))
+				st->pinners[~c] |= sniperSq;
 		}
 	}
-	return blockers;
 }
 
 
@@ -1156,6 +1264,12 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 		h -= Zobrist::hand[Us][pr];
 		k += Zobrist::psq[to][pc];
 
+#if defined(ENABLE_PAWN_HISTORY)
+		// 打ち歩なら、pawnKeyの更新が必要
+		if (pr == PAWN)
+			st->pawnKey_ ^= Zobrist::psq[to][pc];
+#endif
+
 		// なるべく早い段階でのTTに対するprefetch
 		// 駒打ちのときはこの時点でTT entryのアドレスが確定できる
 		const HASH_KEY key = k + h;
@@ -1272,6 +1386,12 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 			k -= Zobrist::psq[to][to_pc];
 			h += Zobrist::hand[Us][pr];
 
+#if defined(ENABLE_PAWN_HISTORY)
+			// 歩を捕獲したならば、その歩をpawnKeyから除去。
+			if (type_of(to_pc)==PAWN)
+				st->pawnKey_ ^= Zobrist::psq[to][to_pc];
+#endif
+
 			// 捕獲した駒をStateInfoに保存しておく。(undo_moveのため)
 			st->capturedPiece = to_pc;
 
@@ -1321,6 +1441,17 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 		// fromにあったmoved_pcがtoにmoved_after_pcとして移動した。
 		k -= Zobrist::psq[from][moved_pc];
 		k += Zobrist::psq[to][moved_after_pc];
+
+#if defined(ENABLE_PAWN_HISTORY)
+		// 歩の移動ならば歩を除去
+		if (type_of(moved_pc)==PAWN)
+		{
+			st->pawnKey_ ^= Zobrist::psq[from][moved_pc];
+			// 成ってないなら移動先の歩の除去も。
+			if (!is_promote(m))
+				st->pawnKey_ ^= Zobrist::psq[to][moved_pc];
+		}
+#endif
 
 		// 駒打ちでないときはprefetchはこの時点まで延期される。
 		const HASH_KEY key = k + h;
@@ -1402,7 +1533,7 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 	st->hand = hand[Them];
 
 	// このタイミングで王手関係の情報を更新しておいてやる。
-	set_check_info<false>(st);
+	set_check_info<false>();
 
 	//ASSERT_LV5(evalList.is_valid(*this));
 
@@ -1662,7 +1793,7 @@ void Position::do_null_move(StateInfo& newSt) {
 
 	sideToMove = ~sideToMove;
 
-	set_check_info<true>(st);
+	set_check_info<true>();
 
 	//st->repetition = 0;
 
@@ -1862,7 +1993,7 @@ bool Position::see_ge(Move m, Value threshold) const
 
 		// pinnersが元の升にいる限りにおいては、pinされた駒から王以外への移動は許さない。
 
-		if (!(st->pinners[~stm] & occupied))
+		if (!(pinners(~stm) & occupied))
 			stmAttackers &= ~st->blockersForKing[stm];
 
 		// 手番側のtoに利いている駒がもうないなら、手番側の負けである。
@@ -1972,7 +2103,7 @@ RepetitionState Position::is_repetition(int repPly /* = 16 */) const
 	return REPETITION_NONE;
 }
 
-// is_repetition()の、千日手が見つかった時に、原局面から何手遡ったかを返すバージョン。
+// is_repetition()の、千日手が見つかった時に、現局面から何手遡ったかを返すバージョン。
 // found_plyにその値が返ってくる。
 RepetitionState Position::is_repetition(int repPly, int& found_ply) const
 {
@@ -2013,6 +2144,60 @@ RepetitionState Position::is_repetition(int repPly, int& found_ply) const
 				return REPETITION_DRAW;
 			}
 			else {
+				// 優等局面か劣等局面であるか。(手番が相手番になっている場合はいま考えない)
+				if (hand_is_equal_or_superior(st->hand, stp->hand))
+					return REPETITION_SUPERIOR;
+				if (hand_is_equal_or_superior(stp->hand, st->hand))
+					return REPETITION_INFERIOR;
+			}
+		}
+	}
+
+	// 同じhash keyの局面が見つからなかったので…。
+	return REPETITION_NONE;
+}
+
+// is_repetition()の、千日手が見つかった時に、現局面から何手遡ったかを返すバージョン。
+// found_plyにその値が返ってくる。
+RepetitionState Position::is_repetition2(int repPly, int sup_rep_ply) const
+{
+	// pliesFromNullが未初期化になっていないかのチェックのためのassert
+	ASSERT_LV3(st->pliesFromNull >= 0);
+
+	// 遡り可能な手数。
+	// 最大でもrepPly手までしか遡らないことにする。
+	int end = std::min(repPly, st->pliesFromNull);
+
+	// 少なくとも4手かけないと千日手にはならないから、4手前から調べていく。
+	if (end < 4)
+		return REPETITION_NONE;
+
+	StateInfo* stp = st->previous->previous;
+
+	for (int i = 4; i <= end ; i += 2)
+	{
+		stp = stp->previous->previous;
+
+		// board_key : 盤上の駒のみのhash(手駒を除く)
+		// 盤上の駒が同じ状態であるかを判定する。
+		if (stp->board_key() == st->board_key())
+		{
+			// 手駒が一致するなら同一局面である。(2手ずつ遡っているので手番は同じである)
+			if (stp->hand == st->hand)
+			{
+				// 自分が王手をしている連続王手の千日手なのか？
+				if (i <= st->continuousCheck[sideToMove])
+					return REPETITION_LOSE;
+
+				// 相手が王手をしている連続王手の千日手なのか？
+				if (i <= st->continuousCheck[~sideToMove])
+					return REPETITION_WIN;
+
+				return REPETITION_DRAW;
+			}
+			else if (i < sup_rep_ply) {
+					// ↑rootより遡らないための措置
+
 				// 優等局面か劣等局面であるか。(手番が相手番になっている場合はいま考えない)
 				if (hand_is_equal_or_superior(st->hand, stp->hand))
 					return REPETITION_SUPERIOR;
@@ -2212,6 +2397,8 @@ Move Position::DeclarationWin() const
 		return MOVE_NONE;
 	}
 }
+
+
 
 // ----------------------------------
 //      内部情報の正当性のテスト
@@ -2419,8 +2606,7 @@ void Position::UnitTest(Test::UnitTester& tester)
 	{
 		auto section2 = tester.section("is_repetition");
 
-		std::vector<StateInfo> sis;
-		sis.reserve(MAX_PLY);
+		std::deque<StateInfo> sis;
 
 		// 4手前の局面に戻っているパターン
 		BookTools::feed_position_string(pos, "startpos moves 5i5h 5a5b 5h5i 5b5a", sis);
@@ -2501,46 +2687,13 @@ void Position::UnitTest(Test::UnitTester& tester)
 	}
 
 	{
-		// 深いdepthのperftのテストが通っていれば、利きの計算、指し手生成はおおよそ間違っていないと言える。
-
-		auto section2 = tester.section("Perft");
-
-		{
-			auto section3 = tester.section("hirate");
-			hirate_init();
-			const s64 p_nodes[] = { 0 , 30 , 900, 25470, 719731, 19861490, 547581517 };
-
-			for (Depth d = 1; d <= 6; ++d)
-			{
-				u64 nodes = perft(pos, d);
-				u64 pn = p_nodes[d];
-				tester.test("depth " + to_string(d) + " = " + to_string(pn), nodes == pn);
-			}
-		}
-
-		{
-			auto section3 = tester.section("matsuri");
-			matsuri_init();
-
-			const s64 p_nodes[] = { 0 , 207 , 28684, 4809015, 516925165};
-
-			for (Depth d = 1; d <= 4; ++d)
-			{
-				u64 nodes = perft(pos, d);
-				u64 pn = p_nodes[d];
-				tester.test("depth " + to_string(d) + " = " + to_string(nodes), nodes == pn);
-			}
-		}
-	}
-
-	{
 		// 指し手生成のテスト
 		auto section2 = tester.section("GenMove");
 
 		{
 			// 23歩不成ができ、かつ、23歩不成では駒の捕獲にはならない局面。
 			pos_init("lnsgk1snl/1r4g2/p1ppppb1p/6pP1/7R1/2P6/P2PPPP1P/1SG6/LN2KGSNL b BP2p 21");
-			Move move1 = make_move(SQ_24, SQ_23,B_PAWN);
+			Move move1 = make_move        (SQ_24, SQ_23,B_PAWN);
 			Move move2 = make_move_promote(SQ_24, SQ_23,B_PAWN);
 
 			ExtMove move_buf[MAX_MOVES] , *move_last;
@@ -2578,55 +2731,142 @@ void Position::UnitTest(Test::UnitTester& tester)
 			all &= !find_move(move1);
 			all &=  find_move(move2);
 
+			move_last = generateMoves<CAPTURES_PRO_PLUS_ALL>(pos, move_buf);
+			all &=  find_move(move1); // 歩の不成はこちらに含めることになった。(movegenの実装の修正が難しいので)
+			all &=  find_move(move2);
+
 			move_last = generateMoves<NON_CAPTURES_PRO_MINUS>(pos, move_buf);
 			all &= !find_move(move1);
 			all &= !find_move(move2);
 
+			move_last = generateMoves<NON_CAPTURES_PRO_MINUS_ALL>(pos, move_buf);
+			all &= !find_move(move1); // 歩の不成はこちらには含まれていないので注意。
+			all &= !find_move(move2);
+
 			tester.test("pawn's unpromoted move", all);
+
+			// 23角不成で5手詰め
+			// https://github.com/yaneurao/YaneuraOu/issues/257
+			pos_init("5B1n1/8k/6Rpp/9/9/9/1+p7/9/K8 b rb4g4s3n4l15p 1");
+			// 23角不成(41)と23角成(41)
+			move1 = make_move        (SQ_41, SQ_23, B_BISHOP);
+			move2 = make_move_promote(SQ_41, SQ_23, B_BISHOP);
+			all = true;
+
+			move_last = generateMoves<LEGAL_ALL>(pos, move_buf);
+			all &=  find_move(move1);
+			all &=  find_move(move2);
+
+			move_last = generateMoves<CAPTURES_PRO_PLUS>(pos, move_buf);
+			all &= !find_move(move1);
+			all &=  find_move(move2);
+
+			move_last = generateMoves<NON_CAPTURES_PRO_MINUS>(pos, move_buf);
+			all &= !find_move(move1);
+			all &= !find_move(move2);
+
+			move_last = generateMoves<CAPTURES_PRO_PLUS>(pos, move_buf);
+			all &= !find_move(move1);
+			all &=  find_move(move2);
+
+			move_last = generateMoves<NON_CAPTURES_PRO_MINUS_ALL>(pos, move_buf);
+			all &= !find_move(move1);
+			all &= !find_move(move2);
+
+			move_last = generateMoves<CAPTURES_PRO_PLUS_ALL>(pos, move_buf);
+			all &=  find_move(move1);
+			all &=  find_move(move2);
+
+			tester.test("bishop's unpromoted move",all);
 		}
 	}
 
+	{
+		// それ以外のテスト
+		auto section = tester.section("misc");
+		{
+			// 盤面の反転
 
-#if 0
+			// 23歩不成ができ、かつ、23歩不成では駒の捕獲にはならない局面。
+			pos_init("lnsgk1snl/1r4g2/p1ppppb1p/6pP1/7R1/2P6/P2PPPP1P/1SG6/LN2KGSNL b BP2p 21");
+			auto flipped = pos.flipped_sfen();
+			tester.test("flip sfen", flipped=="lnsgk2nl/6gs1/p1pppp2p/6p2/1r7/1pP6/P1BPPPP1P/2G4R1/LNS1KGSNL w 2Pbp 21");
+		}
+	}
+
+	{
+		// 深いdepthのperftのテストが通っていれば、利きの計算、指し手生成はおおよそ間違っていないと言える。
+
+		auto section2 = tester.section("Perft");
+
+		{
+			auto section3 = tester.section("hirate");
+			hirate_init();
+			const s64 p_nodes[] = { 0 , 30 , 900, 25470, 719731, 19861490, 547581517 };
+
+			for (Depth d = 1; d <= 6; ++d)
+			{
+				u64 nodes = perft(pos, d);
+				u64 pn = p_nodes[d];
+				tester.test("depth " + to_string(d) + " = " + to_string(pn), nodes == pn);
+			}
+		}
+
+		{
+			auto section3 = tester.section("matsuri");
+			matsuri_init();
+
+			const s64 p_nodes[] = { 0 , 207 , 28684, 4809015, 516925165};
+
+			for (Depth d = 1; d <= 4; ++d)
+			{
+				u64 nodes = perft(pos, d);
+				u64 pn = p_nodes[d];
+				tester.test("depth " + to_string(d) + " = " + to_string(nodes), nodes == pn);
+			}
+		}
+	}
+
 	// ランダムプレイヤーでの対局
 	{
-		auto section2 = tester.section("GamesOfRandomPlayer");
-
-		// 対局回数
+		// 対局回数→0ならskip
 		s64 random_player_loop = tester.options["random_player_loop"];
-
-		// seed固定乱数(再現性ある乱数)
-		PRNG my_rand;
-		StateInfo si[512];
-
-		for (s64 i = 0; i < random_player_loop; ++i)
+		if (random_player_loop)
 		{
-			// 平手初期化
-			hirate_init();
-			bool fail = false;
+			auto section2 = tester.section("GamesOfRandomPlayer");
 
-			// 512手目まで
-			for (int ply = 0; ply < 512; ++ply)
+			// seed固定乱数(再現性ある乱数)
+			PRNG my_rand;
+			StateInfo s[512];
+
+			for (s64 i = 0; i < random_player_loop; ++i)
 			{
-				MoveList<LEGAL_ALL> ml(pos);
+				// 平手初期化
+				hirate_init();
+				bool fail = false;
 
-				// 指し手がない == 負け == 終了
-				if (ml.size() == 0)
-					break;
+				// 512手目まで
+				for (int ply = 0; ply < 512; ++ply)
+				{
+					MoveList<LEGAL_ALL> ml(pos);
 
-				Move m = ml.at(size_t(my_rand.rand(ml.size()))).move;
+					// 指し手がない == 負け == 終了
+					if (ml.size() == 0)
+						break;
 
-				pos.do_move(m,si[ply]);
+					Move m = ml.at(size_t(my_rand.rand(ml.size()))).move;
 
-				if (!pos.pos_is_ok())
-					fail = true;
+					pos.do_move(m,s[ply]);
+
+					if (!pos.pos_is_ok())
+						fail = true;
+				}
+
+				// 今回のゲームのなかでおかしいものがなかったか
+				tester.test(string("game ")+to_string(i+1),!fail);
 			}
-
-			// 今回のゲームのなかでおかしいものがなかったか
-			tester.test(string("game ")+to_string(i+1),!fail);
 		}
 	}
-#endif
 
 }
 
