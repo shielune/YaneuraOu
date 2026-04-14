@@ -7,7 +7,6 @@
 #include "../../mate/mate.h"
 
 #include "Node.h"
-#include "PvMateSearch.h"
 
 // この探索部は、NN専用なので直接読み込む。
 
@@ -150,12 +149,8 @@ namespace dlshogi
 	// EvalNode()ごとにどのNodeとColorから呼び出されたのかを記録しておく構造体。
 	// NNから返し値がもらえた時に、ここに記録されているNodeについて、その情報を更新する。
 	struct BatchElement {
-		Node*	node;       // どのNodeに対するEvalNode()なのか。
-		Color	color;      // その時の手番
-
-#if defined(USE_POLICY_BOOK)
-		HASH_KEY key;       // この局面のhash key
-#endif
+		Node*	node;     // どのNodeに対するEvalNode()なのか。
+		Color	color;    // その時の手番
 
 		// 通常の探索では、このポインターはNodeVisitor::value_win を指している。
 		float* value_win; // leaf nodeでのvalue_winの値(これを辿ってきたNodeに対して符号を反転させながら伝播させていく)
@@ -333,14 +328,6 @@ namespace dlshogi
 		// leaf node用のdf-pn solver
 		Mate::Dfpn::MateDfpnSolver mate_solver;
 	};
-
-	// 訪問回数が最大の子ノードを選択
-	unsigned int select_max_child_node(const Node* uct_node);
-
-	// 訪問回数が上からN個の子ノードを返す。
-	// N個ない時は、残りが-1で埋まる。
-	void select_nth_child_node(const Node* uct_node, int n , int (&indices)[MAX_MOVES]);
-
 }
 
 #endif

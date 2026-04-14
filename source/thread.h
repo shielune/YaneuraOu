@@ -3,17 +3,14 @@
 
 #include <atomic>
 #include <condition_variable>
-//#include <cstddef>
-//#include <cstdint>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "movepick.h"
-#include "numa.h"
 #include "position.h"
 #include "search.h"
 #include "thread_win32_osx.h"
-//#include "types.h"
 
 #if defined(EVAL_LEARN)
 // 学習用の実行ファイルでは、スレッドごとに置換表を持ちたい。
@@ -21,58 +18,12 @@
 #endif
 
 // --------------------
-// スレッドの属するNumaを管理する
-// --------------------
-
-// Sometimes we don't want to actually bind the threads, but the recipient still
-// needs to think it runs on *some* NUMA node, such that it can access structures
-// that rely on NUMA node knowledge. This class encapsulates this optional process
-// such that the recipient does not need to know whether the binding happened or not.
-
-// 時にはスレッドを実際にバインドしたくない場合もありますが、
-// 受け手側は、それが 何らかの NUMAノード上で実行されていると認識する必要があります。
-// これは、NUMAノードに関する情報を必要とする構造体にアクセスするためです。
-// このクラスは、このバインドが行われたかどうかを受け手が知る必要がないように、
-// このオプションのプロセスをカプセル化します。
-
-class OptionalThreadToNumaNodeBinder {
-public:
-	OptionalThreadToNumaNodeBinder(NumaIndex n) :
-		numaConfig(nullptr),
-		numaId(n) {}
-
-	OptionalThreadToNumaNodeBinder(const NumaConfig& cfg, NumaIndex n) :
-		numaConfig(&cfg),
-		numaId(n) {}
-
-	NumaReplicatedAccessToken operator()() const {
-		if (numaConfig != nullptr)
-			return numaConfig->bind_current_thread_to_numa_node(numaId);
-		else
-			return NumaReplicatedAccessToken(numaId);
-	}
-
-private:
-	const NumaConfig* numaConfig;
-	NumaIndex         numaId;
-};
-
-
-// --------------------
 // 探索時に用いるスレッド
 // --------------------
 
-// Abstraction of a thread. It contains a pointer to the worker and a native thread.
-// After construction, the native thread is started with idle_loop()
-// waiting for a signal to start searching.
-// When the signal is received, the thread starts searching and when
-// the search is finished, it goes back to idle_loop() waiting for a new signal.
-
-// (探索用の)スレッドの抽象化です。これはワーカーへのポインタとネイティブスレッドを含みます。
-// 構築後、ネイティブスレッドは idle_loop() で開始され、開始信号を待ちます。
-// 信号を受け取るとスレッドは検索を開始し、検索が終了すると再び idle_loop() に戻り、新しい信号を待ちます。
-// ⇨  探索時に用いる、それぞれのスレッド。これを探索用スレッド数だけ確保する。
-//    ただしメインスレッドはこのclassを継承してMainThreadにして使う。
+// 探索時に用いる、それぞれのスレッド
+// これを思考スレッド数だけ確保する。
+// ただしメインスレッドはこのclassを継承してMainThreadにして使う。
 class Thread
 {
 	// exitフラグやsearchingフラグの状態を変更するときのmutex
@@ -137,6 +88,9 @@ public:
 	// pvLast   : tbRank絡み。将棋では関係ないので用いない。
 	size_t pvIdx /*,pvLast*/;
 
+	//RunningAverage complexityAverage;
+	// →　やねうら王では導入せず
+
 	// nodes     : このスレッドが探索したノード数(≒Position::do_move()を呼び出した回数)
 	// bestMoveChanges : 反復深化においてbestMoveが変わった回数。nodeの安定性の指標として用いる。全スレ分集計して使う。
 	std::atomic<uint64_t> nodes,/* tbHits,*/ bestMoveChanges;
@@ -146,6 +100,7 @@ public:
 	// nmpColor  : null moveの前回の適用Color
 	// state     : 探索で組合せ爆発が起きているか等を示す状態
 	int selDepth, nmpMinPly;
+	Color nmpColor;
 
 	// bestValue :
 	// search()で、そのnodeでbestMoveを指したときの(探索の)評価値
@@ -181,32 +136,27 @@ public:
 	// aspiration searchのrootでの beta - alpha
 	Value rootDelta;
 
-	// reduction量を計算する
-	//Depth reduction(bool i, Depth d, int mn, int delta) const;
-
-	// ↓Stockfishでは思考開始時に評価関数から設定しているが、やねうら王では使っていないのでコメントアウト。
-	//Value rootSimpleEval;
-
 #if defined(USE_MOVE_PICKER)
 	// 近代的なMovePickerではオーダリングのために、スレッドごとにhistoryとcounter movesなどのtableを持たないといけない。
+	CounterMoveHistory counterMoves;
 	ButterflyHistory mainHistory;
-	LowPlyHistory lowPlyHistory;
 	CapturePieceToHistory captureHistory;
 
 	// コア数が多いか、長い持ち時間においては、ContinuationHistoryもスレッドごとに確保したほうが良いらしい。
 	// cf. https://github.com/official-stockfish/Stockfish/commit/5c58d1f5cb4871595c07e6c2f6931780b5ac05b5
-	// 添字の[2][2]は、[inCheck(王手がかかっているか)][capture_stage]
+	// 添字の[2][2]は、[inCheck(王手がかかっているか)][captureOrPawnPromotion]
 	// →　この改造、レーティングがほぼ上がっていない。悪い改造のような気がする。
 	ContinuationHistory continuationHistory[2][2];
-
-#if defined(ENABLE_PAWN_HISTORY)
-	PawnHistory pawnHistory;
-#endif
 
 #endif
 
 	// Stockfish10ではスレッドごとにcontemptを保持するように変わった。
 	//Score contempt;
+
+	// trendは千日手を受け入れるスコア。動的に変更する。(dynamic contempt)
+	// 勝ってるほうは千日手にはしたくないし、負けてるほうは千日手やむなしという…。
+	//Value trend;
+	// →　やねうら王ではこの値、使わないことにする。
 
 	// ------------------------------
 	//   やねうら王、独自追加
@@ -221,6 +171,7 @@ public:
 	// 学習用の実行ファイルでは、スレッドごとに置換表を持ちたい。
 	TranspositionTable tt;
 #endif
+
 };
 
 
@@ -288,10 +239,6 @@ struct MainThread: public Thread
 	std::string last_go_cmd_string;
 	// Stochastic Ponderのために2手前に戻してしまっているかのフラグ
 	bool position_is_dirty = false;
-
-	// goコマンドの"wait_stop"フラグと関連して、↓と出力したかのフラグ。
-	// "info string time to return bestmove."
-	bool time_to_return_bestmove;
 };
 
 
@@ -302,10 +249,8 @@ struct MainThread: public Thread
 // Threads(スレッドオブジェクト)はglobalに配置するし、スレッドの初期化の際には
 // スレッドが保持する思考エンジンが使う変数等がすべてが初期化されていて欲しいからである。
 // スレッドの生成はset(options["Threads"])で行い、スレッドの終了はset(0)で行なう。
-class ThreadPool
+struct ThreadPool: public std::vector<Thread*>
 {
-public:
-
 	// mainスレッドに思考を開始させる。
 	void start_thinking(const Position& pos, StateListPtr& states , const Search::LimitsType& limits , bool ponderMode = false);
 
@@ -317,7 +262,7 @@ public:
 	void set(size_t requested);
 
 	// mainスレッドを取得する。これはthis[0]がそう。
-	MainThread* main() const { return static_cast<MainThread*>(threads.front()); }
+	MainThread* main() { return static_cast<MainThread*>(at(0)); }
 
 	// 今回、goコマンド以降に探索したノード数
 	// →　これはPosition::do_move()を呼び出した回数。
@@ -339,15 +284,6 @@ public:
 	//                 増えて行ってないなら、同じ深さを再度探索するのに用いる。
 	std::atomic_bool stop , increaseDepth;
 
-	auto cbegin() const noexcept { return threads.cbegin(); }
-	auto begin() noexcept { return threads.begin(); }
-	auto end() noexcept { return threads.end(); }
-	auto cend() const noexcept { return threads.cend(); }
-	auto size() const noexcept { return threads.size(); }
-	auto empty() const noexcept { return threads.empty(); }
-	// thread_pool[n]のようにでアクセスしたいので…。
-	auto operator[](size_t i) const noexcept { return threads[i];}
-
 	// === やねうら王独自拡張 ===
 
 	// main thread以外の探索スレッドがすべて終了しているか。
@@ -359,14 +295,11 @@ private:
 	// 現局面までのStateInfoのlist
 	StateListPtr setupStates;
 
-	// vector<Thread*>からこのclassを継承させるのはやめて、このメンバーとして持たせるようにした。
-	std::vector<Thread*> threads;
-
 	// Threadクラスの特定のメンバー変数を足し合わせたものを返す。
 	uint64_t accumulate(std::atomic<uint64_t> Thread::* member) const {
 
 		uint64_t sum = 0;
-		for (Thread* th : threads)
+		for (Thread* th : *this)
 			sum += (th->*member).load(std::memory_order_relaxed);
 		return sum;
 	}
