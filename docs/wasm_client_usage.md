@@ -588,7 +588,29 @@ Cloudflare Workers / Vercel Edge Functions / Deno Deploy 等、
 | `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | 動く |
 | `USI_Hash` / `EvalHash` | 動くが並列 init が無いので `isready` 応答が他変種比でやや遅め |
 
-### 9.2 ラッパーテンプレート
+### 9.2 パッケージ別対応状況
+
+edge variant は全 `pkgobj` (`halfkp` / `k-p` / `yaneuraou-mate` /
+`tanuki-mate` 等) でビルド自体は通るが、実用的に edge ランタイムに
+乗せられるかは wasm サイズと runtime の動作が揃っている必要がある。
+2026-04-14 時点の確認結果:
+
+| パッケージ | ビルド | smoke | wasm サイズ (br 圧縮) | edge 実用性 |
+|---|---|---|---|---|
+| `k-p` (KP256 NNUE) | ✅ | ✅ `go movetime 500` | 1.41 MiB (479 KiB) | **Edge 実用可** |
+| `halfkp` (Suisho5+YaneuraOu NNUE) | ✅ | ✅ `go movetime 500` | **61 MiB** (25 MiB) | Edge の bundle size 上限 (Paid 10 MiB) を大きく超える。**ブラウザ直接配信なら実用可**、Workers / Edge Functions では載らない |
+| `yaneuraou-mate` (df-pn mate solver) | ✅ | ⚠️ load + handshake までは通るが **`go mate` で Aborted()** | 564 KiB (113 KiB) | 現状 edge 非対応。 `df-pn` ソルバーが固有の pthread 依存を持っている疑い。web/node variant なら動く。対応は未実施 (調査保留) |
+| `tanuki-mate` (mate solver) | ✅ | ✅ `go mate 2000` → `checkmate nomate` | 518 KiB (110 KiB) | **Edge 実用可**。詰将棋用途はこちらを使う |
+
+**運用上の指針**:
+
+- Edge で「通常思考」が欲しい → `k-p`
+- Edge で「詰将棋探索」が欲しい → `tanuki-mate`
+- Edge で Suisho5+YaneuraOu の強い NNUE が欲しい → **edge 不可**。
+  `web` / `node` variant を直接ブラウザ or Node サーバーで使う
+- `yaneuraou-mate` を edge で使いたい → 現状サポート外、将来対応は未定
+
+### 9.3 ラッパーテンプレート
 
 フレームワーク非依存の最小ラッパーを
 `templates/edge/yaneuraou-edge.ts` に用意してある。コピペで自分の
@@ -616,7 +638,7 @@ const engine = await createYaneuraOuEdge({
 - 連続呼び出しは内部で自動直列化される。呼び出し側でロックを取る必要は無い。
 - `dispose()` で `Module.terminate()`。呼び忘れても致命的ではない。
 
-### 9.3 `eval()` と `evalBatch()` の使い分け
+### 9.4 `eval()` と `evalBatch()` の使い分け
 
 | | `eval(req)` | `evalBatch(reqs)` |
 |---|---|---|
@@ -644,7 +666,7 @@ const results: EvalResult[] = await engine.evalBatch(
 (option 変更は実質 TT flush で Batch の旨味が消えるため、Batch 内
 option 固定は意図的な制約)。
 
-### 9.4 option の扱い (Isolate-level vs Request-level)
+### 9.5 option の扱い (Isolate-level vs Request-level)
 
 同じ Isolate に複数ユーザーのリクエストが届く前提なので、option を
 2 層に分けている:
@@ -660,7 +682,7 @@ Request-level option は **省略時も USI 既定値で毎回上書き** され
 `eval()`」というパターンで user B が user A の設定で思考される事故を
 防ぐため。
 
-### 9.5 組み込み例 (Cloudflare Workers)
+### 9.6 組み込み例 (Cloudflare Workers)
 
 wrangler で wasm と JS を bundle し、module scope にエンジンを 1 つ
 持っておく構成:
@@ -705,7 +727,7 @@ fallthrough = true
 Vercel Edge Functions / Deno Deploy も同パターン。`yaneuraou.k-p.js`
 を ES module として import し、`.wasm` を ArrayBuffer として渡すだけ。
 
-### 9.6 実測パフォーマンス (k-p, em++ 5.0.5, aarch64)
+### 9.7 実測パフォーマンス (k-p, em++ 5.0.5, aarch64)
 
 `templates/edge/yaneuraou-edge.ts` + `go movetime 500`、中盤局面 1 手、
 Node (bun):
