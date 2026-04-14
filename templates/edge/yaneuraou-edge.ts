@@ -98,10 +98,18 @@ export interface EvalRequest {
   sfen: string;
   /** 思考時間 ms。default 500。内部では `go movetime` として発行する。 */
   byoyomi?: number;
-  /** SkillLevel (0–20)。default 20 = 手加減なし。 */
+  /**
+   * SkillLevel (0–20)。default 20 = 手加減なし。
+   * 省略すると毎回 20 (USI 既定値) で上書きされるので、前回の
+   * eval() で立てた値を引きずらない。
+   */
   skillLevel?: number;
-  /** MultiPV (default 1)。 */
+  /** MultiPV (default 1)。省略時は 1 で毎回上書き。 */
   multiPv?: number;
+  /** 探索深さ上限 (0 = 無制限、default 0)。省略時は 0 で毎回上書き。 */
+  depthLimit?: number;
+  /** 探索ノード数上限 (0 = 無制限、default 0)。省略時は 0 で毎回上書き。 */
+  nodesLimit?: number;
 }
 
 export type Score = {
@@ -190,14 +198,23 @@ export async function createYaneuraOuEdge(
 
   async function evalPosition(req: EvalRequest): Promise<EvalResult> {
     return serial(async () => {
-      if (req.multiPv != null) {
-        instance.postMessage(`setoption name MultiPV value ${req.multiPv}`);
-      }
-      if (req.skillLevel != null) {
-        instance.postMessage(
-          `setoption name SkillLevel value ${req.skillLevel}`,
-        );
-      }
+      // request-level option は毎回明示的に再設定する。
+      // 省略された場合も USI 既定値で上書きしてリセットするので、
+      // 同じ Isolate に届いた前の eval() の値を引きずらない
+      // (edge 環境では複数ユーザーが同じ instance を共有する
+      // 前提になるため)。
+      instance.postMessage(
+        `setoption name MultiPV value ${req.multiPv ?? 1}`,
+      );
+      instance.postMessage(
+        `setoption name SkillLevel value ${req.skillLevel ?? 20}`,
+      );
+      instance.postMessage(
+        `setoption name DepthLimit value ${req.depthLimit ?? 0}`,
+      );
+      instance.postMessage(
+        `setoption name NodesLimit value ${req.nodesLimit ?? 0}`,
+      );
 
       instance.postMessage("usinewgame");
       const readyMark = lines.length;
