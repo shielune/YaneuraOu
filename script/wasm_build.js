@@ -92,6 +92,58 @@ if(!fs.existsSync("source/Makefile")) {
 const cwd = process.cwd();
 const cpus = os.cpus().length;
 
+// ── Patch management ──
+// patches/*.patch are applied to the working tree right before `make` runs
+// and reverted on exit (success or failure) so the repo stays clean for the
+// next invocation. Re-applying an already-applied patch is a no-op thanks to
+// the `git apply --reverse --check` probe.
+const patchesDir = fpath.join(cwd, "patches");
+const patchFiles = fs.existsSync(patchesDir)
+  ? fs.readdirSync(patchesDir).filter((f) => f.endsWith(".patch")).sort()
+  : [];
+
+function patchApplied(p) {
+  try {
+    execSync(`git apply --reverse --check "patches/${p}"`, { cwd, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function applyPatches() {
+  for (const p of patchFiles) {
+    if (patchApplied(p)) {
+      console.log(`[patch] ${p} already applied — skip`);
+      continue;
+    }
+    console.log(`[patch] applying ${p}`);
+    execSync(`git apply "patches/${p}"`, { cwd, stdio: "inherit" });
+  }
+}
+
+function revertPatches() {
+  for (const p of [...patchFiles].reverse()) {
+    if (!patchApplied(p)) continue;
+    try {
+      execSync(`git apply --reverse "patches/${p}"`, { cwd, stdio: "inherit" });
+      console.log(`[patch] reverted ${p}`);
+    } catch (e) {
+      console.warn(`[patch] failed to revert ${p}: ${e.message}`);
+    }
+  }
+}
+
+let patchesReverted = false;
+function revertOnce() {
+  if (patchesReverted) return;
+  patchesReverted = true;
+  revertPatches();
+}
+process.on("exit", revertOnce);
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+
 // Two build variants are produced from the same source per package, so
 // downstream runners can test both paths:
 //   - web : ENVIRONMENT=web,worker, EXPORTED_RUNTIME_METHODS=['FS','ccall']
@@ -115,6 +167,8 @@ const variants = [
 ];
 
 (async () => {
+try {
+  applyPatches();
 for(const pkgobj of pkglist) {
   // embedded_nnue setup (shared between variants — only touches
   // source/eval/nnue/embedded_nnue.cpp which is the same for both builds)
@@ -369,4 +423,8 @@ export = ${pkgobj.exportname};
   }
 }  // variant loop
 }  // pkgobj loop
+} catch (err) {
+  console.error("[wasm_build] failed:", err);
+  process.exitCode = 1;
+}
 })();
