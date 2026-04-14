@@ -26,13 +26,14 @@
 ## 0. 前提: ビルド成果物のレイアウト
 
 `make build` 経由で `script/wasm_build.js` を呼ぶと、パッケージ 1 つに
-つき **web 変種と node 変種の 2 つ** が生成される。同じソースから
-`EM_ENVIRONMENT` / `EM_EXPORTED_RUNTIME_METHODS` だけ切り替えて別々に
-ビルドされる (`script/wasm_build.js` の `variants` 配列参照):
+つき **web 変種・node 変種・edge 変種の 3 つ** が生成される。同じソースから
+`EM_ENVIRONMENT` / `EM_EXPORTED_RUNTIME_METHODS` / `EM_PTHREAD` だけ
+切り替えて別々にビルドされる (`script/wasm_build.js` の `variants` 配列
+参照):
 
 ```
 build/<emscripten-ver>_<arch>/k-p/
-├── web/                       ← ブラウザ向け
+├── web/                       ← ブラウザ向け (pthread + web worker)
 │   └── lib/
 │       ├── yaneuraou.k-p.js          ← ES module factory (import 対象)
 │       ├── yaneuraou.k-p.wasm        ← 本体
@@ -40,9 +41,12 @@ build/<emscripten-ver>_<arch>/k-p/
 │       ├── yaneuraou.k-p.{js,wasm}.{br,gz}   ← 配信用圧縮済み
 │       ├── yaneuraou.k-p.d.ts
 │       └── yaneuraou.module.d.ts
-└── node/                      ← Node 向け
+├── node/                      ← Node 向け (pthread + worker_threads)
+│   └── lib/
+│       └── (同じ構成)
+└── edge/                      ← V8 Isolate 系ランタイム向け (single-thread)
     └── lib/
-        └── (同じ構成)
+        └── (同じ構成、`yaneuraou.k-p.worker.js` は空)
 ```
 
 **web 変種** のビルドフラグ:
@@ -50,6 +54,7 @@ build/<emscripten-ver>_<arch>/k-p/
 ```
 -s ENVIRONMENT=web,worker
 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
+-pthread -s PTHREAD_POOL_SIZE=32
 ```
 
 **node 変種** のビルドフラグ:
@@ -57,17 +62,31 @@ build/<emscripten-ver>_<arch>/k-p/
 ```
 -s ENVIRONMENT=node
 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']"
+-pthread -s PTHREAD_POOL_SIZE=32
 ```
 
-両変種とも共通:
+**edge 変種** のビルドフラグ:
+
+```
+-s ENVIRONMENT=web
+-s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
+(pthread / PTHREAD_POOL_SIZE なし)
+```
+
+3 変種共通:
 
 ```
 --pre-js wasm_pre.js
 -s EXPORT_ES6=1 -s MODULARIZE=1
--s PTHREAD_POOL_SIZE=32
 -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=<pkg> -s MAXIMUM_MEMORY=4294967296
 -s STACK_SIZE=67108864
 -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,...    # 3.1.74+ 必須
+```
+
+特定の variant だけをビルドしたい場合は `VARIANT` 環境変数で絞り込める:
+
+```bash
+VARIANT=edge node script/wasm_build.js k-p
 ```
 
 `yaneuraou.k-p.js` はすべてのバージョンで **ES module** (`-s
@@ -522,24 +541,161 @@ module worker かは loader 側の責任。アプリは USI コマンドのシ�
 
 ## 8. ビルドフラグ早見表
 
-| 項目 | web 変種 / 3.1.43 | web / 3.1.60–3.1.73 | web / 3.1.74+ | node 変種 |
-|---|---|---|---|---|
-| ビルド出力先 | `build/.../k-p/web/lib/` | 同 | 同 | `build/.../k-p/node/lib/` |
-| `ENVIRONMENT` | `web,worker` | `web,worker` | `web,worker` | `node` |
-| `EXPORT_ES6` / `MODULARIZE` | 必須 | 必須 | 必須 | 必須 |
-| `EXPORTED_RUNTIME_METHODS` | `['FS','ccall']` | `['FS','ccall']` | `['FS','ccall']` | `['FS','ccall','callMain']` |
-| `INCOMING_MODULE_JS_API` 明示 | 不要 | 不要 | **必須** | **必須** |
-| `PTHREAD_POOL_SIZE` | 32 | 32 | 32 | 32 |
-| `--pre-js wasm_pre.js` | 必須 | 必須 | 必須 | 必須 |
-| 別 `.worker.js` が出る | ✅ | ❌ | ❌ | ❌ |
-| サーバ側 COOP/COEP | 必須 | 必須 | 必須 | N/A |
-| アプリ側 `console.log` tap | 不要 | 不要 | 推奨 | 推奨 |
-| アプリ側 `Worker` patch | 不要 | 不要 | 推奨 | N/A |
-| アプリ側 `noInitialRun` + `callMain` | 不要 | 不要 | 不要 | **必須** (`source/main.cpp` 初期化用) |
+| 項目 | web 変種 / 3.1.43 | web / 3.1.60–3.1.73 | web / 3.1.74+ | node 変種 | edge 変種 |
+|---|---|---|---|---|---|
+| ビルド出力先 | `build/.../k-p/web/lib/` | 同 | 同 | `build/.../k-p/node/lib/` | `build/.../k-p/edge/lib/` |
+| `ENVIRONMENT` | `web,worker` | `web,worker` | `web,worker` | `node` | `web` |
+| `EXPORT_ES6` / `MODULARIZE` | 必須 | 必須 | 必須 | 必須 | 必須 |
+| `EXPORTED_RUNTIME_METHODS` | `['FS','ccall']` | `['FS','ccall']` | `['FS','ccall']` | `['FS','ccall','callMain']` | `['FS','ccall']` |
+| `INCOMING_MODULE_JS_API` 明示 | 不要 | 不要 | **必須** | **必須** | **必須** |
+| `-pthread` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `PTHREAD_POOL_SIZE` | 32 | 32 | 32 | 32 | — |
+| `--pre-js wasm_pre.js` | 必須 | 必須 | 必須 | 必須 | 必須 |
+| 別 `.worker.js` が出る | ✅ | ❌ | ❌ | ❌ | ❌ |
+| サーバ側 COOP/COEP | 必須 | 必須 | 必須 | N/A | 不要 |
+| アプリ側 `console.log` tap | 不要 | 不要 | 推奨 | 推奨 | 推奨 |
+| アプリ側 `Worker` patch | 不要 | 不要 | 推奨 | N/A | N/A |
+| アプリ側 `noInitialRun` + `callMain` | 不要 | 不要 | 不要 | **必須** (`source/main.cpp` 初期化用) | 不要 |
 
-両変種とも `script/wasm_build.js` が同じソースから一度のビルド呼び出しで
-自動生成する。Makefile 側の差分は `EM_ENVIRONMENT` と
-`EM_EXPORTED_RUNTIME_METHODS` の 2 変数のみ。
+3 変種とも `script/wasm_build.js` が同じソースから一度のビルド呼び出しで
+自動生成する。Makefile 側の差分は `EM_ENVIRONMENT` /
+`EM_EXPORTED_RUNTIME_METHODS` / `EM_PTHREAD` の 3 変数のみ。
 
 「推奨」「必須」のセルは `docs/wasm_eval_results.md` の進捗と連動して
 更新する。
+
+---
+
+## 9. edge 変種 (V8 Isolate 系ランタイム向け)
+
+### 9.1 対象ランタイム
+
+V8 Isolate を JS 実行モデルとするエッジランタイムでは、`Worker`
+コンストラクタと `SharedArrayBuffer` が使えないため、pthread 付きの
+web/node variant はそのままでは動作しない。edge 変種はこれらを
+外した single-thread ビルド。代表的なターゲット:
+
+- **Cloudflare Workers** / **Cloudflare Pages Functions** / **Durable Objects**
+- **Vercel Edge Functions** / **Next.js Edge Runtime**
+- **Deno Deploy**
+
+### 9.2 制約
+
+| 項目 | 挙動 |
+|---|---|
+| `Threads` | 1 固定。`setoption name Threads value N` は実質無視 (`source/thread.{cpp,h}` が single-thread パスで search() を呼び出し元スレッドで同期実行) |
+| `USI_Ponder` / `Stochastic_Ponder` | 機能しない。探索と別スレッドで USI ループを回す手段が無い |
+| 探索中の `stop` / `setoption` / 次の `position` | 送れない。`go` は呼び出しスレッドをブロックする同期呼び出しとして動く |
+| `go btime/wtime/byoyomi` | `MinimumThinkingTime` / `NetworkDelay` に削られるので非推奨 |
+| `go movetime N` | 推奨。ほぼ N ms で打ち切る |
+| `MultiPV` / `SkillLevel` / 探索系 option 全般 | 動く |
+| `USI_Hash` / `EvalHash` | 動くが、並列 init が無いので `isready` 応答が変種比で遅め |
+
+### 9.3 最小ラッパー: `templates/edge/yaneuraou-edge.ts`
+
+フレームワーク非依存の最小ラッパーをリポジトリに用意してある。
+**コピペで自分のプロジェクトに取り込んで使う前提** で、`@types/emscripten`
+にも依存しない形にしてある。
+
+提供している API:
+
+```ts
+import {
+  createYaneuraOuEdge,
+  type YaneuraOuFactory,
+  type EvalRequest,
+  type EvalResult,
+} from "./yaneuraou-edge";
+
+const engine = await createYaneuraOuEdge({
+  factory,       // yaneuraou.<pkg>.js から import した default export
+  wasmBinary,    // yaneuraou.<pkg>.wasm の中身 (ArrayBuffer|Uint8Array)
+  usiHash: 16,   // MB (省略時 16)
+  hash: 16,      // MB (省略時 usiHash と同値)
+});
+
+const result: EvalResult = await engine.eval({
+  sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+  byoyomi: 500,     // ms。内部では `go movetime` として発行
+  skillLevel: 20,   // 0–20, 省略可
+});
+// result.bestmove      : "6i7h"
+// result.ponder        : "8c8d" | null
+// result.score         : { kind: "cp" | "mate", value: number, bound? }
+// result.depth/nodes/pv/...
+```
+
+- `createYaneuraOuEdge()` 内で `usi` → `setoption Threads/Hash` → `isready`
+  までを済ませ、以降は `eval()` の繰り返しで使い回せるようにしてある。
+- **連続 `eval()` 呼び出しは内部で自動直列化される**ので、呼び出し側で
+  ロックを取る必要は無い。
+- `dispose()` で `Module.terminate()` を呼ぶ。Isolate が捨てられる前に
+  呼ぶと綺麗だが、呼び忘れても実害は無い。
+
+### 9.4 Cloudflare Workers への組み込み例
+
+wrangler で wasm と JS を bundle して、module scope にエンジンを
+1 個持っておく構成:
+
+```ts
+// src/index.ts
+import YaneuraOu_K_P from "./yaneuraou.k-p.js";
+import wasmBinary from "./yaneuraou.k-p.wasm"; // wrangler.toml で data 扱い
+import {
+  createYaneuraOuEdge,
+  type YaneuraOuFactory,
+} from "./yaneuraou-edge";
+
+// Isolate 寿命中は同じエンジンを使い回す。cold start 時のみ初期化コストを払う。
+const enginePromise = createYaneuraOuEdge({
+  factory: YaneuraOu_K_P as unknown as YaneuraOuFactory,
+  wasmBinary,
+});
+
+export default {
+  async fetch(req: Request): Promise<Response> {
+    const { sfen, byoyomi = 500 } = await req.json<{
+      sfen: string;
+      byoyomi?: number;
+    }>();
+    const engine = await enginePromise;
+    const result = await engine.eval({ sfen, byoyomi });
+    return Response.json(result);
+  },
+};
+```
+
+`wrangler.toml` 側で `.wasm` をバイナリとして import できるよう
+`rules` を設定する (Workers の場合):
+
+```toml
+[[rules]]
+type = "Data"
+globs = ["**/*.wasm"]
+fallthrough = true
+```
+
+Vercel Edge Functions / Deno Deploy も同様のパターンで動く。
+`yaneuraou.k-p.js` を ES module として import し、`.wasm` を
+ArrayBuffer として渡すだけで差し替えられる。
+
+### 9.5 実測パフォーマンス (k-p, em++ 5.0.5, aarch64)
+
+`templates/edge/yaneuraou-edge.ts` + `go movetime 500` で中盤局面
+1 手、Node (bun) で実行:
+
+| phase | 時間 |
+|---|---|
+| ① `factory(...)` ロード (WASM compile + runtime init) | ~90 ms |
+| ② `usi` → `usiok` + 初回 `setoption` → `isready` → `readyok` | ~30 ms |
+| ③ `go movetime 500` → `bestmove` | ~505 ms |
+| **cold 合計 (1 リクエスト目)** | **~620 ms** |
+| **warm 合計 (Isolate 再利用)** | **~510 ms** (①② が省略される) |
+
+Cloudflare Workers Paid プランの **CPU time 30 s 上限** に対して ~2%
+の消費で収まる。Free プランの 10 ms CPU は当然無理 (思考だけで
+500 ms 消費する)。
+
+wasm サイズ: `yaneuraou.k-p.wasm` が約 **1.41 MiB**、Brotli 圧縮後で約
+**479 KiB**。Workers の bundle size 上限(Paid 10 MiB / Free 3 MiB)に対して
+十分な余裕がある。
