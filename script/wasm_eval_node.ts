@@ -20,16 +20,18 @@ const DEFAULT_THINK_MS = 30000;
 const argv = process.argv.slice(2);
 if (argv.length < 1) {
   console.error(
-    "usage: bun script/wasm_eval_node.ts <yaneuraou.<pkg>.js> [--think-ms N] [--sfen '<sfen>']",
+    "usage: bun script/wasm_eval_node.ts <yaneuraou.<pkg>.js> [--think-ms N] [--sfen '<sfen>'] [--expect-version <regex>]",
   );
   process.exit(2);
 }
 const jsPath = resolve(argv[0]!);
 let thinkMs = DEFAULT_THINK_MS;
 let SFEN = DEFAULT_SFEN;
+let expectVersion: RegExp | null = null;
 for (let i = 1; i < argv.length; i++) {
   if (argv[i] === "--think-ms") thinkMs = Number(argv[++i]);
   else if (argv[i] === "--sfen") SFEN = String(argv[++i]);
+  else if (argv[i] === "--expect-version") expectVersion = new RegExp(String(argv[++i]));
 }
 if (!fs.existsSync(jsPath)) {
   console.error(`not found: ${jsPath}`);
@@ -56,6 +58,7 @@ const emit = (obj: unknown) => {
 async function main() {
   const loader = pickLoader(nodeLoaders, ctx.emscriptenVersion);
   const engine = await loader.load(ctx);
+  let engineVersionMismatch: string | null = null;
   try {
     const result = await runUsiEval(engine, {
       sfen: SFEN,
@@ -63,6 +66,9 @@ async function main() {
       threads: 1,
       hash: 64,
     });
+    if (expectVersion && !(result.engineVersion && expectVersion.test(result.engineVersion))) {
+      engineVersionMismatch = `expected /${expectVersion.source}/, got '${result.engineVersion ?? "null"}' (id name: ${result.idName ?? "null"})`;
+    }
     emit({
       runner: "node",
       loader: loader.name,
@@ -70,9 +76,14 @@ async function main() {
       engine: engineTag,
       thinkMs,
       ...result,
+      ...(engineVersionMismatch ? { engineVersionMismatch } : {}),
     });
   } finally {
     await engine.dispose();
+  }
+  if (engineVersionMismatch) {
+    process.stderr.write(`[wasm_eval_node] engine version mismatch: ${engineVersionMismatch}\n`);
+    process.exit(4);
   }
 }
 
