@@ -92,17 +92,32 @@ if(!fs.existsSync("source/Makefile")) {
 const cwd = process.cwd();
 const cpus = os.cpus().length;
 
+// Two build variants are produced from the same source per package, so
+// downstream runners can test both paths:
+//   - web : ENVIRONMENT=web,worker, EXPORTED_RUNTIME_METHODS=['FS','ccall']
+//           → drives Playwright + Chromium in script/wasm_eval_browser.ts
+//   - node: ENVIRONMENT=node,        EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']
+//           → drives node:worker_threads in script/wasm_eval_node.ts
+// callMain is only needed on the node variant because the node loader
+// uses noInitialRun:true and triggers main() explicitly (see
+// script/loaders/node/common.ts and docs/wasm_client_usage.md).
+const variants = [
+  {
+    name: "web",
+    em_environment: "web,worker",
+    em_exported_runtime_methods: "['FS','ccall']",
+  },
+  {
+    name: "node",
+    em_environment: "node",
+    em_exported_runtime_methods: "['FS','ccall','callMain']",
+  },
+];
+
 (async () => {
 for(const pkgobj of pkglist) {
-  const builddirusi = `build/${version}_${arch}/${pkgobj.name}/`;
-  const builddirlib = `build/${version}_${arch}/${pkgobj.name}/lib/`;
-  const usijs_copy_dirs = [
-  ];
-  const dts_copy_dirs = [
-  ];
-  const lib_copy_dirs = [
-  ];
-  // embedded_nnue
+  // embedded_nnue setup (shared between variants — only touches
+  // source/eval/nnue/embedded_nnue.cpp which is the same for both builds)
   switch(pkgobj.name) {
     case "halfkp":
       if (!fs.existsSync(".dl/suisho5_20211123.halfkp.nnue.cpp.gz")) {
@@ -117,6 +132,16 @@ for(const pkgobj of pkglist) {
       execSync("gzip -cd .dl/suishopetite_20211123.k_p.nnue.cpp.gz > source/eval/nnue/embedded_nnue.cpp");
       break;
   }
+
+for(const variant of variants) {
+  const builddirusi = `build/${version}_${arch}/${pkgobj.name}/${variant.name}/`;
+  const builddirlib = `build/${version}_${arch}/${pkgobj.name}/${variant.name}/lib/`;
+  const usijs_copy_dirs = [
+  ];
+  const dts_copy_dirs = [
+  ];
+  const lib_copy_dirs = [
+  ];
   // mkdir
   fs.mkdirSync(fpath.join(cwd, builddirlib), { recursive: true });
   for (const copy_dir of lib_copy_dirs) {
@@ -267,10 +292,12 @@ export = ${pkgobj.exportname};
     fs.copyFileSync(bpath_module_dts, fpath.join(cwd, copy_dir, `yaneuraou.module.d.ts`));
     fs.copyFileSync(bpath_dts, fpath.join(cwd, copy_dir, `yaneuraou.${pkgobj.name}.d.ts`));
   }
-  // make
+  // make — parameterised per variant via EM_ENVIRONMENT /
+  // EM_EXPORTED_RUNTIME_METHODS (source/Makefile reads both as `?=`
+  // variables in the em++ branch)
   await new Promise((resolve) => {
     let child = exec(
-      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} ${pkgobj.extra} -s EXPORT_ES6=1 -s ENVIRONMENT=web -s MODULARIZE=1`,
+      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`,
       { cwd: fpath.join(cwd, "source"), stdio: "inherit" },
       (_error, _stdout, _stderr) => { resolve(); },
     );
@@ -325,5 +352,6 @@ export = ${pkgobj.exportname};
       }))
       .pipe(ws_gz);
   }
-}
+}  // variant loop
+}  // pkgobj loop
 })();

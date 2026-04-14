@@ -143,8 +143,12 @@ const addr = server.address();
 if (!addr || typeof addr === "string") throw new Error("server.address()");
 const origin = `http://127.0.0.1:${addr.port}`;
 
-const versionTag = basename(dirname(dirname(libDir)));
-const engineTag = basename(dirname(libDir));
+// New layout: build/<ver>_<arch>/<pkg>/<variant>/lib/
+//   dirname(libDir):                    <variant>
+//   dirname(dirname(libDir)):           <pkg>
+//   dirname(dirname(dirname(libDir))):  <ver>_<arch>
+const versionTag = basename(dirname(dirname(dirname(libDir))));
+const engineTag = basename(dirname(dirname(libDir)));
 
 let exitCode = 0;
 const browser = await chromium.launch({ headless: true });

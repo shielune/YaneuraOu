@@ -35,8 +35,13 @@ if (!fs.existsSync(jsPath)) {
 }
 
 const ctx = buildContext("node", jsPath);
-const versionTag = basename(dirname(dirname(ctx.libDir)));
-const engineTag = basename(dirname(ctx.libDir));
+// New layout: build/<ver>_<arch>/<pkg>/<variant>/lib/
+//   libDir:                                         ^^^
+//   dirname(libDir):                    <variant>
+//   dirname(dirname(libDir)):           <pkg>
+//   dirname(dirname(dirname(libDir))):  <ver>_<arch>
+const versionTag = basename(dirname(dirname(dirname(ctx.libDir))));
+const engineTag = basename(dirname(dirname(ctx.libDir)));
 
 // The Node loaders install a `console.log` tap to catch emscripten runtime
 // stdout, which means we can't use `console.log` to emit our own JSON
