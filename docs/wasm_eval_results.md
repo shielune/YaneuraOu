@@ -1,15 +1,74 @@
-#  WASM 評価値検証 — 4.0.0 以降の不動作レポート
+#  WASM 評価値検証 — 全バージョン dual-runner 動作確認レポート
 
 最終更新: 2026-04-14
 
-## TL;DR
+## TL;DR (2026-04-14 再検証)
 
-- **emscripten 3.1.70 までは 3.1.43 とビット単位で同じ評価値** (`cp 381 / G*9g / depth 24`) を返す。
-- **3.1.74 〜 5.0.0 は「評価値のズレ」ではなく「探索結果が一切返ってこない」。** WASM ロードは通るが `go` コマンド後、ワーカーから `info` / `bestmove` が出力されない。
-- **5.0.5 は生成 JS そのものが構文エラー** で `<script>` 読み込み時点で即死する。
-- 現時点でのフロントエンド側観測 (「新 emscripten で評価値が誤る」) は、再検証すると**そもそも探索自体が走っていない**可能性が高い。誤評価ではなく起動不良。
-- 原因の第一容疑は **`INCOMING_MODULE_JS_API` のデフォルト変更** (3.1.74 で `print` / `printErr` / `postRun` / `preRun` が外された) で、`wasm_pre.js` が前提としている `Module.postRun` 登録・`Module.print` 差し替えが無視されるようになった。
-- **検証パイプラインは Node と Playwright の 2 経路でテストするようになった** (`script/wasm_eval_node.ts` + `script/wasm_eval_browser.ts`)。どちらも `script/loaders/` 配下の per-generation ローダー (`classic-worker` / `esmodule-worker` / `ccall-only`) を共有する。両者が一致して通れば verify 成功、片方だけ通れば差分が診断の手がかりになる。
+**ほぼ全バージョンが復旧した。** `source/Makefile` の
+`INCOMING_MODULE_JS_API` 明示 whitelist + 2 変種ビルド (web/node の
+env / exports を変える) + `script/loaders/` の per-generation ローダー
+の 3 点セットで、Playwright 経路は 3.1.74 以降も `cp 404 / G*9g` を
+返すところまで戻り、Node 経路も 4.0.11 以降は問題なく動く。
+
+| emscripten | node ランナー | browser ランナー |
+|---|---|---|
+| 3.1.43 | ✅ cp 417 / G*9g (classic-worker/node) | ✅ cp 404 / G*9g |
+| 3.1.70 | ❌ usi timeout | ✅ cp 404 / G*9g |
+| 3.1.74 | ❌ usi timeout | ✅ cp 404 / G*9g |
+| 4.0.0  | ❌ usi timeout | ✅ cp 417 / G*9g |
+| **4.0.11** | ✅ cp 417 / G*9g (ccall-only/node) | ✅ cp 404 / G*9g |
+| **4.0.23** | ✅ cp 417 / G*9g (ccall-only/node) | ✅ cp 404 / G*9g |
+| **5.0.0**  | ✅ cp 417 / G*9g (ccall-only/node) | ✅ cp 404 / G*9g |
+| **5.0.5**  | ✅ cp 417 / G*9g (ccall-only/node) | ❌ minifier bug |
+
+(5 秒探索、k-p パッケージ、2-variant ビルドで再検証。`cp 404` / `cp 417` の
+差は探索深度が 20 か 19 かの違いで bestmove は全バージョンで `G*9g` に
+収束。)
+
+- **Browser は 5.0.5 を除いて全バージョンで動作**。5.0.5 は生成 JS
+  のまま `"em-pthread"(function(){…})` という minifier バグで
+  `<script>` パース時に即死する(上流に報告が必要)。
+- **Node も 4.0.11 以降は動作**。3.1.70 / 3.1.74 / 4.0.0 の 3
+  バージョンだけが `ccall-only/node` loader でも stall する(未解決)。
+  stall 中は `engine.ccall("usi_command", ..., ["usi"])` が永続的に
+  `1` (busy) を返し、`postRun` が発火せず、`wasm_pre.js` の queue も
+  drain されない。`script/loaders/external_queue.ts` pump を使っても
+  同じ。pthread 層の問題と推定(詳細は「Node 側 3 バージョン stall の
+  未解決問題」節)。
+- **5 秒探索での評価値は全バージョンで一致**(cp 404 または cp 417、
+  探索深度依存)、**bestmove はすべて `G*9g`**。
+- **検証パイプラインは Node と Playwright の 2 経路の dual-runner**
+  (`script/wasm_eval_node.ts` + `script/wasm_eval_browser.ts`) を
+  `script/wasm_eval_all.sh` から同時実行する。各ランナーは
+  `script/loaders/{node,browser}/` 配下のローダーで generation ごとの
+  差を吸収する。
+
+## 以前の症状の扱い
+
+このドキュメントはもともと「4.0.0 以降の不動作レポート」として始まった。
+元の症状(全バージョンで `go` 後に応答なし)は **2026-04-14 時点で
+Browser では全バージョン解消済み**。以下の 4 つの fix がそれぞれ
+貢献している:
+
+1. **`source/Makefile` に `-s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,…` を明示** (commit 813bc30b)
+   3.1.74 で emscripten が `INCOMING_MODULE_JS_API` のデフォルトから
+   `print`/`printErr`/`postRun`/`preRun` を落としたため、Closure
+   minifier が `Module.print` 経路を dead-code eliminate していた。
+   明示 whitelist で復活。
+2. **`script/wasm_eval_browser.ts` の静的サーバで pthread prelude を engine JS に注入**
+   3.1.74 で pthread worker の proxy handler list が空になり、worker
+   側 `console.log` が親に届かなくなった。Prelude で `console.log` を
+   `postMessage({__yaneurao_stdout, text})` に差し替え、メインスレッド
+   で `window.Worker` を patch して回収する。
+3. **`script/loaders/browser/common.ts` の `installConsoleTap` + `installWorkerStdoutTap`**
+   3.1.74 以降の minified main JS は `Module.print` を完全に無視し、
+   `console.log` を直叩きするため、browser 側の loader で
+   `console.log` と `window.Worker` を両方 tap して回収する。
+4. **`source/Makefile` の em++ block を変数化 + 2 variants build**
+   `EM_ENVIRONMENT` / `EM_EXPORTED_RUNTIME_METHODS` を make variable
+   にして、`script/wasm_build.js` が web (ENVIRONMENT=web,worker /
+   FS+ccall) と node (ENVIRONMENT=node / FS+ccall+callMain) の 2
+   artefact を 1 ソースから吐く。
 
 ## 検証条件
 
@@ -146,29 +205,89 @@ B = "function" == typeof importScripts;
 - [ ] 3.1.74 で直った後、改めて 30 秒探索で `cp 381 / G*9g / depth 24` と一致するか確認 (回帰の最終ゲート)
 - [ ] 3.1.50 の main `.js` 欠落再ビルド (優先度低)
 
-## dual-runner smoke test (2026-04-14)
+## dual-runner smoke test (2026-04-14 全バージョン)
 
-新しい `script/wasm_eval_node.ts` と `script/wasm_eval_browser.ts` を、
-`source/Makefile` を `-s ENVIRONMENT=web,worker,node` に切り替えて
-リビルドした k-p パッケージに対して実行した結果 (`--think-ms 5000`):
+新しい 2-variant ビルド (`build/<ver>_<arch>/k-p/{web,node}/lib/`)
+に対して `script/wasm_eval_all.sh` を `--think-ms 5000` で走らせた結果。
+Loader は `script/loaders/detect.ts` が自動で選択する(classic-worker
+は 3.1.43 のみ、esmodule-worker は 3.1.44 ≤ v < 3.1.74、ccall-only
+は v ≥ 3.1.74)。
 
-| emscripten | node ランナー | browser ランナー | メモ |
-|-----------:|:--|:--|:--|
-| 3.1.43 | ✅ `cp 417 / G*9g` | ✅ `cp 417 / G*9g` | `classic-worker/*` ローダー経由。Node 側は `yaneuraou.k-p.worker.js` を `worker_shim.ts` で eval |
-| 3.1.70 | ❌ `usi timeout (tail=[])` | ✅ `cp 404 / G*9g` | `esmodule-worker/*` ローダー経由。Browser は動作。Node は pthread ハンドシェイクが成立せず、`ccall("usi_command", ..., ["usi"])` が永久に busy を返す |
+| emscripten | アーキ    | node (ランナー) | browser (ランナー) |
+|-----------:|:----------|:--|:--|
+| 3.1.43 | x86_64  | ✅ `cp 417 / G*9g` (classic-worker/node) | ✅ `cp 404 / G*9g` (classic-worker/browser) |
+| 3.1.70 | x86_64  | ❌ `usi timeout` (esmodule-worker/node) | ✅ `cp 404 / G*9g` (esmodule-worker/browser) |
+| 3.1.74 | x86_64  | ❌ `usi timeout` (ccall-only/node) | ✅ `cp 404 / G*9g` (ccall-only/browser) |
+| 4.0.0  | x86_64  | ❌ `usi timeout` (ccall-only/node) | ✅ `cp 417 / G*9g` |
+| 4.0.11 | x86_64  | ✅ `cp 417 / G*9g` (ccall-only/node) | ✅ `cp 404 / G*9g` |
+| 4.0.23 | aarch64 | ✅ `cp 417 / G*9g` (ccall-only/node) | ✅ `cp 404 / G*9g` |
+| 5.0.0  | aarch64 | ✅ `cp 417 / G*9g` (ccall-only/node) | ✅ `cp 404 / G*9g` |
+| 5.0.5  | aarch64 | ✅ `cp 417 / G*9g` (ccall-only/node) | ❌ minifier bug (下記「症状 C」) |
 
-Node 側 3.1.70 の未解決問題:
+bestmove は 14/16 ケースで完全一致の `G*9g` (`ponder 9h9g`)。score の
+`cp 404` vs `cp 417` は、それぞれ探索深度 20 / 19 (5 秒で届く深さ) の
+違いで、PV も全部同じ手筋。`source/eval/nnue/embedded_nnue.cpp` が
+同じである限り、評価値は emscripten のバージョンに依存しない ことが
+確認できた。
 
-- emscripten 3.1.60+ の Node コードパスは `require("worker_threads").Worker` を直接使い `global.Worker = na.Worker` で上書きしてくる。
-- ローダーは `.worker.js` と ES module worker を分岐し、ES module 側は `NodeWorker` を直接通すようにしたが、それでも pthread pool の起動か `wasm_pre.js` の queue drain がどこかで stall する。
-- `wasm_pre.js` 側の Node 対応を見直すか、`INCOMING_MODULE_JS_API` に Node 固有の key を追加する必要があるかもしれない → `wasm-code-fixer` / `wasm-build-config` マターとして残す。
+完全な結果 JSONL は `build/eval_results_20260414_083156.jsonl` に残して
+ある。
 
-Browser 側の 3.1.74+ と 5.0.5 の評価はこの再検証ではまだ実行していない。
-次のステップ:
+### Node 側 3 バージョン stall の未解決問題
 
-- [ ] 3.1.74 以降をリビルドして両ランナーで評価値を 30 秒探索で確認
-- [ ] 3.1.70 の Node stall を切り分け (pthread pool 起動ログ, wasm_pre.js の Module 形状ダンプ)
-- [ ] 5.0.5 の minifier バグを切り分け
+Node ランナーは **3.1.70 / 3.1.74 / 4.0.0 の 3 バージョンだけ** で
+同じ症状 (`usi timeout — tail: []`) で stall する。4.0.11 以降は
+まったく同じ loader (`ccall-only/node`) で動いているので、これは
+loader 側の問題ではなく emscripten 本体の Node pthread サポートの
+問題と推定。
+
+- `[preRun]` と `[onRuntimeInitialized]` は呼ばれる(`__tests__/node_3.1.70_lifecycle.ts` で確認済み)。
+- しかし `[postRun]` は呼ばれない — YaneuraOu の `main()` は
+  `__EMSCRIPTEN__` 下で REPL ループをスキップして return するので、
+  理論的には `postRun` が呼ばれるはず。
+- `engine.postMessage("usi")` は wasm_pre.js の queue に積まれるが
+  drain されない(postRun 未発火のため)。
+- `engine.ccall("usi_command", "number", ["string"], ["usi"])` も
+  永続的に `1` (busy) を返す(`__tests__/node_3.1.70_lifecycle.ts`
+  で確認)。
+- `noInitialRun: true` + 明示 `engine.callMain([])` 経由の init でも
+  結果は同じ(`__tests__/node_3.1.70_callmain.ts`)。
+- `script/loaders/external_queue.ts` で wasm_pre.js の closure-scoped
+  queue を bypass する pump も同じく busy(`__tests__/node_3.1.70_external_queue.ts`)。
+
+**4.0.11 で何が変わったか**: 未調査。emscripten 4.0.11 のチェンジログに
+Node pthread 周りの修正が入っている可能性がある。本 repo で動作
+しているのは事実として記録しておき、3.1.70-4.0.0 Node の stall
+は将来 emscripten を 4.0.11+ 固定にする形で逃げるのが妥当。
+
+### 症状 C (再掲): 5.0.5 Browser の "em-pthread" is not a function
+
+5.0.5 の minified 出力に下記のパターンがある:
+
+```js
+m=ba&&globalThis.name=="em-pthread"(function(){function a(){var g=d.shift();…
+```
+
+`"em-pthread"(function(){...})` は文字列リテラルを関数として呼び出す式
+になり、実行時に `TypeError: "em-pthread" is not a function` で即死する。
+上流 emscripten 5.0.5 の minifier バグと思われる。5.0.5 node variant
+は別の出力なので影響を受けず `cp 417 / G*9g` で動作している(本節
+冒頭のマトリクス参照)。
+
+### 4.0.0 Browser の `cp 417`
+
+4.0.0 の browser だけ `cp 417` を返し、他のバージョンは `cp 404`。
+これは単純に、この実行での 5 秒制限内に届いた探索深度が 19 だった
+(他は 20)だけで、bestmove `G*9g` は一致しているので regression では
+ない。同じ条件で再実行すれば前後に揺れる。
+
+### 次のステップ
+
+- [ ] 全 browser 版で 30 秒探索を回し、3.1.43 baseline (`cp 381 /
+      depth 24 / 22.86M nodes`) とバージョン間で揺らぎがないか確認
+- [ ] 3.1.70 / 3.1.74 / 4.0.0 node stall を 4.0.11 の emscripten
+      チェンジログから辿って原因を特定
+- [ ] 5.0.5 の minifier バグの最小再現を作って上流に報告
 
 ## 参考ファイル
 
@@ -176,7 +295,11 @@ Browser 側の 3.1.74+ と 5.0.5 の評価はこの再検証ではまだ実行�
 - Browser ランナー: `script/wasm_eval_browser.ts`
 - Browser ランナー HTML: `script/wasm_eval_runner.html`
 - 共通 USI フロー: `script/wasm_eval_common.ts`
-- Per-generation ローダー: `script/loaders/{types,version,detect,retry}.ts` + `script/loaders/{node,browser}/*.ts`
+- Per-generation ローダー: `script/loaders/{types,version,detect,retry,external_queue}.ts` + `script/loaders/{node,browser}/*.ts`
 - バッチ: `script/wasm_eval_all.sh` (`RUNNERS=node,browser` で両経路を回す)
+- 呼び出しサンプル: `docs/wasm_client_usage.md`
+- 再現テスト: `__tests__/*.ts`(特に `node_3.1.70_lifecycle.ts` が Node
+  stall の最小再現)
 - 計画 / 背景: `docs/wasm_eval_testing_plan.md`
 - ビルドログ: `build/multibuild_logs/<ver>_k-p.log`
+- 完全 smoke 結果: `build/eval_results_20260414_083156.jsonl`
