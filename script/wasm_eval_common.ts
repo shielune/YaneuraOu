@@ -21,10 +21,26 @@ export interface EvalResult {
   thinkMs: number;
   threads: number;
   hash: number;
+  /** Full `id name <…>` line the engine sent in response to `usi`. */
+  idName: string | null;
+  /**
+   * Version string parsed out of `id name`. For YaneuraOu the line looks
+   * like `id name YaneuraOu NNUE KP256 7.61 32WASM TOURNAMENT`, and we
+   * extract the X.YY (or X.YYgit) token that comes after the engine
+   * family name.
+   */
+  engineVersion: string | null;
   score: { kind: "cp" | "mate"; value: number } | null;
   bestmove: string | null;
   lastInfo: string | null;
   infoCount: number;
+}
+
+function extractEngineVersion(idName: string | null): string | null {
+  if (!idName) return null;
+  // Match the first X.Y[.Z][git…] token in the id name line.
+  const m = idName.match(/\b(\d+\.\d+(?:\.\d+)?(?:git[\w.-]*)?)\b/);
+  return m ? m[1]! : null;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -54,6 +70,8 @@ export async function runUsiEval(
       "usi timeout — tail: " + JSON.stringify(lines.slice(-10)),
     );
   }
+  const idName = lines.find((l) => l.startsWith("id name ")) ?? null;
+  const engineVersion = extractEngineVersion(idName);
 
   await engine.sendCommand(`setoption name Threads value ${config.threads}`);
   await engine.sendCommand(`setoption name USI_Hash value ${config.hash}`);
@@ -96,6 +114,8 @@ export async function runUsiEval(
     thinkMs: config.thinkMs,
     threads: config.threads,
     hash: config.hash,
+    idName,
+    engineVersion,
     score,
     bestmove,
     lastInfo,

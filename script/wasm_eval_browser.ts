@@ -31,16 +31,18 @@ const DEFAULT_THINK_MS = 30000;
 const argv = process.argv.slice(2);
 if (argv.length < 1) {
   console.error(
-    "usage: bun script/wasm_eval_browser.ts <yaneuraou.<pkg>.js> [--think-ms N] [--sfen '<sfen>']",
+    "usage: bun script/wasm_eval_browser.ts <yaneuraou.<pkg>.js> [--think-ms N] [--sfen '<sfen>'] [--expect-version <regex>]",
   );
   process.exit(2);
 }
 const jsPath = resolve(argv[0]!);
 let thinkMs = DEFAULT_THINK_MS;
 let SFEN = DEFAULT_SFEN;
+let expectVersion: RegExp | null = null;
 for (let i = 1; i < argv.length; i++) {
   if (argv[i] === "--think-ms") thinkMs = Number(argv[++i]);
   else if (argv[i] === "--sfen") SFEN = String(argv[++i]);
+  else if (argv[i] === "--expect-version") expectVersion = new RegExp(String(argv[++i]));
 }
 if (!existsSync(jsPath)) {
   console.error(`not found: ${jsPath}`);
@@ -216,6 +218,21 @@ try {
     );
     exitCode = 3;
   } else {
+    const v = value as unknown as {
+      score?: unknown;
+      bestmove?: unknown;
+      lastInfo?: unknown;
+      infoCount?: unknown;
+      idName?: string | null;
+      engineVersion?: string | null;
+    };
+    let engineVersionMismatch: string | null = null;
+    if (
+      expectVersion &&
+      !(v.engineVersion && expectVersion.test(v.engineVersion))
+    ) {
+      engineVersionMismatch = `expected /${expectVersion.source}/, got '${v.engineVersion ?? "null"}' (id name: ${v.idName ?? "null"})`;
+    }
     console.log(
       JSON.stringify(
         {
@@ -224,15 +241,22 @@ try {
           engine: engineTag,
           thinkMs,
           sfen: SFEN,
-          score: value.score,
-          bestmove: value.bestmove,
-          lastInfo: value.lastInfo,
-          infoCount: value.infoCount,
+          idName: v.idName ?? null,
+          engineVersion: v.engineVersion ?? null,
+          score: v.score,
+          bestmove: v.bestmove,
+          lastInfo: v.lastInfo,
+          infoCount: v.infoCount,
+          ...(engineVersionMismatch ? { engineVersionMismatch } : {}),
         },
         null,
         2,
       ),
     );
+    if (engineVersionMismatch) {
+      process.stderr.write(`[wasm_eval_browser] engine version mismatch: ${engineVersionMismatch}\n`);
+      exitCode = 4;
+    }
   }
 } catch (e) {
   console.log(

@@ -177,19 +177,41 @@ else
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
-		CPPFLAGS += -march=wasm32
-		# CPPFLAGS += -march=corei7
-		CPPFLAGS += -s USE_PTHREADS=1
+		# `-pthread` is the modern spelling; the legacy `-s USE_PTHREADS=1`
+		# that V7.61 originally shipped no longer compiles on emscripten 5.0.0.
+		CPPFLAGS += -pthread
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
-		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node
+		# Two variants are produced from the same source by the outer
+		# driver (script/wasm_build.js): one with ENVIRONMENT=web,worker
+		# for Playwright + Chromium, and one with ENVIRONMENT=node for
+		# the wasm_eval_node.ts runner. EM_ENVIRONMENT is set per build
+		# by the driver. Node variant also adds `callMain` to the
+		# exported runtime methods so the Node loader can explicitly run
+		# main() after the factory resolves with noInitialRun=true.
+		EM_ENVIRONMENT ?= web,worker
+		EM_EXPORTED_RUNTIME_METHODS ?= ['FS','ccall']
+		# `-s EXPORT_ES6=1` must live in LDFLAGS; passing it via the
+		# outer make command line only sets a make variable that the
+		# em++ block does not reference, and the generated JS falls
+		# back to a CommonJS `module.exports = …` shape that the ESM
+		# dynamic-import path in script/loaders/{node,browser}/common.ts
+		# can't consume.
+		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s EXPORT_ES6=1 -s ENVIRONMENT=$(EM_ENVIRONMENT)
+		# emscripten 3.1.74 以降、INCOMING_MODULE_JS_API のデフォルトから
+		# print/printErr/postRun/preRun が外れ、wasm_pre.js の Module.print /
+		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの
+		# stdout もメインスレッドに届かなくなる)。明示的に指定して復活させる。
+		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
 		LDFLAGS += -s PTHREAD_POOL_SIZE=32
 		# -s PTHREAD_POOL_SIZE_STRICT=32
-		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
+		# EXPORTED_RUNTIME_METHODS is parameterised by EM_EXPORTED_RUNTIME_METHODS.
+		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
 		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=4294967296
-		LDFLAGS += -s TOTAL_STACK=67108864
-		LDFLAGS += -s LLD_REPORT_UNDEFINED
+		# Newer emscripten renamed TOTAL_STACK to STACK_SIZE; STACK_SIZE
+		# also works on 3.1.43.
+		LDFLAGS += -s STACK_SIZE=67108864
 		# LDFLAGS += -s PROXY_TO_PTHREAD
 		# LDFLAGS += -s ALLOW_UNIMPLEMENTED_SYSCALLS
 		# LDFLAGS += -s ASSERTIONS
