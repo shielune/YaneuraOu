@@ -9,6 +9,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { gte, lt } from "../version.ts";
+import { installExternalQueue } from "../external_queue.ts";
 import { loadEngineWithUnifiedStdout } from "./common.ts";
 
 export const esmoduleWorkerLoader: Loader = {
@@ -31,15 +32,11 @@ export const esmoduleWorkerLoader: Loader = {
 
     const engine = await loadEngineWithUnifiedStdout(ctx, push);
 
-    if (typeof engine.postMessage !== "function") {
-      throw new Error(
-        "esmodule-worker/browser: engine.postMessage is missing — wasm_pre.js wiring failed",
-      );
-    }
+    const enqueue = installExternalQueue(engine);
 
     return {
       async sendCommand(cmd: string) {
-        engine.postMessage!(cmd);
+        enqueue(cmd);
       },
       onLine(listener) {
         listeners.push(listener);

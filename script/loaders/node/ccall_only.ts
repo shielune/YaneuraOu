@@ -12,7 +12,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { gte } from "../version.ts";
-import { ccallWithRetry } from "../retry.ts";
+import { installExternalQueue } from "../external_queue.ts";
 import { instantiateWithUnifiedStdout } from "./common.ts";
 
 const SHIM_URL = new URL("./worker_shim.ts", import.meta.url);
@@ -37,18 +37,11 @@ export const ccallOnlyLoader: Loader = {
 
     const engine = await instantiateWithUnifiedStdout(ctx, SHIM_URL, push);
 
-    if (typeof engine.ccall !== "function") {
-      throw new Error(
-        "ccall-only/node: engine.ccall is missing — are EXPORTED_RUNTIME_METHODS correct?",
-      );
-    }
+    const enqueue = installExternalQueue(engine);
 
     return {
       async sendCommand(cmd: string) {
-        await ccallWithRetry(
-          () => engine.ccall!("usi_command", "number", ["string"], [cmd]),
-          cmd,
-        );
+        enqueue(cmd);
       },
       onLine(listener) {
         listeners.push(listener);
