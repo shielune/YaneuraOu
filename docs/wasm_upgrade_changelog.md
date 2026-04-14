@@ -371,3 +371,65 @@ Brotli 圧縮 479 KiB。`go movetime 500` の smoke test で
 e92b712c feat(wasm): add single-thread edge variant for V8 Isolate runtimes
 b3e9d7e0 feat(engine): re-enable SkillLevel UCI option
 ```
+
+---
+
+# 2026-04-14 (追補): edge variant を全パッケージに拡張検証
+
+作業ブランチ: `feat/wasm-edge-more-packages`
+
+## ゴール
+
+edge variant を `k-p` 以外の主要パッケージ (`halfkp` / `yaneuraou-mate` /
+`tanuki-mate`) でもビルド・実行できるかを確認し、結果をドキュメント
+に追記する。ビルドドライバ側のコード変更は不要で、`VARIANT=edge
+node script/wasm_build.js <pkg>` で各パッケージが通るかの確認作業。
+
+## 確認結果
+
+| パッケージ | ビルド | smoke | wasm (br 圧縮) | edge 実用性 |
+|---|---|---|---|---|
+| `k-p` | ✅ | ✅ `go movetime 500` | 1.41 MiB (479 KiB) | **実用可** |
+| `halfkp` | ✅ | ✅ `go movetime 500` | **61 MiB** (25 MiB) | Edge bundle size 上限超過。ブラウザ直接配信なら可 |
+| `yaneuraou-mate` | ✅ | ⚠️ load + handshake は通るが **`go mate` で `Aborted()`** | 564 KiB (113 KiB) | 現状非対応 (調査保留) |
+| `tanuki-mate` | ✅ | ✅ `go mate 2000` → `checkmate nomate` 返却 | 518 KiB (110 KiB) | **実用可** |
+
+### 1. `halfkp` (Suisho5+YaneuraOu NNUE)
+
+- edge variant でのビルドは `thread.{cpp,h}` の single-thread
+  経路がそのまま効いて通過。
+- 初期局面で `go movetime 500` を実行し、`cp 63 / depth 17 / bestmove
+  7g7f` を確認。探索の動作に問題なし。
+- **問題は wasm サイズ**: NNUE 重みが埋め込まれて wasm 61 MiB /
+  Brotli 25 MiB。Cloudflare Workers Paid プランの bundle size 上限
+  10 MiB を大きく超えるため、エッジランタイムには載らない。
+- **運用方針**: halfkp を edge 配信したい場合は edge variant を選ばず、
+  `web` / `node` variant をブラウザまたは Node サーバから直接使う。
+  Edge はあくまでおまけ扱い。
+
+### 2. `yaneuraou-mate` (df-pn 詰将棋ソルバー)
+
+- edge variant でのビルドは通過 (wasm 564 KiB / br 113 KiB)。
+- load + `usi` + `isready` までは正常に応答。
+- `go mate 2000` を送ると探索開始直後に `Aborted()` で落ちる。
+  `source/thread.{cpp,h}` の single-thread stub では捕らえきれない
+  pthread / std::thread 依存が `source/mate/` 配下のソルバー実装
+  (おそらく df-pn の並列化まわり) に残っている疑いが高い。
+- **対応は保留**。Edge はおまけ扱いで、詰将棋用途は後述の
+  `tanuki-mate` で代替可能なため、ROI を考えて調査は後回しにする。
+  将来必要になった時点で `-sASSERTIONS=1` で再ビルドして原因を
+  絞り込む。
+
+### 3. `tanuki-mate` (mate solver)
+
+- edge variant でのビルドは通過 (wasm 518 KiB / br 110 KiB)。
+- 簡単な詰み局面 (`4k4/9/4G4/9/9/9/9/9/9 b 2g 1`) に対して
+  `go mate 2000` を実行し、`checkmate nomate` を返却 (局面が実際に
+  詰みかどうかとは別に、USI 応答が完結することを確認)。
+- **Edge で詰将棋探索が欲しい場合のデフォルト選択**。
+
+## コード変更
+
+なし。ビルドドライバ (`script/wasm_build.js`) も Makefile も既存
+のままで、`VARIANT` 環境変数と `pkgobjs` 配列の既存項目がそのまま
+機能した。変更は `docs/wasm_client_usage.md` 9.2 節の追加のみ。
