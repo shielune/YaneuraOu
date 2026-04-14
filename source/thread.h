@@ -88,8 +88,11 @@ class Thread
 	// searching : 探索中であるかを表すフラグ。プログラムを簡素化するため、事前にtrueにしてある。
 	bool exit = false , searching = true;
 
+#if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
 	// stack領域を増やしたstd::thread
+	// edge variant (emscripten + no pthread) ではスレッドを生成できないため省略。
 	NativeThread stdThread;
+#endif
 
 public:
 

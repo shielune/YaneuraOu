@@ -220,10 +220,16 @@ else
 		# から上書きできるように ?= で default を置く。
 		EM_ENVIRONMENT ?= web,worker
 		EM_EXPORTED_RUNTIME_METHODS ?= ['FS','ccall']
+		# pthread 付きビルド (node/web variant 向け) か、single-thread ビルド
+		# (edge variant 向け, V8 Isolate 系ランタイムでは Worker / SharedArrayBuffer
+		# が使えないため) かを切り替える。
+		EM_PTHREAD ?= 1
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
-		CPPFLAGS += -pthread
+		ifeq ($(EM_PTHREAD),1)
+			CPPFLAGS += -pthread
+		endif
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
@@ -233,8 +239,11 @@ else
 		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの
 		# stdout が吸い込まれる症状 B)。明示 whitelist で復活させる。
 		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
-		LDFLAGS += -s PTHREAD_POOL_SIZE=32
-		# -s PTHREAD_POOL_SIZE_STRICT=32
+		ifeq ($(EM_PTHREAD),1)
+			LDFLAGS += -pthread
+			LDFLAGS += -s PTHREAD_POOL_SIZE=32
+			# -s PTHREAD_POOL_SIZE_STRICT=32
+		endif
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
 		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=4294967296
 		LDFLAGS += -s STACK_SIZE=67108864
