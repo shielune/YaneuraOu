@@ -9,10 +9,12 @@
 export interface EngineInstance {
   /**
    * Send a USI command to the engine. Implementations may queue, throttle,
-   * or retry internally. Does not wait for a response — use `onLine` to
-   * observe stdout.
+   * or retry internally (ccall on this engine can return 1 = "busy, try
+   * later again", so loaders implement an internal backoff loop). The
+   * returned promise resolves once the command has been accepted — it
+   * does NOT wait for the command's response. Use `onLine` for that.
    */
-  sendCommand(cmd: string): void;
+  sendCommand(cmd: string): Promise<void>;
 
   /**
    * Register a listener that receives every stdout line the engine emits

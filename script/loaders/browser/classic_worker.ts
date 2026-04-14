@@ -32,15 +32,15 @@ export const classicWorkerLoader: Loader = {
 
     const engine = await loadEngineWithUnifiedStdout(ctx, push);
 
-    if (typeof engine.ccall !== "function") {
+    if (typeof engine.postMessage !== "function") {
       throw new Error(
-        "classic-worker/browser: engine.ccall is missing — check EXPORTED_RUNTIME_METHODS",
+        "classic-worker/browser: engine.postMessage is missing — wasm_pre.js wiring failed",
       );
     }
 
     return {
-      sendCommand(cmd: string) {
-        engine.ccall!("usi_command", "number", ["string"], [cmd]);
+      async sendCommand(cmd: string) {
+        engine.postMessage!(cmd);
       },
       onLine(listener) {
         listeners.push(listener);
