@@ -23,7 +23,9 @@
 
   Module["terminate"] = function () {
     quit = true;
-    PThread.terminateAllThreads();
+    if (typeof PThread !== "undefined" && PThread.terminateAllThreads) {
+      PThread.terminateAllThreads();
+    }
   };
 
   // Command queue
