@@ -1,6 +1,54 @@
 #  WASM 評価値検証 — 全バージョン dual-runner 動作確認レポート
 
-最終更新: 2026-04-14
+最終更新: 2026-04-14 (V7.61 再 baseline / emscripten 5.0.0 固定)
+
+## 2026-04-14 追補: V7.61 downgrade 後の baseline 更新
+
+前セッションの bisection で upstream YaneuraOu 本体のバージョン V8.50 以降
+(`74d9b0e9 V8.50` と後続の V9.xx 系) で WASM の評価値が壊れることが判明した
+ため、`a7229610 feat(wasm): downgrade YaneuraOu source to V7.61` で develop
+を V7.61 (known-good state) に pin した。
+
+**以下の旧 TL;DR 以降のセクションの数値はすべて V8.50 以降の壊れた state
+で記録されたもの**で、現在の develop では再現しない。新 baseline は V7.61
+エンジンが返す `cp 1500 帯 / B*6f` 方向で、engine id は
+`id name YaneuraOu NNUE KP256 7.61 32WASM TOURNAMENT`。
+
+- **emscripten ターゲットは 5.0.0 で固定**。5.0.5 は下の症状 C
+  (`"em-pthread" is not a function`) が upstream 未解決のため、
+  今後の upstream minifier 修正待ちで保留する。次期バージョン (5.0.6 以降)
+  の追従も現在は行わない。
+- **30 秒探索の V7.61 新 baseline**
+  (`bun script/wasm_eval_{node,browser}.ts <path> --think-ms 30000`,
+  2026-04-14 再計測):
+
+| variant | score | bestmove | depth | nodes | time |
+|---|---|---|---|---|---|
+| 5.0.0 node    | `cp 1658 (lowerbound)` | `B*6f ponder S*3c` | 22 | 23,329,254 | 27,727 ms |
+| 5.0.0 browser | `cp 1658 (lowerbound)` | `B*6f ponder S*3c` | 22 | 24,873,913 | 26,374 ms |
+| 5.0.5 node    | `cp 1545 (lowerbound)` | `B*6f ponder S*3c` | 22 | 20,447,573 | 26,248 ms |
+| 5.0.5 browser | — (症状 C: minifier バグで起動不可) | — | — | — | — |
+
+30 秒でも `lowerbound` が付くのは、V7.61 エンジンが aspiration window 下限
+に到達した時点で時間切れになっているため。探索時間を伸ばせばさらに上方に
+振れる余地があるが、**`bestmove B*6f (ponder S*3c)` は全 variant で完全
+一致**しており、これが V7.61 エンジンの正解方向と確定した。
+
+- **`script/wasm_build.js` に `patches/` 自動適用フックを追加**
+  (`6addf5f0 build(wasm): add idempotent patches/ auto-apply hook to wasm_build.js`)。
+  現時点では `patches/` 配下は空で no-op だが、将来 emscripten 固有の
+  source patch が必要になった時のインフラとして残している。ビルド前に
+  unified diff を apply、終了時 (成功/失敗問わず) に逆 apply。
+
+---
+
+以下の旧 TL;DR 以降のセクションは V8.50 以降の「壊れた state」時代の記録。
+emscripten バージョン互換性の知見 (症状 B = 3.1.74 以降の Module.print
+dead-code elimination / 症状 A = 3.1.60 pthread 検出バグ / 症状 C = 5.0.5
+minifier 出力の構文破綻 / Node 側 3 バージョンの pthread stall) は V7.61
+でも変わらないので歴史として保持するが、**評価値の数値 (`cp 381` / `cp 404`
+/ `cp 417` / `cp 577` / `bestmove G*9g` / `bestmove G*6h`) は V7.61 では
+再現しない**。
 
 ## TL;DR (2026-04-14 再検証)
 
