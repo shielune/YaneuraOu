@@ -295,15 +295,22 @@ export = ${pkgobj.exportname};
   // make — parameterised per variant via EM_ENVIRONMENT /
   // EM_EXPORTED_RUNTIME_METHODS (source/Makefile reads both as `?=`
   // variables in the em++ branch)
-  await new Promise((resolve) => {
-    let child = exec(
+  console.log(`[wasm_build] starting ${variant.name} build for ${pkgobj.name} (${version}_${arch})`);
+  await new Promise((resolve, reject) => {
+    const child = exec(
       `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`,
-      { cwd: fpath.join(cwd, "source"), stdio: "inherit" },
-      (_error, _stdout, _stderr) => { resolve(); },
+      { cwd: fpath.join(cwd, "source"), maxBuffer: 64 * 1024 * 1024 },
+      (error) => {
+        if (error) {
+          console.error(`[wasm_build] make failed for ${variant.name}: ${error.message}`);
+        }
+        resolve();
+      },
     );
-    child.stdout.on('data', (data) => { console.log(String(data).trimEnd()); });
-    child.stderr.on('data', (data) => { console.error(String(data).trimEnd()); });
+    child.stdout.on("data", (data) => { console.log(String(data).trimEnd()); });
+    child.stderr.on("data", (data) => { console.error(String(data).trimEnd()); });
   });
+  console.log(`[wasm_build] finished ${variant.name} build for ${pkgobj.name}`);
   // compress, public copy
   for (const fext of ["js", "worker.js", "wasm"]) {
     const bfile = `yaneuraou.${pkgobj.name}.${fext}`;
@@ -315,6 +322,14 @@ export = ${pkgobj.exportname};
     const ws_br = fs.createWriteStream(bpath_br);
     const ws_gz = fs.createWriteStream(bpath_gz);
     if(!fs.existsSync(bpath)) {
+      // Only the classic-worker generation (3.1.43) emits a separate
+      // `.worker.js`. From 3.1.60 onwards the worker is inlined into
+      // the main ES module and no sibling file is produced, so skip
+      // compression silently instead of aborting the whole build.
+      if (fext === "worker.js") {
+        console.warn(`[wasm_build] no separate ${bfile} (inlined worker generation), skipping compress`);
+        continue;
+      }
       console.error(`file not found: ${bpath}`);
       process.exit(1);
     }
