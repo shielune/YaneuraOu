@@ -144,27 +144,55 @@ process.on("exit", revertOnce);
 process.on("SIGINT", () => process.exit(130));
 process.on("SIGTERM", () => process.exit(143));
 
-// Two build variants are produced from the same source per package, so
-// downstream runners can test both paths:
-//   - web : ENVIRONMENT=web,worker, EXPORTED_RUNTIME_METHODS=['FS','ccall']
-//           → drives Playwright + Chromium in script/wasm_eval_browser.ts
-//   - node: ENVIRONMENT=node,        EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']
-//           → drives node:worker_threads in script/wasm_eval_node.ts
+// Three build variants are produced from the same source per package, so
+// downstream runners can test each target:
+//   - web  : ENVIRONMENT=web,worker,        pthread=on  EXPORTED_RUNTIME_METHODS=['FS','ccall']
+//            → drives Playwright + Chromium in script/wasm_eval_browser.ts
+//   - node : ENVIRONMENT=node,              pthread=on  EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']
+//            → drives node:worker_threads in script/wasm_eval_node.ts
+//   - edge : ENVIRONMENT=web,               pthread=off EXPORTED_RUNTIME_METHODS=['FS','ccall']
+//            → single-thread build for V8 Isolate runtimes (Cloudflare
+//              Workers / Vercel Edge / Deno Deploy), where Worker and
+//              SharedArrayBuffer are not available.
 // callMain is only needed on the node variant because the node loader
 // uses noInitialRun:true and triggers main() explicitly (see
 // script/loaders/node/common.ts and docs/wasm_client_usage.md).
-const variants = [
+const allVariants = [
   {
     name: "web",
     em_environment: "web,worker",
     em_exported_runtime_methods: "['FS','ccall']",
+    em_pthread: 1,
   },
   {
     name: "node",
     em_environment: "node",
     em_exported_runtime_methods: "['FS','ccall','callMain']",
+    em_pthread: 1,
+  },
+  {
+    name: "edge",
+    em_environment: "web",
+    em_exported_runtime_methods: "['FS','ccall']",
+    em_pthread: 0,
   },
 ];
+// Optional filter: `VARIANT=edge node script/wasm_build.js k-p` builds only
+// the edge variant. Useful for iterating on a single target without redoing
+// the full sweep.
+const variantFilter = process.env.VARIANT
+  ? process.env.VARIANT.split(",").map((s) => s.trim())
+  : null;
+const variants = variantFilter
+  ? allVariants.filter((v) => variantFilter.includes(v.name))
+  : allVariants;
+if (variants.length === 0) {
+  console.error(
+    `[wasm_build] VARIANT filter '${process.env.VARIANT}' matched no variants. ` +
+      `Known: ${allVariants.map((v) => v.name).join(", ")}`,
+  );
+  process.exit(1);
+}
 
 (async () => {
 try {
@@ -354,7 +382,7 @@ export = ${pkgobj.exportname};
   // execSync with stdio:"inherit" forwards make's stdout/stderr to this
   // process directly so `docker run` callers see the full build log.
   console.log(`[wasm_build] starting ${variant.name} build for ${pkgobj.name} (${version}_${arch})`);
-  const cmd = `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`;
+  const cmd = `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" EM_PTHREAD=${variant.em_pthread} ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`;
   try {
     execSync(cmd, {
       cwd: fpath.join(cwd, "source"),
