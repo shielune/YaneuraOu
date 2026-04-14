@@ -294,22 +294,22 @@ export = ${pkgobj.exportname};
   }
   // make — parameterised per variant via EM_ENVIRONMENT /
   // EM_EXPORTED_RUNTIME_METHODS (source/Makefile reads both as `?=`
-  // variables in the em++ branch)
+  // variables in the em++ branch). pkgobj.extra contains shell-quoted
+  // segments (`EXTRA_CPPFLAGS='-DENGINE_OPTIONS="…"'`) so we keep it as a
+  // single shell command string and let the shell parse the quoting.
+  // execSync with stdio:"inherit" forwards make's stdout/stderr to this
+  // process directly so `docker run` callers see the full build log.
   console.log(`[wasm_build] starting ${variant.name} build for ${pkgobj.name} (${version}_${arch})`);
-  await new Promise((resolve, reject) => {
-    const child = exec(
-      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`,
-      { cwd: fpath.join(cwd, "source"), maxBuffer: 64 * 1024 * 1024 },
-      (error) => {
-        if (error) {
-          console.error(`[wasm_build] make failed for ${variant.name}: ${error.message}`);
-        }
-        resolve();
-      },
-    );
-    child.stdout.on("data", (data) => { console.log(String(data).trimEnd()); });
-    child.stderr.on("data", (data) => { console.error(String(data).trimEnd()); });
-  });
+  const cmd = `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`;
+  try {
+    execSync(cmd, {
+      cwd: fpath.join(cwd, "source"),
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.error(`[wasm_build] make failed for ${variant.name}: ${err.message}`);
+    process.exit(1);
+  }
   console.log(`[wasm_build] finished ${variant.name} build for ${pkgobj.name}`);
   // compress, public copy
   for (const fext of ["js", "worker.js", "wasm"]) {
