@@ -20,6 +20,7 @@ YaneuraOu_backup*.lnk
 .*/
 !.github/
 !.claude/
+!.devcontainer/
 .claude/settings.local.json
 *.nnue
 *.nnue.*
