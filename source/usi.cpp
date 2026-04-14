@@ -86,7 +86,7 @@ void mate_cmd(Position& pos, istream& is);
 
 // 定跡を作るコマンド
 #if defined (ENABLE_MAKEBOOK_CMD) && (defined(EVAL_LEARN) || defined(YANEURAOU_ENGINE_DEEP))
-namespace Book { void makebook_cmd(Position& pos, istringstream& is); }
+namespace Book { extern void makebook_cmd(Position& pos, istringstream& is); }
 #endif
 
 // ----------------------------------
@@ -109,10 +109,10 @@ namespace Learner
 #endif
 
   // 読み筋と評価値のペア。Learner::search(),Learner::qsearch()が返す。
-  typedef std::pair<Value, std::vector<Move> > ValuePV;
+  typedef std::pair<Value, std::vector<Move> > ValueAndPV;
 
-  ValuePV qsearch(Position& pos);
-  ValuePV search(Position& pos, int depth_, size_t multiPV = 1 , u64 nodesLimit = 0 );
+  ValueAndPV qsearch(Position& pos);
+  ValueAndPV search(Position& pos, int depth_, size_t multiPV = 1 , u64 nodesLimit = 0 );
 
 }
 #endif
@@ -122,11 +122,11 @@ namespace Learner
 // ----------------------------------
 
 // "bench"コマンドは、"test"コマンド群とは別。常に呼び出せるようにしてある。
-void bench_cmd(Position& pos, istringstream& is);
+extern void bench_cmd(Position& pos, istringstream& is);
 
 
 // "gameover"コマンドに対するハンドラ
-#if defined(USE_GAMEOVER_HANDLER) || defined(YANEURAOU_ENGINE_DEEP)
+#if defined(USE_GAMEOVER_HANDLER)
 void gameover_handler(const string& cmd);
 #endif
 
@@ -144,6 +144,187 @@ namespace YaneuraouTheCluster
 }
 #endif
 #endif
+
+namespace USI
+{
+	// --------------------
+	//    読み筋の出力
+	// --------------------
+
+	// depth : iteration深さ
+	std::string pv(const Position& pos, Depth depth, Value alpha, Value beta)
+	{
+#if defined(YANEURAOU_ENGINE_DEEP)
+		// ふかうら王では、この関数呼び出さないからまるっと要らない。
+
+		return string();
+#else
+		std::stringstream ss;
+
+		TimePoint elapsed = Time.elapsed() + 1;
+#if defined(__EMSCRIPTEN__)
+		// yaneuraou.wasm
+		// Time.elapsed()が-1を返すことがある
+		// https://github.com/lichess-org/stockfish.wasm/issues/5
+		// https://github.com/lichess-org/stockfish.wasm/commit/4f591186650ab9729705dc01dec1b2d099cd5e29
+		elapsed = std::max(elapsed, TimePoint(1));
+#endif
+		const auto& rootMoves = pos.this_thread()->rootMoves;
+		size_t pvIdx = pos.this_thread()->pvIdx;
+		size_t multiPV = std::min((size_t)Options["MultiPV"], rootMoves.size());
+
+		uint64_t nodes_searched = Threads.nodes_searched();
+
+		// MultiPVでは上位N個の候補手と読み筋を出力する必要がある。
+		for (size_t i = 0; i < multiPV; ++i)
+		{
+			// この指し手のpvの更新が終わっているのか
+			bool updated = rootMoves[i].score != -VALUE_INFINITE;
+
+			if (depth == 1 && !updated && i > 0)
+				continue;
+
+			// 1より小さな探索depthで出力しない。
+			Depth d = updated ? depth : std::max(1, depth - 1);
+			Value v = updated ? rootMoves[i].score : rootMoves[i].previousScore;
+
+			// multi pv時、例えば3個目の候補手までしか評価が終わっていなくて(PVIdx==2)、このとき、
+			// 3,4,5個目にあるのは前回のiterationまでずっと評価されていなかった指し手であるような場合に、
+			// これらのpreviousScoreが-VALUE_INFINITE(未初期化状態)でありうる。
+			// (multi pv状態で"go infinite"～"stop"を繰り返すとこの現象が発生する。おそらく置換表にhitしまくる結果ではないかと思う。)
+			if (v == -VALUE_INFINITE)
+				v = VALUE_ZERO; // この場合でもとりあえず出力は行う。
+
+			//bool tb = TB::RootInTB && abs(v) < VALUE_MATE_IN_MAX_PLY;
+			//v = tb ? rootMoves[i].tbScore : v;
+
+			if (ss.rdbuf()->in_avail()) // 1行目でないなら連結のための改行を出力
+				ss << endl;
+
+			ss  << "info"
+				<< " depth "    << d
+				<< " seldepth " << rootMoves[i].selDepth
+#if defined(USE_PIECE_VALUE)
+				<< " score "    << USI::value(v)
+#endif
+				;
+
+			// これが現在探索中の指し手であるなら、それがlowerboundかupperboundかは表示させる
+			if (i == pvIdx)
+				ss << (v >= beta ? " lowerbound" : v <= alpha ? " upperbound" : "");
+
+			// 将棋所はmultipvに対応していないが、とりあえず出力はしておく。
+			if (multiPV > 1)
+				ss << " multipv " << (i + 1);
+
+			ss << " nodes " << nodes_searched
+			   << " nps "   << nodes_searched * 1000 / elapsed;
+
+			// 置換表使用率。経過時間が短いときは意味をなさないので出力しない。
+			if (elapsed > 1000)
+				ss << " hashfull " << TT.hashfull();
+
+			ss << " time " << elapsed
+			   << " pv";
+
+
+			// PV配列からPVを出力する。
+			// ※　USIの"info"で読み筋を出力するときは"pv"サブコマンドはサブコマンドの一番最後にしなければならない。
+
+			auto out_array_pv = [&]()
+			{
+				for (Move m : rootMoves[i].pv)
+					ss << " " << m;
+			};
+
+			// 置換表からPVをかき集めてきてPVを出力する。
+			auto out_tt_pv = [&]()
+			{
+				auto pos_ = const_cast<Position*>(&pos);
+				Move moves[MAX_PLY + 1];
+				StateInfo si[MAX_PLY];
+				int ply = 0;
+
+				while ( ply < MAX_PLY )
+				{
+					// 千日手はそこで終了。ただし初手はPVを出力。
+					// 千日手がベストのとき、置換表を更新していないので
+					// 置換表上はMOVE_NONEがベストの指し手になっている可能性があるので早めに検出する。
+					auto rep = pos.is_repetition(ply);
+					if (rep != REPETITION_NONE && ply >= 1)
+					{
+						// 千日手でPVを打ち切るときはその旨を表示
+						ss << " " << rep;
+						break;
+					}
+
+					Move m;
+
+					// MultiPVを考慮して初手は置換表からではなくrootMovesから取得
+					// rootMovesには宣言勝ちも含まれるので注意。
+					if (ply == 0)
+						m = rootMoves[i].pv[0];
+					else
+					{
+						// 次の手を置換表から拾う。
+						// ただし置換表を破壊されるとbenchコマンドの時にシングルスレッドなのに探索内容の同一性が保証されなくて
+						// 困るのでread_probe()を用いる。
+						bool found;
+						auto* tte = TT.read_probe(pos.state()->hash_key(), found);
+
+						// 置換表になかった
+						if (!found)
+							break;
+
+						m = pos.to_move(tte->move());
+
+						// 置換表にはpsudo_legalではない指し手が含まれるのでそれを弾く。
+						// 宣言勝ちでないならこれが合法手であるかのチェックが必要。
+						if (m != MOVE_WIN)
+						{
+							// 歩の不成が読み筋に含まれていようともそれは表示できなくてはならないので
+							// pseudo_legal_s<true>()を用いて判定。
+							if (!(pos.pseudo_legal_s<true>(m) && pos.legal(m)))
+								break;
+						}
+					}
+
+#if defined (USE_ENTERING_KING_WIN)
+					// 宣言勝ちである
+					if (m == MOVE_WIN)
+					{
+						// これが合法手であるなら宣言勝ちであると出力。
+						if (pos.DeclarationWin() != MOVE_NONE)
+							ss << " " << MOVE_WIN;
+
+						break;
+					}
+#endif
+
+					moves[ply] = m;
+					ss << " " << m;
+
+					pos_->do_move(m, si[ply]);
+					++ply;
+				}
+				while (ply > 0)
+					pos_->undo_move(moves[--ply]);
+			};
+
+			// 検討用のPVを出力するモードなら、置換表からPVをかき集める。
+			// (そうしないとMultiPV時にPVが欠損することがあるようだ)
+			// fail-highのときにもPVを更新しているのが問題ではなさそう。
+			// Stockfish側の何らかのバグかも。
+			if (Search::Limits.consideration_mode)
+				out_tt_pv();
+			else
+				out_array_pv();
+		}
+
+		return ss.str();
+#endif // defined(YANEURAOU_ENGINE_DEEP)
+	}
+}
 
 // --------------------
 // USI関係のコマンド処理
@@ -338,11 +519,11 @@ void position_cmd(Position& pos, istringstream& is , StateListPtr& states)
 	std::vector<Move> moves_from_game_root;
 
 	// 指し手のリストをパースする(あるなら)
-	while (is >> token && (m = USI::to_move(pos, token)) != Move::none())
+	while (is >> token && (m = USI::to_move(pos, token)) != MOVE_NONE)
 	{
 		// 1手進めるごとにStateInfoが積まれていく。これは千日手の検出のために必要。
 		states->emplace_back();
-		if (m == Move::null()) // do_move に MOVE_NULL を与えると死ぬので
+		if (m == MOVE_NULL) // do_move に MOVE_NULL を与えると死ぬので
 			pos.do_null_move(states->back());
 		else
 			pos.do_move(m, states->back());
@@ -406,8 +587,6 @@ void getoption_cmd(istringstream& is)
 		sync_cout << "No such option: " << name << sync_endl;
 }
 
-// Called when the engine receives the "go" UCI command. The function sets the
-// thinking time and other parameters from the input string then stars with a search
 
 // go()は、思考エンジンがUSIコマンドの"go"を受け取ったときに呼び出される。
 // この関数は、入力文字列から思考時間とその他のパラメーターをセットし、探索を開始する。
@@ -449,8 +628,6 @@ void go_cmd(const Position& pos, istringstream& is , StateListPtr& states , bool
 	int max_game_ply = 0;
 	if (Options.count("MaxMovesToDraw"))
 		max_game_ply = (int)Options["MaxMovesToDraw"];
-
-	// これ0の時、何らか設定しておかないと探索部でこの手数を超えた時に引き分け扱いにしてしまうので、無限大みたいな定数の設定が必要。
 	limits.max_game_ply = (max_game_ply == 0) ? 100000 : max_game_ply;
 
 #if defined (USE_ENTERING_KING_WIN)
@@ -523,6 +700,20 @@ void go_cmd(const Position& pos, istringstream& is , StateListPtr& states , bool
 				limits.mate = stoi(token);
 		}
 
+#if defined(TANUKI_MATE_ENGINE)
+		// MateEngineのデバッグ用コマンド: 詰将棋の特定の変化に対する解析を効率的に行うことが出来る。
+		//	cf.https ://github.com/yaneurao/YaneuraOu/pull/115
+
+		else if (token == "matedebug") {
+			string token="";
+			Move16 m;
+			limits.pv_check.clear();
+			while (is >> token && (m = USI::to_move16(token)) != MOVE_NONE){
+				limits.pv_check.push_back(m);
+			}
+		}
+#endif
+
 		// パフォーマンステスト(Stockfishにある、合法手N手で到達できる局面を求めるやつ)
 		// このあとposition～goコマンドを使うとパフォーマンステストモードに突入し、ここで設定した手数で到達できる局面数を求める
 		else if (token == "perft")		is >> limits.perft;
@@ -546,27 +737,6 @@ void go_cmd(const Position& pos, istringstream& is , StateListPtr& states , bool
 				main_thread->position_is_dirty = true;
 			}
 		}
-
-		// --- やねうら王独自拡張
-
-		// "wait_stop"指定。
-		else if (token == "wait_stop")
-			limits.wait_stop = true;
-
-#if defined(TANUKI_MATE_ENGINE)
-		// MateEngineのデバッグ用コマンド: 詰将棋の特定の変化に対する解析を効率的に行うことが出来る。
-		//	cf.https ://github.com/yaneurao/YaneuraOu/pull/115
-
-		else if (token == "matedebug") {
-			string token="";
-			Move16 m;
-			limits.pv_check.clear();
-			while (is >> token && (m = USI::to_move16(token)).to_u16() != MOVE_NONE){
-				limits.pv_check.push_back(m);
-			}
-		}
-#endif
-
 	}
 
 	// goコマンド、デバッグ時に使うが、そのときに"go btime XXX wtime XXX byoyomi XXX"と毎回入力するのが面倒なので
@@ -678,12 +848,10 @@ void usi_cmdexec(Position& pos, StateListPtr& states, string& cmd)
 			// gameoverに対してbestmoveは返すべきではないのかも知れないが、
 			// それを言えばstopにだって…。
 
-#if defined(USE_GAMEOVER_HANDLER) || defined(YANEURAOU_ENGINE_DEEP)
-
+#if defined(USE_GAMEOVER_HANDLER)
+			// "gameover"コマンドに対するハンドラを呼び出したいのか？
 			if (token == "gameover")
-				// "gameover"コマンドに対するハンドラを呼び出したいのか？
 				gameover_handler(cmd);
-
 #endif
 
 			// "go infinite" , "go ponder"などで思考を終えて寝てるかも知れないが、
@@ -780,7 +948,6 @@ void usi_cmdexec(Position& pos, StateListPtr& states, string& cmd)
 				filename += ".txt";
 				sync_cout << "USI Commands from File = " << filename << sync_endl;
 				vector<string> lines;
-
 				SystemIO::ReadAllLines(filename, lines);
 				for (auto& line : lines)
 					std_input.push(line);
@@ -823,7 +990,7 @@ void usi_cmdexec(Position& pos, StateListPtr& states, string& cmd)
 		// この局面での指し手をすべて出力
 		else if (token == "moves") {
 			for (auto m : MoveList<LEGAL_ALL>(pos))
-				cout << Move(m) << ' ';
+				cout << m.move << ' ';
 			cout << endl;
 		}
 
@@ -967,53 +1134,30 @@ namespace {
 }
 
 #if defined(USE_PIECE_VALUE)
-/// Turns a Value to an integer centipawn number,
-/// without treatment of mate and similar special scores.
-// 詰みやそれに類似した特別なスコアの処理なしに、Valueを整数のセントポーン数に変換します、
-int USI::to_cp(Value v) {
-
-  return 100 * v / USI::NormalizeToPawnValue;
-}
-
-// cpからValueへ。⇑の逆変換。
-Value USI::cp_to_value(int v)
-{
-	return Value((std::abs(v) < VALUE_MATE_IN_MAX_PLY) ? (USI::NormalizeToPawnValue * v / 100) : v);
-}
-
 // スコアを歩の価値を100として正規化して出力する。
 // USE_PIECE_VALUEが定義されていない時は正規化しようがないのでこの関数は呼び出せない。
 std::string USI::value(Value v)
 {
 	ASSERT_LV3(-VALUE_INFINITE < v && v < VALUE_INFINITE);
 
-	std::stringstream ss;
+	std::stringstream s;
 
 	// 置換表上、値が確定していないことがある。
 	if (v == VALUE_NONE)
-		ss << "none";
-	else if (std::abs(v) < VALUE_MATE_IN_MAX_PLY)
-		//s << "cp " << v * 100 / int(Eval::PawnValue);
-		ss << "cp " << USI::to_cp(v);
-	/*
-    else if (abs(v) <= VALUE_TB)
-    {
-        const int ply = VALUE_TB - std::abs(v);  // recompute ss->ply
-        ss << "cp " << (v > 0 ? 20000 - ply : -20000 + ply);
-    }
-	*/
+		s << "none";
+	else if (abs(v) < VALUE_MATE_IN_MAX_PLY)
+		s << "cp " << v * 100 / int(Eval::PawnValue);
 	else if (v == -VALUE_MATE)
 		// USIプロトコルでは、手数がわからないときには "mate -"と出力するらしい。
 		// 手数がわからないというか詰んでいるのだが…。これを出力する方法がUSIプロトコルで定められていない。
 		// ここでは"-0"を出力しておく。
 		// ※　ShogiGUIだと、これで"+詰"と出力されるようである。
-		ss << "mate -0";
+		s << "mate -0";
 	else
-		ss << "mate " << (v > 0 ? VALUE_MATE - v : -VALUE_MATE - v);
+		s << "mate " << (v > 0 ? VALUE_MATE - v : -VALUE_MATE - v);
 
-	return ss.str();
+	return s.str();
 }
-
 #endif
 
 // Square型をUSI文字列に変換する
@@ -1022,28 +1166,28 @@ std::string USI::square(Square s) {
 }
 
 // 指し手をUSI文字列に変換する。
-std::string USI::move(Move   m) { return move(m.to_move16()); }
+std::string USI::move(Move   m) { return move(Move16(m)); }
 std::string USI::move(Move16 m)
 {
 	std::stringstream ss;
-	if (!m.is_ok())
+	if (!is_ok(m))
 	{
-		ss << ((m.to_u16() == MOVE_RESIGN) ? "resign" :
-			   (m.to_u16() == MOVE_WIN)    ? "win" :
-			   (m.to_u16() == MOVE_NULL)   ? "null" :
-			   (m.to_u16() == MOVE_NONE)   ? "none" :
+		ss << ((m == MOVE_RESIGN) ? "resign" :
+			   (m == MOVE_WIN)    ? "win" :
+			   (m == MOVE_NULL)   ? "null" :
+			   (m == MOVE_NONE)   ? "none" :
 			    "");
 	}
-	else if (m.is_drop())
+	else if (is_drop(m))
 	{
-		ss << m.move_dropped_piece();
+		ss << move_dropped_piece(m);
 		ss << '*';
-		ss << m.to_sq();
+		ss << to_sq(m);
 	}
 	else {
-		ss << m.from_sq();
-		ss << m.to_sq();
-		if (m.is_promote())
+		ss << from_sq(m);
+		ss << to_sq(m);
+		if (is_promote(m))
 			ss << '+';
 	}
 	return ss.str();
@@ -1073,14 +1217,14 @@ Move USI::to_move(const Position& pos, const std::string& str)
 	// ↑のコードは大変美しいコードではあるが、棋譜を大量に読み込むときに時間がかかるうるのでもっと高速な実装をする。
 
 	if (str == "resign")
-		return Move::resign();
+		return MOVE_RESIGN;
 
 	if (str == "win")
-		return Move::win();
+		return MOVE_WIN;
 
 	// パス(null move)入力への対応 {UCI: "0000", GPSfish: "pass"}
 	if (str == "0000" || str == "null" || str == "pass")
-		return Move::null();
+		return MOVE_NULL;
 
 	// usi文字列を高速にmoveに変換するやつがいるがな..
 	Move move = pos.to_move(USI::to_move16(str));
@@ -1093,7 +1237,7 @@ Move USI::to_move(const Position& pos, const std::string& str)
 	// 入力に非合法手が含まれていた。エラーとして出力すべき。
 	sync_cout << "info string Error! : Illegal Input Move : " << str << sync_endl;
 
-	return Move::none();
+	return MOVE_NONE;
 }
 
 
@@ -1102,7 +1246,7 @@ Move USI::to_move(const Position& pos, const std::string& str)
 // やねうら王、独自追加。
 Move16 USI::to_move16(const string& str)
 {
-	Move16 move = Move16::none();
+	Move16 move = MOVE_NONE;
 
 	{
 		// さすがに3文字以下の指し手はおかしいだろ。
@@ -1177,7 +1321,7 @@ void USI::UnitTest(Test::UnitTester& tester)
 			while (is >> token)
 			{
 				Move m = USI::to_move(pos,token);
-				if (m == Move::none())
+				if (m == MOVE_NONE)
 					fail = true;
 
 				pos.do_move(m, si[pos.game_ply()]);

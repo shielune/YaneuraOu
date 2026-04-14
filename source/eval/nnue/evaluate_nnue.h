@@ -10,11 +10,10 @@
 
 #include "nnue_feature_transformer.h"
 #include "nnue_architecture.h"
-//#include "../../misc.h"
-#include "../../memory.h"
+#include "../../misc.h"
 
-// 評価関数のソースコードへの埋め込みをする時は、EVAL_EMBEDDINGをdefineして、
-// ⇓この2つのシンボルを正しく定義するembedded_nnue.cppを書けば良い。
+#include <memory>
+
 #if defined(EVAL_EMBEDDING)
 	extern const char*  gEmbeddedNNUEData;
 	extern const size_t gEmbeddedNNUESize;
@@ -30,8 +29,27 @@ namespace Eval::NNUE {
 	constexpr std::uint32_t kHashValue =
 	    FeatureTransformer::GetHashValue() ^ Network::GetHashValue();
 
+	// Deleter for automating release of memory area
+	// メモリ領域の解放を自動化するためのデリータ
+	template <typename T>
+	struct LargeMemoryDeleter {
+
+	    void operator()(T* ptr) const {
+
+	        // Tクラスのデストラクタ
+	        ptr->~T();
+
+			// このメモリはLargeMemoryクラスを利用して確保したものなので、
+			// このクラスのfree()を呼び出して開放する。
+	        LargeMemory::static_free(ptr);
+	    }
+	};
+
+	template <typename T>
+	using AlignedPtr = std::unique_ptr<T, LargeMemoryDeleter<T>>;
+
 	// 入力特徴量変換器
-	extern LargePagePtr<FeatureTransformer> feature_transformer;
+	extern AlignedPtr<FeatureTransformer> feature_transformer;
 
 	// 評価関数
 	extern AlignedPtr<Network> network;
@@ -43,7 +61,7 @@ namespace Eval::NNUE {
 	std::string GetArchitectureString();
 
 	// ヘッダを読み込む
-	Tools::Result ReadHeader(std::istream& stream,
+	bool ReadHeader(std::istream& stream,
 	    std::uint32_t* hash_value, std::string* architecture);
 
 	// ヘッダを書き込む
@@ -51,7 +69,7 @@ namespace Eval::NNUE {
 	    std::uint32_t hash_value, const std::string& architecture);
 
 	// 評価関数パラメータを読み込む
-	Tools::Result ReadParameters(std::istream& stream);
+	bool ReadParameters(std::istream& stream);
 
 	// 評価関数パラメータを書き込む
 	bool WriteParameters(std::ostream& stream);

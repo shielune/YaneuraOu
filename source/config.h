@@ -1,20 +1,15 @@
 ﻿#ifndef _CONFIG_H_INCLUDED
 #define _CONFIG_H_INCLUDED
 
-// ============================================================
 //
 //  やねうら王プロジェクト
 //  公式サイト :  http://yaneuraou.yaneu.com/yaneuraou_mini/
 //
-// ============================================================
 
 // 思考エンジンのバージョンとしてUSIプロトコルの"usi"コマンドに応答するときの文字列。
 // ただし、この値を数値として使用することがあるので数値化できる文字列にしておく必要がある。
-#if !defined(ENGINE_VERSION)
+#define ENGINE_VERSION "7.61"
 
-#define ENGINE_VERSION "8.50git"
-
-#endif
 // --------------------
 //  思考エンジンの種類
 // --------------------
@@ -186,9 +181,6 @@
 // ";"で区切って複数指定できる。
 // #define ENGINE_OPTIONS "FV_SCALE=24;BookFile=no_book"
 
-// NNUE評価関数で、推論時のオーバーフローを防ぐ。
-// これオンにすると0.5%ぐらいnpsが低下する。オフで運用できるならオフでいいと思う。
-// #define NNUE_FIX_OVERFLOW
 
 // ---------------------
 //  置換表絡みの設定
@@ -216,9 +208,12 @@
 // ---------------------
 
 // 評価関数を教師局面から学習させるときに使うときのモード
-// "learn"コマンドが使えるようになる。(教師局面からの評価関数パラメーターの学習ができるようになる。)
-// "gensfen"コマンドも使えるようになる。(教師局面の生成もできるようになる。)
 //#define EVAL_LEARN
+
+
+// 教師生成用の特殊コマンド"gensfen2019"を使えるようにするモード。
+// 教師生成用の探索パラメーターも別途用意するといいかも。
+//#define GENSFEN2019
 
 
 // sfenを256bitにpackする機能、unpackする機能を有効にする。
@@ -273,9 +268,8 @@
 // #define FOR_TOURNAMENT
 
 // sortが少し高速化されるらしい。
-// 注意)
-//  安定ソートではないので並び順が以前のとは異なるから、benchコマンドの探索ノード数は変わる。
-//  CPU targetによって実装が変わるのでCPUによってbenchコマンドの探索ノード数は変わる。
+// 安定ソートではないので並び順が以前のとは異なるから、benchコマンドの探索ノード数は変わる。
+// CPU targetによって実装が変わるのでCPUによってbenchコマンドの探索ノード数は変わる。
 // #define USE_SUPER_SORT
 
 
@@ -291,9 +285,6 @@
 // ふかうら王でTensorRTを使う時はこちら。
 //#define TENSOR_RT
 
-// ふかうら王でCore MLを使う時はこちら。
-// ※　Mac専用。
-//#define COREML
 
 // ---------------------
 // 探索パラメーターの自動調整用
@@ -301,7 +292,7 @@
 
 
 // 探索パラメーターのチューニングを行うモード
-// ※　使い方は、やねうら王Wiki の 「探索パラメーターのチューニングについて」をご覧ください。
+// ※　使い方は、"docs/解説.txt" の 「探索パラメーターのチューニングについて」をご覧ください。
 //
 // 実行時に"param/yaneuraou-param.h" からパラメーターファイルを読み込むので
 // "source/engine/yaneuraou-engine/yaneuraou-param.h"をそこに配置すること。
@@ -351,14 +342,15 @@
 // 長い利き(遠方駒の利き)のライブラリを用いるか。
 // 超高速1手詰め判定などではこのライブラリが必要。
 // do_move()のときに利きの差分更新を行なうので、do_move()は少し遅くなる。(その代わり、利きが使えるようになる)
-// #define LONG_EFFECT_LIBRARY
+//#define LONG_EFFECT_LIBRARY
 
 
 // position.hのStateInfoに直前の指し手、移動させた駒などの情報を保存しておくのか
 // これが保存されていると詰将棋ルーチンなどを自作する場合においてそこまでの手順を表示するのが簡単になる。
 // (Position::moves_from_start_pretty()などにより、わかりやすい手順が得られる。
 // ただし通常探索においてはやや遅くなるので思考エンジンとしてリリースするときには無効にしておくこと。
-// #define KEEP_LAST_MOVE
+
+//#define KEEP_LAST_MOVE
 
 
 // GlobalOptionという、EVAL_HASHを有効/無効を切り替えたり、置換表の有効/無効を切り替えたりする
@@ -372,7 +364,7 @@
 
 // "Threads"オプション が 8以下の設定の時でも強制的に bindThisThread()を呼び出して、指定されたNUMAで動作するようにする。
 // "ThreadIdOffset"オプションと併用して、狙ったNUMAで動作することを強制することができる。
-// #define FORCE_BIND_THIS_THREAD
+//#define FORCE_BIND_THIS_THREAD
 
 
 // PVの出力時の千日手に関する出力をすべて"rep_draw"に変更するオプション。
@@ -383,28 +375,6 @@
 // ニコニコ生放送の電王盤用
 // 電王盤はMultiPV非対応なので定跡を送るとき、"multipv"をつけずに1番目の候補手を送信する必要がある。
 // #define NICONICO
-
-
-// Pawn Historyの有効化。これ、計測したら少し弱くなっていたのでデフォルトでは無効化しておくことにした。
-//  ⇨　計測資料 V7.74k1 , V7.74k2
-// #define ENABLE_PAWN_HISTORY
-
-// 千日手検出を簡略化する
-// (これをオフにするとR5～10程度弱くなるが、これをオンにすると優等局面で評価値31111が出力されたりするので、
-// 検討目的なら、これをオンにするのは好ましくない。)
-// #define ENABLE_QUICK_DRAW
-
-// 差分計算型の評価関数を用いるのか？
-// ※ 次の子nodeに行くときに必ずevaluate()を呼び出さないといけないタイプの評価関数。
-// #define USE_DIFF_EVAL
-
-// PolicyBookを使うのか？
-// TODO : ⇨ PolicyBookについて、記事を書く。
-// #define USE_POLICY_BOOK
-
-// PolicyBookの局後学習を有効化するのか？
-// TODO : ⇨ PolicyBookの局後学習について、記事を書く。
-// #define ENABLE_POLICY_BOOK_LEARN
 
 // ===============================================================
 // ここ以降では、↑↑↑で設定した内容に基づき必要なdefineを行う。
@@ -449,10 +419,6 @@ constexpr int MAX_PLY_NUM = 246;
 		#define USE_SHARED_MEMORY_IN_EVAL
 	#endif
 
-	#if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE)
-		#define USE_DIFF_EVAL
-	#endif
-
 	// 学習機能を有効にするオプション。
 	// 教師局面の生成、定跡コマンド(makebook thinkなど)を用いる時には、これを
 	// 有効化してコンパイルしなければならない。
@@ -469,6 +435,8 @@ constexpr int MAX_PLY_NUM = 246;
 	// 定跡生成絡み
 	#define ENABLE_MAKEBOOK_CMD
 
+	// パラメーターの自動調整絡み
+	#define USE_GAMEOVER_HANDLER
 	//#define LONG_EFFECT_LIBRARY
 
 	// GlobalOptionsは有効にしておく。
@@ -500,7 +468,6 @@ constexpr int MAX_PLY_NUM = 246;
 
 	#if defined(YANEURAOU_ENGINE_NNUE)
 		#define EVAL_NNUE
-		#define NNUE_FIX_OVERFLOW
 
 		// 学習のためにOpenBLASを使う
 		// "../openblas/lib/libopenblas.dll.a"をlibとして追加すること。
@@ -596,10 +563,6 @@ constexpr int MAX_PLY_NUM = 246;
 	#undef ENABLE_TEST_CMD
 	#undef USE_GLOBAL_OPTIONS
 	#undef KEEP_LAST_MOVE
-	#undef NNUE_FIX_OVERFLOW
-
-	// 千日手検出を簡略化する
-	#define ENABLE_QUICK_DRAW
 #endif
 
 // --------------------
@@ -610,13 +573,6 @@ constexpr int MAX_PLY_NUM = 246;
 // 正しく計算できない。そのため、EVAL_HASHを動的に無効化するためのオプションを用意する。
 #if defined(EVAL_LEARN)
 	#define USE_GLOBAL_OPTIONS
-#endif
-
-// パラメーター自動調整を行う時は、結果をファイルに書き出す必要があるので
-// USIの"gameover"に対してそれに対して応答するハンドラを設定してやる必要がある。
-
-#if defined(TUNING_SEARCH_PARAMETERS) && !defined(USE_GAMEOVER_HANDLER)
-	#define USE_GAMEOVER_HANDLER
 #endif
 
 // --------------------
@@ -677,9 +633,6 @@ extern GlobalOptions_ GlobalOptions;
 #define ASSERT_LV4(X) ASSERT_LV_EX(4, X)
 #define ASSERT_LV5(X) ASSERT_LV_EX(5, X)
 
-// memoryがalignされているかのassert
-#define ASSERT_ALIGNED(ptr, alignment) assert(reinterpret_cast<uintptr_t>(ptr) % alignment == 0)
-
 // --- declaration of unreachablity
 
 // switchにおいてdefaultに到達しないことを明示して高速化させる
@@ -714,20 +667,12 @@ constexpr bool pretty_jp = true;
 constexpr bool pretty_jp = false;
 #endif
 
-// --- PolicyBook
-
-// PolicyBookを使うときは、hash keyを128bitにする。局面のhash keyが衝突してしまうとまずいので…。
-#if defined(USE_POLICY_BOOK)
-#define HASH_KEY_BITS 128
-#endif
 
 // --- hash key bits and TT_CLUSTER_SIZE
 
 #if !defined(HASH_KEY_BITS)
 #define HASH_KEY_BITS 64
 #endif
-
-// ここ、typedef ではなく usingで書きたいが、現時点でKey64が未定義なので…。
 
 #if HASH_KEY_BITS <= 64
 #define HASH_KEY Key64
@@ -741,13 +686,6 @@ constexpr bool pretty_jp = false;
 #define TT_CLUSTER_SIZE 3
 #endif
 
-
-// --- gensfen
-
-// LEARN版では"gensfen"コマンドが使えるようになる。
-#if defined(EVAL_LEARN)
-#define GENSFEN2019
-#endif
 
 // --- lastMove
 
@@ -875,6 +813,8 @@ constexpr bool pretty_jp = false;
 			#define EVAL_TYPE_NAME "ORT_CPU-" << EVAL_DEEP
 		#elif defined(ORT_DML)
 			#define EVAL_TYPE_NAME "ORT_DML-" << EVAL_DEEP
+		#elif defined(ORT_MKL)
+			#define EVAL_TYPE_NAME "ORT_MKL-" << EVAL_DEEP
 		#elif defined(ORT_TRT)
 			#define EVAL_TYPE_NAME "ORT_TRT-" << EVAL_DEEP
 		#else
@@ -883,8 +823,6 @@ constexpr bool pretty_jp = false;
 	#elif defined(TENSOR_RT)
 		#include "NvInferRuntimeCommon.h"
 		#define EVAL_TYPE_NAME "TensorRT" << std::to_string(getInferLibVersion()) << "-" << EVAL_DEEP
-	#elif defined(COREML)
-		#define EVAL_TYPE_NAME "CoreML-" << EVAL_DEEP
 	#endif
 
 #else
@@ -905,4 +843,5 @@ constexpr bool pretty_jp = false;
 #define ADD_BOARD_EFFECT_REWIND(color_,sq_,e1_) { board_effect[color_].e[sq_] += (uint8_t)e1_; }
 #define ADD_BOARD_EFFECT_BOTH_REWIND(color_,sq_,e1_,e2_) { board_effect[color_].e[sq_] += (uint8_t)e1_; board_effect[~color_].e[sq_] += (uint8_t)e2_; }
 
-#endif // if !defined(CONFIG_H_INCLUDED)
+#endif // ifndef _CONFIG_H_INCLUDED
+

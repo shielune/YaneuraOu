@@ -55,14 +55,11 @@ namespace dlshogi::UctPrint
 		// moveを指した時に遷移するNode
 		Node* node;
 
-		// その訪問回数
-		NodeCountType move_count;
-
-		BestMove() : move(Move::none()), wp(0), node(nullptr), move_count(0){}
-		BestMove(Move move_,WinType wp_,Node* node_, NodeCountType move_count) :move(move_), wp(wp_) , node(node_) , move_count(move_count) {}
+		BestMove() : move(MOVE_NONE), wp(0), node(nullptr){}
+		BestMove(Move move_,WinType wp_,Node* node_) :move(move_), wp(wp_) , node(node_) {}
 	};
 
-	BestMovePonder::BestMovePonder() : move(Move::none()), wp(0), ponder(Move::none()) {}
+	BestMovePonder::BestMovePonder() : move(MOVE_NONE), wp(0), ponder(MOVE_NONE) {}
 
 
 	// あるnodeの子ノードのbestなやつを選択する。
@@ -86,7 +83,7 @@ namespace dlshogi::UctPrint
 	}
 
 	// あるnodeの子ノードのbestのやつの指し手を返す。
-	// 詰みの局面ならMove::none()が返る。
+	// 詰みの局面ならMOVE_NONEが返る。
 	std::vector<BestMove> select_best_moves(const Node* node , ChildNumType multiPv)
 	{
 		std::vector<BestMove> bests;
@@ -118,10 +115,11 @@ namespace dlshogi::UctPrint
 
 			// 期待勝率
 			float wp = child->move_count ? (float)(child->win / child->move_count) : /* 未訪問なのでわからん… */0.5f;
-			bests.push_back(BestMove(child->move, wp , next_node , child->move_count));
+			bests.push_back(BestMove(child->move, wp , next_node ));
 		}
 		return bests;
 	}
+
 
 	// あるノード以降のPV(最善応手列)を取得する。
 	void  get_pv(Node* node , std::vector<Move>& moves)
@@ -136,7 +134,7 @@ namespace dlshogi::UctPrint
 			if (best_child == -1)
 				break;
 
-			moves.push_back(node->child[best_child].getMove());
+			moves.push_back(node->child[best_child].move);
 			if (!node->child)
 				break;
 
@@ -156,23 +154,11 @@ namespace dlshogi::UctPrint
 		// 勝率を[centi-pawn]に変換
 		int cp = Eval::dlshogi::value_to_cp((float)best.wp,eval_coef);
 
-		ss << "info";
-		if (multipv == 1) // multipv = 1のときはpvと同時に出力。
-			ss << nps;
+		ss << "info" << nps;
 
 		// MultiPVが2以上でないなら、"multipv .."は出力しないようにする。(MultiPV非対応なGUIかも知れないので)
 		if (multipv > 1)
-			ss << " multipv " << (multipv_num + 1) << " nodes " << best.move_count;
-			/*
-				multipvのとき、nodesとして各指し手の訪問回数を出力する。
-				これは、定跡生成の時や、評価関数モデルの精度を知る上で重要な情報である。
-
-				ここで出力しているのはvisit(このnodeの訪問回数で、今回より前のgoの分も含む)から、
-				全体のnodesより大きな値を出力することもある。
-
-				そこでGUI側では、multipvのnodesは一応保存しておき、multipvのついていないinfoコマンドによるnodesを
-				受け取ったなら、以降はそちらを優先して表示するというようなロジックが必要になる。
-			*/
+			ss << " multipv " << (multipv_num + 1);
 
 		ss << " depth " << moves.size() << " score cp " << cp;
 		
@@ -183,9 +169,6 @@ namespace dlshogi::UctPrint
 			for (auto m : moves)
 				ss << ' ' << to_usi_string(m);
 		}
-
-		if (multipv > 1 && multipv == multipv_num + 1) // multipv時の最後の出力なのでnode数等の出力をここにつなげてやる。
-			ss << std::endl << "info" << nps;
 
 		return ss.str();
 	}
@@ -201,61 +184,16 @@ namespace dlshogi::UctPrint
 		std::stringstream nps;
 		nps << " nps "      << (po_info.nodes_searched * 1000LL / (u64)finish_time)
 			<< " time "     <<  finish_time
-			<< " hashfull " << (po_info.current_root->move_count * 1000LL / options.uct_node_limit)
-			<< " nodes "    <<  po_info.nodes_searched;
-
-#if 0
-		if (rootNode->mate_ply > 0)
-		{
-			// 詰みを見つけているのでそれを出力する。
-			const ChildNode* uct_child = rootNode->child.get();
-			Move move = Move::none();
-			int ply = rootNode->mate_ply;
-			// 何手で詰むかわからないので最大手数で初期化。
-			if (ply == 0)
-				ply = INT_MAX;
-
-			for (size_t i = 0; i < rootNode->child_num; ++i)
-				if (uct_child[i].IsLose())
-				{
-					// 手数がいまのplyより小さいか？を調べる。
-					// 次のNodeが存在するかのチェックがまず必要。
-					if (rootNode->child_nodes.get() && rootNode->child_nodes[i])
-					{
-						int mated_ply = rootNode->child_nodes[i]->mate_ply;
-						if (mated_ply)
-						{
-							int mate_ply = 1 - mated_ply; // -2(2手で詰まされる) なら3手詰めなので。
-							if (mate_ply < ply)
-							{
-								ply = mate_ply;
-								move = uct_child[i].getMove();
-							}
-						}
-					}
-
-					// 子に情報がなかったので何手で詰むかはわからん。
-					// とりあえず、いま詰みの指し手がわかってなかったらこれを採用する。
-					if (!move)
-						move = uct_child[i].getMove();
-				}
-
-			// 即詰みなのでponderの指し手わからん。いらんやろ。
-			nps << " pv " << to_usi_string(move);
-			if (!silent)
-				sync_cout << "info score mate " << ply << nps.str() << sync_endl;
-			
-			return BestMovePonder(move, 1.0, Move::none());
-		}
-#endif
-
+			<< " nodes "    <<  po_info.nodes_searched
+			<< " hashfull " << (po_info.current_root->move_count * 1000LL / options.uct_node_limit);
+		
 		// MultiPVであれば、現在のnodeで複数の候補手を表示する。
 
 		auto bests = select_best_moves(rootNode , multiPv);
 		if (bests.size() == 0)
 			return BestMovePonder();
 
-		Move ponder = Move::none();
+		Move ponder = MOVE_NONE;
 		for(ChildNumType i = 0; i < (ChildNumType)bests.size() ; ++i)
 		{
 			auto best = bests[i];
