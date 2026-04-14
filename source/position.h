@@ -63,7 +63,7 @@ struct StateInfo {
 #if defined(ENABLE_PAWN_HISTORY)
 	// 歩の陣形に対するhash key
 	HASH_KEY pawnKey_;
-	Key pawn_key()                const { return hash_key_to_key(pawn_hash_key()) >> 1;  }
+	Key      pawn_key()           const { return hash_key_to_key(pawn_hash_key()) >> 1;  }
 	HASH_KEY pawn_hash_key()      const { return pawnKey_;               }
 #endif
 
@@ -103,8 +103,22 @@ struct StateInfo {
 	// 自駒の駒種Xによって敵玉が王手となる升のbitboard
 	Bitboard checkSquares[PIECE_TYPE_NB];
 
-//  循環局面の何回目であるか  
-//	int        repetition;
+#if !defined(ENABLE_QUICK_DRAW)
+	//  循環局面であることを示す。
+	//   0    = 循環なし
+	//   ply  = ply前の局面と同じ局面であることを表す。(ply > 0) 3回目までの繰り返し。
+	//  -ply  = ply前の局面と同じ局面であることを示す。4回目の繰り返しに到達していることを示す。
+	int repetition;
+
+	// ※　以下の2つはやねうら王独自拡張。
+
+	//  繰り返された回数 - 1。
+	//  ※ repetition != 0の時に意味をなす。
+	int repetition_times;
+
+	//  その時の繰り返しの種類
+	RepetitionState repetition_type;
+#endif
 
 	// この手番側の連続王手は何手前からやっているのか(連続王手の千日手の検出のときに必要)
 	int continuousCheck[COLOR_NB];
@@ -171,9 +185,17 @@ using StateListPtr = std::unique_ptr<StateList>;
 //       盤面
 // --------------------
 
+#if defined(USE_SFEN_PACKER)
+
 // packされたsfen
 struct PackedSfen {
 	u8 data[32];
+
+	// 手番を返す。
+	Color color() const {
+		// これは、data[0]のbit0に格納されていることは保証されている。
+		return Color(data[0] & 1);
+	}
 
 	// std::unordered_mapで使用できるように==と!=を定義しておく。
 
@@ -210,6 +232,7 @@ struct PackedSfenHash {
 		return s;
 	}
 };
+#endif
 
 // 盤面
 class Position
@@ -242,11 +265,11 @@ public:
 	const std::string sfen() const { return sfen(game_ply()); }
 	const std::string sfen(int gamePly) const;
 
-	// sfen()の先後反転(盤面を180度回転)させた時のsfenを返す。
+	// sfen()のflip(先後反転 = 盤面を180度回転)させた時のsfenを返す。
 	const std::string flipped_sfen() const { return flipped_sfen(game_ply()); }
 	const std::string flipped_sfen(int gamePly) const;
 
-	// sfen文字列を先後反転したsfen文字列に変換する。
+	// sfen文字列をflip(先後反転)したsfen文字列に変換する。
 	static const std::string sfen_to_flipped_sfen(std::string sfen);
 
 	// 平手の初期盤面を設定する。
@@ -266,6 +289,7 @@ public:
 	Thread* this_thread() const { return thisThread; }
 
 	// 盤面上の駒を返す。
+	// ※ sq == SQ_NBの時、NO_PIECEが返ることは保証されている。
 	Piece piece_on(Square sq) const { ASSERT_LV3(sq <= SQ_NB); return board[sq]; }
 
 	// ある升に駒がないならtrueを返す。
@@ -297,7 +321,7 @@ public:
 	// また、後手の駒打ちは後手の(その打つ)駒が返る。
 	Piece moved_piece_before(Move m) const
 	{
-		ASSERT_LV3(is_ok(m));
+		ASSERT_LV3(m.is_ok());
 #if defined( KEEP_PIECE_IN_GENERATE_MOVES)
 		// 上位16bitに格納されている値を利用する。
 		// return is_promote(m) ? (piece & ~PIECE_PROMOTE) : piece;
@@ -307,7 +331,7 @@ public:
 		return (Piece)((m ^ ((m & MOVE_PROMOTE) << 4)) >> 16);
 
 #else
-		return is_drop(m) ? make_piece(sideToMove , move_dropped_piece(m)) : piece_on(from_sq(m));
+		return m.is_drop() ? make_piece(sideToMove , m.move_dropped_piece()) : piece_on(m.from_sq());
 #endif
 	}
 
@@ -316,12 +340,10 @@ public:
 	// Moveの上位16bitにそれが格納されているので、単にそれを返しているだけ。
 	Piece moved_piece_after(Move m) const
 	{
-		// move pickerから MOVE_NONEに対してこの関数が呼び出されることがあるのでこのASSERTは書けない。
-		// MOVE_NONEに対しては、NO_PIECEからPIECE_NB未満のいずれかの値が返れば良い。
 		// ASSERT_LV3(is_ok(m));
+		// ⇨ MovePicker から Move::none()に対してこの関数が呼び出されることがあるのでこのASSERTは書けない。
 
-		// 上位16bitにそのまま格納されているはず。
-		return Piece(m >> 16);
+		return m.moved_after_piece();
 	}
 
 	// 定跡DBや置換表から取り出したMove16(16bit型の指し手)を32bit化する。
@@ -332,24 +354,38 @@ public:
 	// ※　mの移動元の駒が現在の手番の駒でなければ、MOVE_NONEが返ることは保証される。
 	// ※  mの移動元に駒がない場合も、MOVE_NONEが返ることは保証される。
 	Move to_move(Move16 m) const;
-	
+
+	// 1. ENABLE_QUICK_DRAWがdefineされている時
+	//		この関数は無視される。
+	//
+	// 2. ENABLE_QUICK_DRAWがdefineされていない時
+	// 　　is_repetition() , has_repeted()で最大で何手前からの千日手をチェックするか。デフォルト16手。
+	// 
+	// ※　これを MAX_PLY に設定すると初手からのチェックになるが、将棋はチェスと異なり
+	// 　　終局までの平均手数がわりと長いので、そこまでするとスピードダウンしてR40ほど弱くなる。
+	void set_max_repetition_ply(int ply){ max_repetition_ply = ply;}
+
 	// 普通の千日手、連続王手の千日手等を判定する。
 	// そこまでの局面と同一局面であるかを、局面を遡って調べる。
-	// rep_ply         : 遡る手数。デフォルトでは16手。あまり大きくすると速度低下を招く。
-	RepetitionState is_repetition(int rep_ply = 16) const;
+	// 
+	// 1. ENABLE_QUICK_DRAWがdefineされている時(大会用に少しでも強くしたい時)
+	// plyは無視される。遡る手数は16手固定。
+	//
+	// 2. ENABLE_QUICK_DRAWがdefineされていない時(正確に千日手の判定を行いたい時)
+	// 遡る手数は、set_max_repetition_ply()で設定された手数だけ遡る。
+	// ply         : rootからの手数。3回目の同一局面の出現まではrootよりは遡って千日手と判定しない。4回目は判定する。
+	RepetitionState is_repetition(int ply = 16) const;
 
 	// is_repetition()の、千日手が見つかった時に、現局面から何手遡ったかを返すバージョン。
 	// REPETITION_NONEではない時は、found_plyにその値が返ってくる。	// ※　定跡生成の時にしか使わない。
-	RepetitionState is_repetition(int rep_ply , int& found_ply) const;
+	RepetitionState is_repetition(int ply , int& found_ply) const;
 
-	// 普通の千日手、連続王手の千日手等を判定する。
-	// そこまでの局面と同一局面であるかを、局面を遡って調べる。
-	// rootより遡って優等局面を判定したくない時に用いる。
-	// rep_ply         : 遡る手数。デフォルトでは16手。あまり大きくすると速度低下を招く。
-	// sup_rep_ply     : 優等局面・劣等局面のために遡る手数。
-	//					 ここにss->plyを渡すことで優等局面の判定のためにrootより遡らない。
-	RepetitionState is_repetition2(int rep_ply = 16 , int sup_rep_ply = 16) const;
-	
+#if !defined(ENABLE_QUICK_DRAW)
+	// Tests whether there has been at least one repetition
+	// of positions since the last capture or pawn move.
+	bool has_repeated() const;
+#endif
+
 	// --- Bitboard
 
 	// c == BLACK : 先手の駒があるBitboardが返る
@@ -406,7 +442,7 @@ public:
 	Bitboard pinners(Color c) const { return st->pinners[c]; }
 
 	// c側の玉に対して、指し手mが空き王手となるのか。
-	bool is_discovery_check_on_king(Color c, Move m) const { return st->blockersForKing[c] & from_sq(m); }
+	bool is_discovery_check_on_king(Color c, Move m) const { return st->blockersForKing[c] & m.from_sq(); }
 
 	// --- 利き
 
@@ -632,13 +668,13 @@ public:
 	Piece captured_piece() const { return st->capturedPiece; }
 
 	// 捕獲する指し手か、成りの指し手であるかを判定する。
-	bool capture_or_promotion(Move m) const { return is_promote(m) || capture(m); }
+	bool capture_or_promotion(Move m) const { return m.is_promote() || capture(m); }
 
 	// 歩の成る指し手であるか？
 	bool pawn_promotion(Move m) const
 	{
 		// 移動させる駒が歩かどうかは、Moveの上位16bitを見れば良い
-		return (is_promote(m) && raw_type_of(moved_piece_after(m)) == PAWN);
+		return (m.is_promote() && raw_type_of(moved_piece_after(m)) == PAWN);
 	}
 
 	// 捕獲する指し手か、歩の成りの指し手であるかを返す。
@@ -652,11 +688,11 @@ public:
 	{
 		// 歩の成りを角・飛車の成りにまで拡大する。
 		auto pr = raw_type_of(moved_piece_after(m));
-		return (is_promote(m) && (pr == PAWN || pr == BISHOP || pr == ROOK)) || capture(m);
+		return (m.is_promote() && (pr == PAWN || pr == BISHOP || pr == ROOK)) || capture(m);
 	}
 
 	// 捕獲する指し手であるか。
-	bool capture(Move m) const { return !is_drop(m) && piece_on(to_sq(m)) != NO_PIECE; }
+	bool capture(Move m) const { return !m.is_drop() && piece_on(m.to_sq()) != NO_PIECE; }
 
 
 	// Stockfishにはcapture_stage()というメソッドが追加された。下記のコード。
@@ -671,6 +707,17 @@ public:
 	//  return  capture(m) || promotion_type(m) == QUEEN;
 	//}
 
+	// →　互換性維持のために、capture_stageを定義。
+	bool capture_stage(Move m) const
+	{
+		//return capture_or_valuable_promotion(m);
+		//return capture_or_pawn_promotion(m);
+
+		// →　V7.73y3とy4,y5の比較。
+		// 単にcapture()にするのが一番良かった。
+
+		return capture(m);
+	}
 
 	// 入玉時の宣言勝ち
 	// Search::Limits.enteringKingRuleに基いて、宣言勝ちを行なう。
@@ -865,6 +912,9 @@ private:
 	//   このとき、undo_move()で戻れるようにStateInfo::previousに前のstの値を設定しておく。
 	// undo_move()で前の局面に戻るときはStateInfo::previousから辿って戻る。
 	StateInfo* st;
+
+	// set_max_repetition_ply()で設定される、千日手の最大遡り手数
+	static int max_repetition_ply /* = 16 */;
 
 #if defined(USE_EVAL_LIST)
 	// 評価関数で用いる駒のリスト

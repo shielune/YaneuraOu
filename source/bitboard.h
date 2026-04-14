@@ -6,7 +6,7 @@
 namespace Bitboards
 {
 	// Bitboard関連のテーブル初期化のための関数
-	extern void init();
+	void init();
 }
 
 // --------------------
@@ -283,8 +283,10 @@ template <int n>
 inline Bitboard& Bitboard::insert64(u64 u)
 {
 	static_assert(n == 0 || n == 1, "");
-#if defined(USE_SSE41)
+#if defined(USE_SSE41) && defined(IS_64BIT)
 	m = _mm_insert_epi64(m, u, n);
+	// ⇨ gcc/clangだと32bit環境で、この命令が定義されていなくてコンパイルエラーになる。
+	//		コンパイラ側のバグっぽい。仕方ないので、この命令を使うのは64bit環境の時のみにする。
 #else
 	p[n] = u;
 #endif
@@ -292,20 +294,20 @@ inline Bitboard& Bitboard::insert64(u64 u)
 }
 
 // Square型との演算子
-extern Bitboard operator|(const Bitboard& b, Square s);
-extern Bitboard operator&(const Bitboard& b, Square s);
-extern Bitboard operator^(const Bitboard& b, Square s);
+Bitboard operator|(const Bitboard& b, Square s);
+Bitboard operator&(const Bitboard& b, Square s);
+Bitboard operator^(const Bitboard& b, Square s);
 
 // 単項演算子
 // →　NOTで書くと、使っていないbit(p[0]のbit63)がおかしくなるのでALL_BBでxorしないといけない。
-extern Bitboard operator ~ (const Bitboard& a);
+Bitboard operator ~ (const Bitboard& a);
 
 // range-forで回せるようにするためのhack(少し遅いので速度が要求されるところでは使わないこと)
-extern const Bitboard begin(const Bitboard& b);
-extern const Bitboard end(const Bitboard&);
+const Bitboard begin(const Bitboard& b);
+const Bitboard end(const Bitboard&);
 
 // Bitboardの1の升を'*'、0の升を'.'として表示する。デバッグ用。
-extern std::ostream& operator<<(std::ostream& os, const Bitboard& board);
+std::ostream& operator<<(std::ostream& os, const Bitboard& board);
 
 // --------------------
 //     Bitboard256
@@ -912,21 +914,16 @@ inline Bitboard lanceEffect(Square sq, const Bitboard& occupied)
 			// 香がp[0]に属する
 			u64 se = lanceStepEffect<C>(sq).template extract64<0>();
 			u64 mocc = se & occupied.extract64<0>();
-			mocc |= mocc >> 1;
-			mocc |= mocc >> 2;
-			mocc |= mocc >> 4;
-			mocc >>= 1;
-			return Bitboard(~mocc & se, 0);
+			// 香が当たる駒より上の升に対応するビットを0、それ以外を1にする
+			mocc = ~uint64_t{0} << MSB64(mocc | 1);
+			return Bitboard(mocc & se, 0);
 		}
 		else {
 			// 香がp[1]に属する
 			u64 se = lanceStepEffect<C>(sq).template extract64<1>();
 			u64 mocc = se & occupied.extract64<1>();
-			mocc |= mocc >> 1;
-			mocc |= mocc >> 2;
-			mocc |= mocc >> 4;
-			mocc >>= 1;
-			return Bitboard(0, ~mocc & se);
+			mocc = ~uint64_t{0} << MSB64(mocc | 1);
+			return Bitboard(0, mocc & se);
 		}
 	}
 #endif
@@ -956,13 +953,10 @@ inline Bitboard rookFileEffect(Square sq, const Bitboard& occupied)
 		// 先手の香の利き
 		u64 se = lanceStepEffect<BLACK>(sq).template extract64<0>();
 		u64 mocc = se & occupied.extract64<0>();
-		mocc |= mocc >> 1;
-		mocc |= mocc >> 2;
-		mocc |= mocc >> 4;
-		mocc >>= 1;
+		mocc = ~uint64_t{0} << MSB64(mocc | 1);
 
 		// 後手の香の利きと先手の香の利きを合成
-		return Bitboard(((em ^ t) & mask) | (~mocc & se), 0);
+		return Bitboard(((em ^ t) & mask) | (mocc & se), 0);
 	}
 	else {
 		// 飛車がp[1]に属する
@@ -974,19 +968,16 @@ inline Bitboard rookFileEffect(Square sq, const Bitboard& occupied)
 
 		u64 se = lanceStepEffect<BLACK>(sq).template extract64<1>();
 		u64 mocc = se & occupied.extract64<1>();
-		mocc |= mocc >> 1;
-		mocc |= mocc >> 2;
-		mocc |= mocc >> 4;
-		mocc >>= 1;
+		mocc = ~uint64_t{0} << MSB64(mocc | 1);
 
-		return Bitboard(0, ((em ^ t) & mask) | (~mocc & se));
+		return Bitboard(0, ((em ^ t) & mask) | (mocc & se));
 	}
 }
 
 // ==== 飛車と角の利き ===
 
 // 飛車の横の利き
-extern Bitboard rookRankEffect(Square sq, const Bitboard& occupied);
+Bitboard rookRankEffect(Square sq, const Bitboard& occupied);
 
 // 飛車の利き
 inline Bitboard rookEffect(const Square sq, const Bitboard& occupied) {
@@ -995,7 +986,7 @@ inline Bitboard rookEffect(const Square sq, const Bitboard& occupied) {
 }
 
 // 角の利き
-extern Bitboard bishopEffect(const Square sq, const Bitboard& occupied);
+Bitboard bishopEffect(const Square sq, const Bitboard& occupied);
 
 // 馬の利き
 inline Bitboard horseEffect(Square sq, const Bitboard& occupied)
@@ -1060,7 +1051,7 @@ Bitboard rayEffect(Square sq, const Bitboard& occupied)
 }
 
 // sqの升から指定した方向dへの利き。盤上の駒も考慮する。
-extern Bitboard directEffect(Square sq, Effect8::Direct d, const Bitboard& occupied);
+Bitboard directEffect(Square sq, Effect8::Direct d, const Bitboard& occupied);
 
 // --------------------
 //   汎用性のある利き
@@ -1068,11 +1059,11 @@ extern Bitboard directEffect(Square sq, Effect8::Direct d, const Bitboard& occup
 
 // 盤上sqに駒pc(先後の区別あり)を置いたときの利き。(step effect)
 // pc == QUEENだと馬+龍の利きが返る。盤上には駒は何もないものとして考える。
-extern Bitboard effects_from(Piece pc, Square sq);
+Bitboard effects_from(Piece pc, Square sq);
 
 // 盤上sqに駒pc(先後の区別あり)を置いたときの利き。
 // pc == QUEENだと馬+龍の利きが返る。
-extern Bitboard effects_from(Piece pc, Square sq, const Bitboard& occ);
+Bitboard effects_from(Piece pc, Square sq, const Bitboard& occ);
 
 // --------------------
 //   Stockfishとの互換性のために用意
@@ -1121,6 +1112,22 @@ template<Piece PC>
 inline Bitboard attacks_bb(Square s, Bitboard occupied) {
 
 	return effects_from(PC, s, occupied);
+}
+
+/// least_significant_square_bb() returns the bitboard of the least significant
+/// square of a non-zero bitboard. It is equivalent to square_bb(lsb(bb)).
+
+// pop_lsb()の、Bitboardを返す版。
+// ※　Stockfishとの互換性のために用意。
+
+inline Bitboard least_significant_square_bb(Bitboard b) {
+	//return b & -b;
+	// →　Stockfishはチェスが64升だから盤面のBitboardが64bit整数に収まるのだが、
+	//    やねうら王では一工夫必要。
+
+	u64 q0 = b.extract64<0>();
+	u64 q1 = b.extract64<1>();
+	return (q0 != 0) ? Bitboard(q0 & -q0 , q1) : Bitboard(q0, q1 & -q1);
 }
 
 

@@ -151,7 +151,7 @@ void Bitboards::init()
 			// dirの方角に壁にぶつかる(盤外)まで延長していく。このとき、sq1から見てsq2のDirectionsは (1 << dir)である。
 			auto delta = Effect8::DirectToDeltaWW(dir);
 			for (auto sq2 = to_sqww(sq1) + delta; is_ok(sq2); sq2 += delta)
-			Effect8::direc_table[sq1][sqww_to_sq(sq2)] = Effect8::to_directions(dir);
+				Effect8::direc_table[sq1][sqww_to_sq(sq2)] = Effect8::to_directions(dir);
 		}
 
 
@@ -173,7 +173,7 @@ void Bitboards::init()
 		for (Rank r = RANK_1; r <= RANK_9; ++r) {
 
 			Bitboard left(ZERO), right(ZERO);
-			
+
 			// SQの升から左方向
 			for (File f2 = (File)(f + 1); f2 <= FILE_9; ++f2)
 				left |= Bitboard(f2 | r);
@@ -584,19 +584,20 @@ Bitboard Bitboard::decrement() const
 {
 #if defined(USE_SSE2)
 
+#if defined(USE_SSE41)
+	// _mm_setzero_si128()は同一レジスタのXORとなる。
+	// 同一レジスタのXORは依存性が切れる
+	// SandyBridge以降Skylake系までなら実行ユニットも使用しない
+	__m128i t2 = _mm_cmpeq_epi64(m, _mm_setzero_si128());
+	// alignrを使ってcmpeqの結果(p[0] == 0 ? -1 : 0)を上位64bit側にシフトしつつ、下位を-1で埋める
+	t2 = _mm_alignr_epi8(t2, _mm_set1_epi64x(-1LL), 8);
+	__m128i t1 = _mm_add_epi64(m, t2);
+#else // SSE2用のコード
 	// p[0]--;
 	__m128i c  = _mm_set_epi64x(0, 1);
 	__m128i t1 = _mm_sub_epi64(m, c);
 
-	// if (p[0] MSB == 1) p[1]++;
-#if defined(USE_SSE41)
-	__m128i t2 = _mm_cmpeq_epi64(m, _mm_setzero_si128());
-	//_mm_setzero_si128()は同一レジスタのXORとなる。
-	//同一レジスタのXORは依存性が切れる
-	//SandyBridge以降Skylake系までなら実行ユニットも使用しない
-	t2 = _mm_slli_si128(t2, 8);
-	t1 = _mm_add_epi64(t1, t2);
-#else // SSE2用のコード
+	// if (p[0] MSB == 1) p[1]--;
 	__m128i t2 = _mm_srli_epi64(t1, 63); // MSBをbit0に持ってきて、byte shiftで上位64bit側に移動させて減算
 	t2 = _mm_slli_si128(t2, 8);
 	t1 = _mm_sub_epi64(t1, t2);
@@ -1022,11 +1023,11 @@ void Bitboard::UnitTest(Test::UnitTester& tester)
 		bool all_ok = true;
 		Bitboard occ(SQ_77);
 		Bitboard zero(ZERO);
-		all_ok = rayEffect<Effect8::DIRECT_LD>(SQ_55, occ) == between_bb(SQ_55, SQ_88);
-		all_ok = rayEffect<Effect8::DIRECT_LD>(SQ_55, zero) == QUGIY_STEP_EFFECT[Effect8::DIRECT_LD - 2][SQ_55];
+		all_ok &= rayEffect<Effect8::DIRECT_LD>(SQ_55, occ) == between_bb(SQ_55, SQ_88);
+		all_ok &= rayEffect<Effect8::DIRECT_LD>(SQ_55, zero) == QUGIY_STEP_EFFECT[Effect8::DIRECT_LD - 2][SQ_55];
 
 		Bitboard occ2(SQ_33);
-		all_ok = rayEffect<Effect8::DIRECT_RU>(SQ_55, occ2) == between_bb(SQ_55, SQ_22);
+		all_ok &= rayEffect<Effect8::DIRECT_RU>(SQ_55, occ2) == between_bb(SQ_55, SQ_22);
 
 		tester.test("rayEffect", all_ok);
 	}
@@ -1090,8 +1091,8 @@ void Bitboard::UnitTest(Test::UnitTester& tester)
 		const Bitboard one_bb(1, 0);
 		bool all_ok = true;
 
-		all_ok = zero_bb.decrement() == minus_one;
-		all_ok = one_bb.decrement()  == zero_bb;
+		all_ok &= zero_bb.decrement() == minus_one;
+		all_ok &= one_bb.decrement()  == zero_bb;
 
 		tester.test("decrement(method)", all_ok);
 	}
@@ -1102,6 +1103,17 @@ void Bitboard::UnitTest(Test::UnitTester& tester)
 
 		tester.test("attacks_bb<B_KNIGHT>",attacks_bb<B_KNIGHT>(SQ_77) == (Bitboard(SQ_85) | Bitboard(SQ_65)));
 		tester.test("attacks_bb<W_KNIGHT>",attacks_bb<W_KNIGHT>(SQ_77) == (Bitboard(SQ_89) | Bitboard(SQ_69)));
+	}
+	{
+		bool all_ok = true;
+		Bitboard bb;
+
+		bb = Bitboard(SQ_22) | Bitboard(SQ_77);
+		all_ok &= least_significant_square_bb(bb) == Bitboard(SQ_22);
+		bb = Bitboard(SQ_99) | Bitboard(SQ_87);
+		all_ok &= least_significant_square_bb(bb) == Bitboard(SQ_87);
+
+		tester.test("least_significant_square_bb",all_ok);
 	}
 }
 
