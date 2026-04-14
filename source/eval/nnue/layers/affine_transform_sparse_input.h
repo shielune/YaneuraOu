@@ -157,14 +157,14 @@ class AffineTransformSparseInput {
 		       PreviousLayer::GetStructureString() + ")";
 	}
 
-	static constexpr IndexType GetWeightIndexScrambled(IndexType i) {
+	static constexpr IndexType get_weight_index_scrambled(IndexType i) {
         return (i / kChunkSize) % (kPaddedInputDimensions / kChunkSize) * kOutputDimensions * kChunkSize
              + i / kPaddedInputDimensions * kChunkSize + i % kChunkSize;
     }
 
-    static constexpr IndexType GetWeightIndex(IndexType i) {
+    static constexpr IndexType get_weight_index(IndexType i) {
 #if defined(USE_SSSE3) || USE_NEON >= 8
-        return kOutputDimensions % 4 == 0 ? GetWeightIndexScrambled(i) : i;
+        return get_weight_index_scrambled(i);
 #else
         return i;
 #endif
@@ -178,7 +178,7 @@ class AffineTransformSparseInput {
 		for (std::size_t i = 0; i < kOutputDimensions; ++i)
 			biases_[i] = read_little_endian<BiasType>(stream);
 		for (std::size_t i = 0; i < kOutputDimensions * kPaddedInputDimensions; ++i)
-			weights_[GetWeightIndex(IndexType(i))] = read_little_endian<WeightType>(stream);
+			weights_[get_weight_index(IndexType(i))] = read_little_endian<WeightType>(stream);
 		return !stream.fail() ? Tools::ResultCode::Ok : Tools::ResultCode::FileReadError;
 	}
 
@@ -363,15 +363,14 @@ class AffineTransformSparseInput {
         }
         else
 #endif
-            affine_transform_unaligned<kInputDimensions, kPaddedInputDimensions, kOutputDimensions>(
-              output, weights_, biases_, input);
+        {}
 
 #undef vec_set_32
 #undef vec_add_dpbusd_32
 
 #else
         // Use dense implementation for the other architectures.
-        affine_transform_unaligned<kInputDimensions, kPaddedInputDimensions, kOutputDimensions>(
+        affine_transform_non_ssse3<kInputDimensions, kPaddedInputDimensions, kOutputDimensions>(
           output, weights_, biases_, input);
 #endif
 
