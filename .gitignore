@@ -19,6 +19,8 @@ YaneuraOu_backup*.lnk
 ~*
 .*/
 !.github/
+!.claude/
+.claude/settings.local.json
 *.nnue
 *.nnue.*
 *.result.txt
