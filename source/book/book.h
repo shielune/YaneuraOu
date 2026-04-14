@@ -15,6 +15,8 @@ namespace Search { struct LimitsType; };
 // 定跡処理関連のnamespace
 namespace Book
 {
+	static const char* BookDBHeader2016_100 = "#YANEURAOU-DB2016 1.00";
+
 	// 将棋ソフト用の標準定跡ファイルフォーマットの提案 : http://yaneuraou.yaneu.com/2016/02/05/standard-shogi-book-format/
 
 	// ある局面における指し手1つ(定跡の局面での指し手を格納するのに用いる)
@@ -243,7 +245,7 @@ namespace Book
 #if defined (ENABLE_MAKEBOOK_CMD)
 	// USI拡張コマンド。"makebook"。定跡ファイルを作成する。
 	// フォーマット等についてはdoc/解説.txt を見ること。
-	extern void makebook_cmd(Position& pos, std::istringstream& is);
+	void makebook_cmd(Position& pos, std::istringstream& is);
 #endif
 
 	// 思考エンジンにおいて定跡の指し手の選択をする部分を切り出したもの。
@@ -301,7 +303,12 @@ namespace Book
 		// bestMoveが合法手であることは保証される。
 		// GenerateAllLegalMovesがfalseの時、歩の不成の指し手を返さないことも保証する。
 		// 但し、ponderMoveが合法手であることは保証しない。
-		bool probe_impl(Position& rootPos, bool silent, Move16& bestMove, Move16& ponderMove , bool forceHit = false);
+		//
+		// 以下の3つの変数は、この関数がtrueを返した時のみ有効。
+		// bestMove   : 今回選択された指し手
+		// ponderMove : bestMoveの次の定跡の指し手 
+		// value      : bestMoveの評価値。
+		bool probe_impl(Position& rootPos, bool silent, Move16& bestMove, Move16& ponderMove , Value& value , bool forceHit = false);
 
 		// 定跡のpv文字列を生成して返す。
 		// m        : 局面posをこの指し手で進める
@@ -312,7 +319,7 @@ namespace Book
 	};
 
 	// 定跡部のUnitTest
-	extern void UnitTest(Test::UnitTester& tester);
+	void UnitTest(Test::UnitTester& tester);
 }
 
 // 定跡関係の処理のための補助ツール群
@@ -326,7 +333,11 @@ namespace BookTools
 	// "sfen xxx moves yyy ..."
 	// また、局面を1つ進めるごとにposition_callback関数が呼び出される。
 	// 辿った局面すべてに対して何かを行いたい場合は、これを利用すると良い。
-	void feed_position_string(Position& pos, const std::string& root_sfen, std::deque<StateInfo>& si, const std::function<void(Position&)>& position_callback = [](Position&) {});
+	// 
+	// position_callbackは、その局面と、その局面での指し手が引数にセットされて呼び出される。
+	// 与えたsfenの最後の局面では、MoveはMove::none()が入って呼び出される。
+	void feed_position_string(Position& pos, const std::string& root_sfen, std::deque<StateInfo>& si,
+		const std::function<void(Position&, Move)>& position_callback = [](Position&, Move) {});
 
 	// 平手、駒落ちの開始局面集
 	// ここで返ってきた配列の、[0]は平手のsfenであることは保証されている。

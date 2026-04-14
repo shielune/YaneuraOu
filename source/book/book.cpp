@@ -48,12 +48,12 @@ namespace Book
 
 	// Aperyの指し手の変換。
 	uint16_t convert_move_to_apery(Move16 m) {
-		const uint16_t ispromote = is_promote(m) ? (1 << 14) : 0;
-		const uint16_t from = ((is_drop(m)?
-			(static_cast<uint16_t>(move_dropped_piece(m)) + SQ_NB - 1):
-			static_cast<uint16_t>(from_sq(m))
+		const uint16_t ispromote = m.is_promote() ? (1 << 14) : 0;
+		const uint16_t from      = ((m.is_drop()?
+			(static_cast<uint16_t>(m.move_dropped_piece()) + SQ_NB - 1):
+			 static_cast<uint16_t>(m.from_sq())
 		) & 0x7f) << 7;
-		const uint16_t to = static_cast<uint16_t>(to_sq(m)) & 0x7f;
+		const uint16_t to = static_cast<uint16_t>(m.to_sq()) & 0x7f;
 		return (ispromote | from | to);
 	}
 
@@ -124,8 +124,8 @@ namespace Book
 
 		// 起動時なので変換に要するオーバーヘッドは最小化したいので合法かのチェックはしない。
 
-		move   = (move_str   == "none" || move_str   == "None" || move_str   == "resign") ? MOVE_NONE : USI::to_move16(move_str  );
-		ponder = (ponder_str == "none" || ponder_str == "None" || ponder_str == "resign") ? MOVE_NONE : USI::to_move16(ponder_str);
+		move   = (move_str   == "none" || move_str   == "None" || move_str   == "resign") ? Move16::none() : USI::to_move16(move_str  );
+		ponder = (ponder_str == "none" || ponder_str == "None" || ponder_str == "resign") ? Move16::none() : USI::to_move16(ponder_str);
 
 		return BookMove(move,ponder,value,depth,move_count);
 	}
@@ -272,7 +272,7 @@ namespace Book
 				if (fs.fail())
 				{
 					sync_cout << "info string Error! : can't read file : " + filename << sync_endl;
-					return Tools::Result(Tools::ResultCode::FileOpenError);
+					return Tools::Result(Tools::ResultCode::FileNotFound);
 				}
 
 				// 定跡ファイルのopenにも成功したし、on the flyできそう。
@@ -407,7 +407,7 @@ namespace Book
 		cout << "write " + filename << endl;
 
 		// バージョン識別用文字列
-		writer.WriteLine("#YANEURAOU-DB2016 1.00");
+		writer.WriteLine(BookDBHeader2016_100);
 
 		vector<pair<string, BookMovesPtr> > vectored_book;
 
@@ -712,7 +712,7 @@ namespace Book
 			for (const auto& entry : entries) {
 
 				Move16 theMove16 = convert_move_from_apery(entry.fromToPro);
-				Move16 thePonder = MOVE_NONE;
+				Move16 thePonder = Move16::none();
 #if 0
 				// Aperyの定跡、ponderの指し手が書かれていない。合法手であるなら、1手進めて、その局面の定跡をprobe()して取得する。
 				// →　呼び出し元で定跡PVの構築のためにこれに該当する処理は行われるから、ここでやらなくてよさそう。
@@ -868,7 +868,7 @@ namespace Book
 			if (entries.empty()) return;
 			for (const auto& entry : entries) {
 				const Move16 move = convert_move_from_apery(entry.fromToPro);
-				BookMove bp(move, MOVE_NONE , entry.score, 256, entry.count);
+				BookMove bp(move, Move16::none(), entry.score, 256, entry.count);
 				insert(sfen, bp);
 			}
 
@@ -1087,7 +1087,8 @@ namespace Book
 
 				// さらに指し手を進める
 				Move16 bestMove16, ponderMove16;
-				if (probe_impl(pos, true, bestMove16, ponderMove16 , true /* 強制的にhitさせる */))
+				Value value;
+				if (probe_impl(pos, true, bestMove16, ponderMove16, value, true /* 強制的にhitさせる */))
 				{
 					// hitした
 
@@ -1104,7 +1105,7 @@ namespace Book
 							// だから、
 							// 1. rest_plyの残りがあるならもう1手は出力しないといけないのでponderを出力して良い。
 							// 2. 但し、この時、ponderが登録されていない(MOVE_NONE)なら出力しない。
-							if (rest_ply >= 1 && ponderMove16 != MOVE_NONE)
+							if (rest_ply >= 1 && ponderMove16.to_u16() != MOVE_NONE)
 								result += " " + ponderMove16.to_usi_string();
 
 						} else {
@@ -1122,7 +1123,7 @@ namespace Book
 	}
 
 	// probe()の下請け
-	bool BookMoveSelector::probe_impl(Position& rootPos, bool silent , Move16& bestMove , Move16& ponderMove , bool forceHit)
+	bool BookMoveSelector::probe_impl(Position& rootPos, bool silent , Move16& bestMove , Move16& ponderMove , Value& value, bool forceHit)
 	{
 		if (!forceHit)
 		{
@@ -1212,7 +1213,7 @@ namespace Book
 					<< " multipv " << (i + 1)
 #endif
 					<< " score cp " << it.value << " depth " << it.depth
-					<< " pv " << pv_builder(rootPos, it.move, pv_moves)
+					<< " pv" << pv_builder(rootPos, it.move, pv_moves)
 					<< " (" << fixed << std::setprecision(2) << (100 * it.move_count / double(move_count_total)) << "%" << ")" // 採択確率
 					<< sync_endl;
 
@@ -1266,7 +1267,15 @@ namespace Book
 
 			// 定跡として採用するdepthの下限。0 = 無視。
 			auto depth_limit = (int)Options["BookDepthLimit"];
-			if ((depth_limit != 0 && move_list[0].depth < depth_limit))
+
+			// 同じ評価値のDepth違いの指し手があると片側が無いこと扱いされてしまうとまずい。(そんな定跡DBがおかしいと言う話はあるが…)
+			// そこで、bestmoveのdepthがdepth_limit未満の時にだけ、この定跡局面を無視する。
+			// つまり、このあとの指し手を絞る処理では、depth_limitでの定跡の指し手のfilterは行わない。
+
+			if (  (depth_limit != 0 && move_list[0].depth < depth_limit )
+				// 千日手時のdepth == 999である定跡で千日手になる指し手を避けたい場合の条件式
+				//|| move_list[0].depth == 999 /* 千日手になるなら無視 */
+				)
 			{
 				if (!silent)
 					sync_cout << "info string BookDepthLimit is lower than the depth of this node." << sync_endl;
@@ -1336,9 +1345,10 @@ namespace Book
 
 			bestMove   = bestBookMove.move;
 			ponderMove = bestBookMove.ponder;
+			value      = Value(bestBookMove.value);
 
 			// ponderが登録されていなければ、bestMoveで一手進めてそこの局面のbestを拾ってくる。
-			if (!is_ok((Move)ponderMove.to_u16()))
+			if (!ponderMove.is_ok())
 			{
 				Move best = rootPos.to_move(bestMove);
 				if (rootPos.pseudo_legal_s<true>(best) && rootPos.legal(best))
@@ -1367,8 +1377,9 @@ namespace Book
 	{
 		const bool silent = true;
 		Move16 bestMove16, ponderMove16;
-		if (!probe_impl(pos, silent, bestMove16, ponderMove16))
-			return MOVE_NONE;
+		Value value;
+		if (!probe_impl(pos, silent, bestMove16, ponderMove16, value))
+			return Move::none();
 
 		Move bestMove = pos.to_move(bestMove16);
 
@@ -1386,8 +1397,9 @@ namespace Book
 			return false;
 
 		Move16 bestMove16, ponderMove16;
+		Value value;
 		auto& pos = th.rootPos;
-		if (probe_impl(pos , Limits.silent, bestMove16, ponderMove16))
+		if (probe_impl(pos , Limits.silent, bestMove16, ponderMove16, value))
 		{
 			auto & rootMoves = th.rootMoves;
 
@@ -1409,22 +1421,35 @@ namespace Book
 				// この意味では、
 				// MultiPVでの探索の時は定跡の上位の指し手をrootMoves[0..N-1]に反映させたほうが良いかも？
 
-				std::swap(rootMoves[0], *it_move);
+				auto& r = rootMoves[0];
+				std::swap(r, *it_move);
+
+				// 定跡の評価値はcp(centi-pawn)のはずだから、
+				// この逆変換をしたものを設定してやる。そうすると出力するときにcpに変換されてちょうど良くなる。
+				// ⇨　出力する逆変換の時の誤差あるの少し気持ち悪いか…。まあ仕方ないな…。定跡ファイルがcp単位になってるからな…。
+				// これは次のaspiration searchで少し探索効率が良くなるから、設定はしたいが…。
+
+				// cp_to_value()はscale downするから⇓変換後、このclampの範囲外に出ないことは保証される。scale upする場合は、注意。
+				value = std::clamp(value , VALUE_MATED_IN_MAX_PLY , VALUE_MATE_IN_MAX_PLY);
+#if defined(USE_PIECE_VALUE)
+				r.previousScore = r.usiScore = r.score = USI::cp_to_value(value);
+#endif
+				// ⇨　定跡の評価値0になってる方が、嬉しい意味もあるか…。
 
 				// 2手目の指し手も与えないとponder出来ない。
 				// 定跡ファイルに2手目が書いてあったなら、それをponder用に出力する。
 				// これが合法手でなかったら将棋所が弾くと思う。
 				// (ただし、"ponder resign"などと出力してしまうと投了と判定されてしまうらしいので
-				//  普通の指し手でなければならない。これは、is_ok(Move)で判定できる。)
-				if (is_ok((Move)ponderMove16.to_u16()))
+				//  普通の指し手でなければならない。これは、Move16.is_ok()で判定できる。)
+				if (ponderMove16.is_ok())
 				{
-					if (rootMoves[0].pv.size() <= 1)
-						rootMoves[0].pv.push_back(MOVE_NONE);
+					if (r.pv.size() <= 1)
+						r.pv.push_back(Move::none());
 
 					// これ32bit Moveに変換してあげるほうが親切なのか…。
 					StateInfo si;
 					pos.do_move(bestMove,si);
-					rootMoves[0].pv[1] = pos.to_move(ponderMove16);
+					r.pv[1] = pos.to_move(ponderMove16);
 					pos.undo_move(bestMove);
 				}
 				// この指し手を指す
@@ -1467,12 +1492,12 @@ namespace Book
 		Position pos;
 		string root_sfen = "startpos moves 7g7f 3c3d 6g6f 8b3b 8h7g 5a6b 2h8h 6b7b 8g8f 3d3e 8f8e 3e3f 3i2h 3f3g+ 2h3g 3a4b 4i3h P*3f 3g2h 4b3c 6i5h 3c4d 7i6h 1c1d P*3g 7a8b";
 		deque<StateInfo> si;
-		BookTools::feed_position_string(pos, root_sfen, si, [](Position&){});
+		BookTools::feed_position_string(pos, root_sfen, si, [](Position&,Move){});
 
 		string moves1 = "1g1f 2g2f 3g3f 4g4f 5g5f 6f6e 7f7e 8e8d 9g9f 1i1h 9i9h 2h3i 6h6g 6h7i 7g8f 7g9e 8h7h 8h8f 8h8g 8h9h 3h3i 3h4h 5h4h 5h6g 5i4h 5i4i 5i6i";
 		string moves2 = string();
 		for(auto m : MoveList<LEGAL_ALL>(pos))
-			moves2 += (moves2.empty() ? "" : " ") + to_usi_string(m.move);
+			moves2 += (moves2.empty() ? "" : " ") + to_usi_string(Move(m));
 
 		tester.test("feed_position_string" , moves1 == moves2);
 	}
@@ -1493,7 +1518,8 @@ namespace BookTools
 	// "sfen xxx moves yyy ..."
 	// また、局面を1つ進めるごとにposition_callback関数が呼び出される。
 	// 辿った局面すべてに対して何かを行いたい場合は、これを利用すると良い。
-	void feed_position_string(Position& pos, const std::string& root_sfen, std::deque<StateInfo>& si, const std::function<void(Position&)>& position_callback)
+	void feed_position_string(Position& pos, const std::string& root_sfen, std::deque<StateInfo>& si,
+		const std::function<void(Position&,Move)>& position_callback)
 	{
 		// issから次のtokenを取得する
 		auto feed_next = [](Parser::LineScanner& iss)
@@ -1551,29 +1577,29 @@ namespace BookTools
 			}
 		} while (token == "startpos" || token == "sfen" || token == "moves"/* movesは無視してループを回る*/ );
 
-		// callbackを呼び出してやる。
-		position_callback(pos);
-
 		// moves以降は1手ずつ進める
 		while (token != "")
 		{
 			// 非合法手ならUSI::to_moveはMOVE_NONEを返すはず…。
 			Move move = USI::to_move(pos, token);
-			if (move == MOVE_NONE)
+			if (move == Move::none())
 				break;
 
 			// MOVE_NULL,MOVE_WINでは局面を進められないのでここで終了。
-			if (!is_ok(move))
+			if (!move.is_ok())
 				break;
+
+			// callbackを呼び出してやる。
+			position_callback(pos, move);
 
 			si.emplace_back(StateInfo());
 			pos.do_move(move, si.back());
 
-			// callbackを呼び出してやる。
-			position_callback(pos);
-
 			token = feed_next(iss);
 		}
+
+		// 最後の局面でcallbackを呼び出してやる。
+		position_callback(pos, Move::none());
 	}
 
 	// 平手、駒落ちの開始局面集
@@ -1610,9 +1636,8 @@ namespace BookTools
 		StateInfo si2;
 		vector<string> sfens;
 
-		for (auto ml : MoveList<LEGAL_ALL>(pos))
+		for (auto m : MoveList<LEGAL_ALL>(pos))
 		{
-			auto m = ml.move;
 			pos.do_move(m, si2);
 			sfens.emplace_back("sfen " + pos.sfen());
 			pos.undo_move(m);

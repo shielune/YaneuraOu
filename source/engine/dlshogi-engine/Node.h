@@ -41,22 +41,28 @@ namespace dlshogi
 		// --- public variables
 
 		// 指し手(Move)が、SetWin()されているかの判定
-		static bool IsMoveWin(Move m)  { return m & VALUE_WIN; }
-		static bool IsMoveLose(Move m) { return m & VALUE_LOSE; }
-		static bool IsMoveDraw(Move m) { return m & VALUE_DRAW; }
+		// ChildNodes::IsMoveWin(move)のように用いる。
+		// これはその子ノードへの指し手moveによって、相手が勝ちになるかという判定なので、
+		// これがtrueであれば現局面は負けの局面ということである。
+		static bool IsMoveWin(Move m)  { return m.to_u32() & VALUE_WIN; }
+		static bool IsMoveLose(Move m) { return m.to_u32() & VALUE_LOSE; }
+		static bool IsMoveDraw(Move m) { return m.to_u32() & VALUE_DRAW; }
 
 		// メモリ節約のため、moveの最上位バイトでWin/Lose/Drawの状態を表す
 		// (32bit型のMoveでは、ここは使っていないはずなので)
 		bool IsWin () const { return IsMoveWin (move); }
 		bool IsLose() const { return IsMoveLose(move); }
 		bool IsDraw() const { return IsMoveDraw(move); }
-		void SetWin () { move = (Move)(move | VALUE_WIN); }
-		void SetLose() { move = (Move)(move | VALUE_LOSE); }
-		void SetDraw() { move = (Move)(move | VALUE_DRAW); }
+		void SetWin () { move = Move(move.to_u32() | VALUE_WIN); }
+		void SetLose() { move = Move(move.to_u32() | VALUE_LOSE); }
+		void SetDraw() { move = Move(move.to_u32() | VALUE_DRAW); }
 		// →　SetDraw()したときに、win = DRAW_VALUEにしたほうが良くないかな…。
 
 		// 親局面(Node)で、このedgeに至るための指し手
+		// 上位8bitをWin/Loseのフラグに使っているので、直接値比較をしないこと。getMove()を用いること。
+		// またこの指し手でdo_move()する時は、getMove()した方行うこと。
 		Move move;
+		Move getMove() const { return Move(move.to_u32() & 0xffffff); }
 
 		// Policy Networkが返してきた、moveが選ばれる確率を正規化したもの。
 		float nnrate;
@@ -75,7 +81,8 @@ namespace dlshogi
 	struct Node
 	{
 		Node()
-			: move_count(NOT_EXPANDED), win(0), visited_nnrate(0.0f) , child_num(0){}
+			: move_count(NOT_EXPANDED), win(0), visited_nnrate(0.0f) , child_num(0),
+			dfpn_checked(0) , dfpn_proven_unsolvable(0) /*, dfpn_mate_ply(0)*/ {}
 
 		// 子ノード作成
 		Node* CreateChildNode(int i) {
@@ -163,6 +170,20 @@ namespace dlshogi
 		// 展開した子ノード以外はnullptrのまま。
 		std::unique_ptr<std::unique_ptr<Node>[]> child_nodes;
 
+#if defined(USE_POLICY_BOOK)
+		// PolicyBookから与えられたvalue
+		// なければ FLT_MAX
+		float policy_book_value = FLT_MAX;
+#endif
+
+		// 詰み関連のフラグ
+		bool dfpn_checked; // df-pn調べ済み
+		bool dfpn_proven_unsolvable; // df-pnで詰まないことが証明されている。
+		//s16 dfpn_mate_ply : 15; // 詰み手数。0なら詰みなし。プラスならこの局面からの詰みまでの手数。マイナスなら、詰まされるまでの手数。
+
+		// dfpn_checkedのフラグの状態を変更する時のmutex
+		static std::mutex mtx_dfpn;
+
 	private:
 
 		// ExpandNode()の下請け。生成する指し手の種類を指定できる。
@@ -174,7 +195,7 @@ namespace dlshogi
 			child = std::make_unique<ChildNode[]>(ml.size());
 			auto* child_node = child.get();
 			for (auto m : ml)
-				(child_node++)->move = m.move;
+				(child_node++)->move = m;
 
 			// 子ノードの数 = 生成された指し手の数
 			child_num = (ChildNumType)ml.size();

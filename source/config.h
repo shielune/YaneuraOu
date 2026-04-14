@@ -1,15 +1,20 @@
 ﻿#ifndef _CONFIG_H_INCLUDED
 #define _CONFIG_H_INCLUDED
 
+// ============================================================
 //
 //  やねうら王プロジェクト
 //  公式サイト :  http://yaneuraou.yaneu.com/yaneuraou_mini/
 //
+// ============================================================
 
 // 思考エンジンのバージョンとしてUSIプロトコルの"usi"コマンドに応答するときの文字列。
 // ただし、この値を数値として使用することがあるので数値化できる文字列にしておく必要がある。
-#define ENGINE_VERSION "7.63"
+#if !defined(ENGINE_VERSION)
 
+#define ENGINE_VERSION "8.50git"
+
+#endif
 // --------------------
 //  思考エンジンの種類
 // --------------------
@@ -181,6 +186,9 @@
 // ";"で区切って複数指定できる。
 // #define ENGINE_OPTIONS "FV_SCALE=24;BookFile=no_book"
 
+// NNUE評価関数で、推論時のオーバーフローを防ぐ。
+// これオンにすると0.5%ぐらいnpsが低下する。オフで運用できるならオフでいいと思う。
+// #define NNUE_FIX_OVERFLOW
 
 // ---------------------
 //  置換表絡みの設定
@@ -265,8 +273,9 @@
 // #define FOR_TOURNAMENT
 
 // sortが少し高速化されるらしい。
-// 安定ソートではないので並び順が以前のとは異なるから、benchコマンドの探索ノード数は変わる。
-// CPU targetによって実装が変わるのでCPUによってbenchコマンドの探索ノード数は変わる。
+// 注意)
+//  安定ソートではないので並び順が以前のとは異なるから、benchコマンドの探索ノード数は変わる。
+//  CPU targetによって実装が変わるのでCPUによってbenchコマンドの探索ノード数は変わる。
 // #define USE_SUPER_SORT
 
 
@@ -292,7 +301,7 @@
 
 
 // 探索パラメーターのチューニングを行うモード
-// ※　使い方は、"docs/解説.txt" の 「探索パラメーターのチューニングについて」をご覧ください。
+// ※　使い方は、やねうら王Wiki の 「探索パラメーターのチューニングについて」をご覧ください。
 //
 // 実行時に"param/yaneuraou-param.h" からパラメーターファイルを読み込むので
 // "source/engine/yaneuraou-engine/yaneuraou-param.h"をそこに配置すること。
@@ -377,8 +386,25 @@
 
 
 // Pawn Historyの有効化。これ、計測したら少し弱くなっていたのでデフォルトでは無効化しておくことにした。
+//  ⇨　計測資料 V7.74k1 , V7.74k2
 // #define ENABLE_PAWN_HISTORY
 
+// 千日手検出を簡略化する
+// (これをオフにするとR5～10程度弱くなるが、これをオンにすると優等局面で評価値31111が出力されたりするので、
+// 検討目的なら、これをオンにするのは好ましくない。)
+// #define ENABLE_QUICK_DRAW
+
+// 差分計算型の評価関数を用いるのか？
+// ※ 次の子nodeに行くときに必ずevaluate()を呼び出さないといけないタイプの評価関数。
+// #define USE_DIFF_EVAL
+
+// PolicyBookを使うのか？
+// TODO : ⇨ PolicyBookについて、記事を書く。
+// #define USE_POLICY_BOOK
+
+// PolicyBookの局後学習を有効化するのか？
+// TODO : ⇨ PolicyBookの局後学習について、記事を書く。
+// #define ENABLE_POLICY_BOOK_LEARN
 
 // ===============================================================
 // ここ以降では、↑↑↑で設定した内容に基づき必要なdefineを行う。
@@ -423,6 +449,10 @@ constexpr int MAX_PLY_NUM = 246;
 		#define USE_SHARED_MEMORY_IN_EVAL
 	#endif
 
+	#if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE)
+		#define USE_DIFF_EVAL
+	#endif
+
 	// 学習機能を有効にするオプション。
 	// 教師局面の生成、定跡コマンド(makebook thinkなど)を用いる時には、これを
 	// 有効化してコンパイルしなければならない。
@@ -439,8 +469,6 @@ constexpr int MAX_PLY_NUM = 246;
 	// 定跡生成絡み
 	#define ENABLE_MAKEBOOK_CMD
 
-	// パラメーターの自動調整絡み
-	#define USE_GAMEOVER_HANDLER
 	//#define LONG_EFFECT_LIBRARY
 
 	// GlobalOptionsは有効にしておく。
@@ -472,6 +500,7 @@ constexpr int MAX_PLY_NUM = 246;
 
 	#if defined(YANEURAOU_ENGINE_NNUE)
 		#define EVAL_NNUE
+		#define NNUE_FIX_OVERFLOW
 
 		// 学習のためにOpenBLASを使う
 		// "../openblas/lib/libopenblas.dll.a"をlibとして追加すること。
@@ -567,6 +596,10 @@ constexpr int MAX_PLY_NUM = 246;
 	#undef ENABLE_TEST_CMD
 	#undef USE_GLOBAL_OPTIONS
 	#undef KEEP_LAST_MOVE
+	#undef NNUE_FIX_OVERFLOW
+
+	// 千日手検出を簡略化する
+	#define ENABLE_QUICK_DRAW
 #endif
 
 // --------------------
@@ -577,6 +610,13 @@ constexpr int MAX_PLY_NUM = 246;
 // 正しく計算できない。そのため、EVAL_HASHを動的に無効化するためのオプションを用意する。
 #if defined(EVAL_LEARN)
 	#define USE_GLOBAL_OPTIONS
+#endif
+
+// パラメーター自動調整を行う時は、結果をファイルに書き出す必要があるので
+// USIの"gameover"に対してそれに対して応答するハンドラを設定してやる必要がある。
+
+#if defined(TUNING_SEARCH_PARAMETERS) && !defined(USE_GAMEOVER_HANDLER)
+	#define USE_GAMEOVER_HANDLER
 #endif
 
 // --------------------
@@ -637,6 +677,9 @@ extern GlobalOptions_ GlobalOptions;
 #define ASSERT_LV4(X) ASSERT_LV_EX(4, X)
 #define ASSERT_LV5(X) ASSERT_LV_EX(5, X)
 
+// memoryがalignされているかのassert
+#define ASSERT_ALIGNED(ptr, alignment) assert(reinterpret_cast<uintptr_t>(ptr) % alignment == 0)
+
 // --- declaration of unreachablity
 
 // switchにおいてdefaultに到達しないことを明示して高速化させる
@@ -671,6 +714,12 @@ constexpr bool pretty_jp = true;
 constexpr bool pretty_jp = false;
 #endif
 
+// --- PolicyBook
+
+// PolicyBookを使うときは、hash keyを128bitにする。局面のhash keyが衝突してしまうとまずいので…。
+#if defined(USE_POLICY_BOOK)
+#define HASH_KEY_BITS 128
+#endif
 
 // --- hash key bits and TT_CLUSTER_SIZE
 
@@ -856,5 +905,4 @@ constexpr bool pretty_jp = false;
 #define ADD_BOARD_EFFECT_REWIND(color_,sq_,e1_) { board_effect[color_].e[sq_] += (uint8_t)e1_; }
 #define ADD_BOARD_EFFECT_BOTH_REWIND(color_,sq_,e1_,e2_) { board_effect[color_].e[sq_] += (uint8_t)e1_; board_effect[~color_].e[sq_] += (uint8_t)e2_; }
 
-#endif // ifndef _CONFIG_H_INCLUDED
-
+#endif // if !defined(CONFIG_H_INCLUDED)

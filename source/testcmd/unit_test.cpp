@@ -12,7 +12,7 @@ using namespace std;
 
 #if defined(YANEURAOU_ENGINE) && defined (EVAL_LEARN)
 namespace Learner {
-	extern void UnitTest(Test::UnitTester& unittest);
+	void UnitTest(Test::UnitTester& unittest);
 }
 #endif
 
@@ -118,7 +118,7 @@ namespace Test
 	//  unittest auto_player_loop 1000 auto_player_depth 6
 	//  →　探索深さ6での自己対局を1000回行うUnitTest。(やねうら王探索部 + EVAL_LEARN版が必要)
 
-	void UnitTest(Position& pos, istringstream& is)
+	void UnitTest([[maybe_unused]] Position& pos, istringstream& is)
 	{
 		// UnitTest開始時に"isready"コマンドを実行したのに相当する初期化はなされているものとする。
 		is_ready();
@@ -155,9 +155,14 @@ namespace Test
 		auto limits_org = Search::Limits;
 		tester.after_run = [&]() { Search::Limits = limits_org; };
 
+		// ConsiderationModeをオフにしておかないとPV出力の時に置換表を漁るのでその時にdo_move()をして
+		// 探索ノード数が加算されてしまい、depth固定のbenchなのに探索ノード数や読み筋が変化することがある。
+		// (これが変化されてしまうと再現性がなくなってしまい、デバッグする時に都合が悪い。)
+		Search::Limits.consideration_mode = false;
+
 		// --- 各classに対するUnitTest
 
-#if defined(YANEURAOU_ENGINE) && defined (EVAL_LEARN)
+#if defined(YANEURAOU_ENGINE) && defined(EVAL_LEARN)
 		// 自己対局のテスト(これはデバッガで追いかけたいことがあるので、他のをすっ飛ばして最初にやって欲しい)
 		tester.run(Learner::UnitTest);
 #endif
@@ -171,6 +176,9 @@ namespace Test
 
 		// Position class
 		tester.run(Position::UnitTest);
+
+		// Transposition Table
+		tester.run(TranspositionTable::UnitTest);
 
 		// USI namespace
 		tester.run(USI::UnitTest);

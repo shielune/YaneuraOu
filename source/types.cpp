@@ -29,18 +29,18 @@ std::string pretty(Rank r) { return pretty_jp ? std::string("一二三四五六�
 
 std::string pretty(Move m)
 {
-	if (is_drop(m))
-		return pretty(to_sq(m)  ) + pretty2(Piece(from_sq(m))) + (pretty_jp ? "打" : "*");
+	if (m.is_drop())
+		return pretty(m.to_sq()  ) + pretty2(Piece(m.from_sq())) + (pretty_jp ? "打" : "*");
 	else
-		return pretty(from_sq(m)) + pretty(to_sq(m))           + (is_promote(m) ? (pretty_jp ? "成" : "+") : "");
+		return pretty(m.from_sq()) + pretty(m.to_sq())           + (m.is_promote() ? (pretty_jp ? "成" : "+") : "");
 }
 
 std::string pretty(Move m, Piece movedPieceType)
 {
-	if (is_drop(m))
-		return pretty(to_sq(m)) + pretty2(movedPieceType) + (pretty_jp ? "打" : "*");
+	if (m.is_drop())
+		return pretty(m.to_sq()) + pretty2(movedPieceType) + (pretty_jp ? "打" : "*");
 	else
-		return pretty(to_sq(m)) + pretty2(movedPieceType) + (is_promote(m) ? (pretty_jp ? "成" : "+") : "") + "[" + pretty(from_sq(m)) + "]";
+		return pretty(m.to_sq()) + pretty2(movedPieceType) + (m.is_promote() ? (pretty_jp ? "成" : "+") : "") + "[" + pretty(m.from_sq()) + "]";
 }
 
 std::string to_usi_string(Move   m){ return USI::move(m); }
@@ -104,46 +104,49 @@ std::ostream& operator<<(std::ostream& os, RepetitionState rs)
 namespace Search {
 	LimitsType Limits;
 
-	/// RootMove::extract_ponder_from_tt() is called in case we have no ponder move
-	/// before exiting the search, for instance, in case we stop the search during a
-	/// fail high at root. We try hard to have a ponder move to return to the GUI,
-	/// otherwise in case of 'ponder on' we have nothing to think about.
+	// Called in case we have no ponder move before exiting the search,
+	// for instance, in case we stop the search during a fail high at root.
+	// We try hard to have a ponder move to return to the GUI,
+	// otherwise in case of 'ponder on' we have nothing to think about.
 
-	// 探索を抜ける前にponderの指し手がないとき(rootでfail highしているだとか)にこの関数を呼び出す。
-	// ponderの指し手として何かを指定したほうが、その分、相手の手番において考えられて得なので。
+	// 探索を終了する前にponder moveがない場合に呼び出されます。
+	// 例えば、rootでfail highが発生して探索を中断した場合などです。
+	// GUIに返すponder moveをできる限り準備しようとしますが、
+	// そうでない場合、「ponder on」の際に考えるべきものが何もなくなります。
 
-	bool RootMove::extract_ponder_from_tt(Position& pos, Move ponder_candidate)
+	bool RootMove::extract_ponder_from_tt(const TranspositionTable& tt, Position& pos, Move ponder_candidate)
 	{
 		StateInfo st;
-		bool ttHit;
 
-		//    ASSERT_LV3(pv.size() == 1);
+		ASSERT_LV3(pv.size() == 1);
 
-		// 詰みの局面が"ponderhit"で返ってくることがあるので、ここでのpv[0] == MOVE_RESIGNであることがありうる。
-		if (!is_ok(pv[0]))
+		// 詰みの局面が"ponderhit"で返ってくることがあるので、
+		// ここでのpv[0] == Move::resign()であることがありうる。
+
+		if (!pv[0].is_ok())
 			return false;
 
-		pos.do_move(pv[0], st, pos.gives_check(pv[0]));
-		TTEntry* tte = TT.read_probe(pos.state()->hash_key(), ttHit);
-		Move m;
+		pos.do_move(pv[0], st);
+
+		auto [ttHit, ttData, ttWriter] = tt.probe(pos.key(), pos);
 		if (ttHit)
 		{
-			m = pos.to_move(tte->move()); // SMP safeにするためlocal copy
-			if (MoveList<LEGAL_ALL>(pos).contains(m))
-				goto FOUND;
+			Move m = ttData.move;
+			//if (MoveList<LEGAL>(pos).contains(ttData.move))
+			// ⇨ Stockfishのこのコード、pseudo_legalとlegalで十分なのではないか？
+			if (pos.pseudo_legal_s<true>(m) && pos.legal(m))
+				pv.push_back(m);
 		}
 		// 置換表にもなかったので以前のiteration時のpv[1]をほじくり返す。
-		m = ponder_candidate;
-		if (MoveList<LEGAL_ALL>(pos).contains(m))
-			goto FOUND;
+		else if (ponder_candidate)
+		{
+			Move m = ponder_candidate;
+			if (pos.pseudo_legal_s<true>(m) && pos.legal(m))
+				pv.push_back(m);
+		}
 
 		pos.undo_move(pv[0]);
-		return false;
-	FOUND:;
-		pos.undo_move(pv[0]);
-		pv.push_back(m);
-		//    std::cout << m << std::endl;
-		return true;
+		return pv.size() > 1;
 	}
 }
 
@@ -157,6 +160,8 @@ Value drawValueTable[REPETITION_NB][COLOR_NB] =
 	{  VALUE_SUPERIOR    ,  VALUE_SUPERIOR    }, // REPETITION_SUPERIOR
 	{ -VALUE_SUPERIOR    , -VALUE_SUPERIOR    }, // REPETITION_INFERIOR
 };
+
+Move16 Move::to_move16() const { return Move16(data); }
 
 #if defined(USE_GLOBAL_OPTIONS)
 GlobalOptions_ GlobalOptions;
