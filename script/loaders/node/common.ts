@@ -33,6 +33,7 @@ export interface EmscriptenEngine {
   postMessage?: (cmd: string) => void;
   terminate?: () => void;
   addMessageListener?: (listener: (line: string) => void) => void;
+  callMain?: (args: readonly string[]) => number;
   FS?: unknown;
 }
 
@@ -258,6 +259,46 @@ export async function loadFactory(
  * regardless of which tap the engine is actually using on this emscripten
  * version.
  */
+/**
+ * Call the engine's main() explicitly. On Node we spawn engines with
+ * `noInitialRun: true`, so main() has to be triggered by hand to run
+ * YaneuraOu's Options / NNUE / Thread init sequence. Safe to call even
+ * if the build doesn't expose `callMain` — we just log a warning so
+ * the caller knows to rebuild with the updated EXPORTED_RUNTIME_METHODS.
+ */
+export function runMainInit(engine: EmscriptenEngine): void {
+  if (typeof engine.callMain === "function") {
+    if (process.env.YANEURA_DEBUG_TAP) {
+      process.stderr.write("[runMainInit] calling engine.callMain([])\n");
+    }
+    try {
+      const ret = engine.callMain([]);
+      if (process.env.YANEURA_DEBUG_TAP) {
+        process.stderr.write(`[runMainInit] callMain returned ${ret}\n`);
+      }
+    } catch (e) {
+      const err = e as Error;
+      // emscripten uses `throw ExitStatus` to signal normal exit from
+      // main(); swallow that so we can continue driving the engine.
+      if (err && err.name === "ExitStatus") {
+        if (process.env.YANEURA_DEBUG_TAP) {
+          process.stderr.write(
+            `[runMainInit] main() exited normally (ExitStatus)\n`,
+          );
+        }
+        return;
+      }
+      throw e;
+    }
+    return;
+  }
+  process.stderr.write(
+    "[wasm-eval-node] warning: engine.callMain is not exposed by this " +
+      "build — engine Options / NNUE will not be initialised. Rebuild " +
+      "with -s EXPORTED_RUNTIME_METHODS including 'callMain'.\n",
+  );
+}
+
 export async function instantiateWithUnifiedStdout(
   ctx: LoaderContext,
   shimUrl: URL,
@@ -290,6 +331,7 @@ export async function instantiateWithUnifiedStdout(
   if (typeof engine.addMessageListener === "function") {
     engine.addMessageListener((s: string) => tap("addMsg", s));
   }
+  runMainInit(engine);
   return engine;
 }
 
@@ -303,6 +345,14 @@ export async function instantiateEngine(
     wasmBinary,
     mainScriptUrlOrBlob: pathToFileURL(ctx.jsPath).href,
     locateFile: (p: string) => path.join(ctx.libDir, p),
+    // Skip the automatic main() on Node. YaneuraOu's main() runs an
+    // initialization sequence (Options, NNUE, Threads) and then — under
+    // __EMSCRIPTEN__ — does nothing else (USI::loop is #if'd out in
+    // source/main.cpp). But emscripten's Node runtime still ends up
+    // deadlocking ccall("usi_command", ...) when main runs automatically.
+    // So we skip it here and call it manually via engine.callMain([])
+    // further down — that gives us the full init without the deadlock.
+    noInitialRun: true,
     instantiateWasm: (
       imports: WebAssembly.Imports,
       receiveInstance: (

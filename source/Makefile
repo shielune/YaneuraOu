@@ -222,11 +222,16 @@ else
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
-		# ENVIRONMENT includes `node` on top of `web,worker` so the same
-		# generated JS can also be driven from a Node-based runner
-		# (script/wasm_eval_node.ts) in addition to the Playwright+Chromium
-		# runner. Keeps a single artefact serving two verification pipelines.
-		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node -s EXPORT_ES6=1 -s AUTO_NATIVE_LIBRARIES=0
+		# Two variants are produced from the same source by the outer
+		# driver (script/wasm_build.js): one with ENVIRONMENT=web,worker
+		# for Playwright + Chromium, and one with ENVIRONMENT=node for
+		# the wasm_eval_node.ts runner. EM_ENVIRONMENT is set per build
+		# by the driver. Node variant also adds `callMain` to the
+		# exported runtime methods so the Node loader can explicitly run
+		# main() after the factory resolves with noInitialRun=true.
+		EM_ENVIRONMENT ?= web,worker
+		EM_EXPORTED_RUNTIME_METHODS ?= ['FS','ccall']
+		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=$(EM_ENVIRONMENT) -s EXPORT_ES6=1 -s AUTO_NATIVE_LIBRARIES=0
 		# emscripten 3.1.74 以降、INCOMING_MODULE_JS_API のデフォルトから
 		# print/printErr/postRun/preRun が外れ、wasm_pre.js の Module.print /
 		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの
@@ -234,7 +239,12 @@ else
 		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
 		LDFLAGS += -s PTHREAD_POOL_SIZE=32
 		# -s PTHREAD_POOL_SIZE_STRICT=32
-		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
+		# EXPORTED_RUNTIME_METHODS is parameterised by EM_EXPORTED_RUNTIME_METHODS.
+		# The Node variant adds `callMain` so the loader can explicitly run
+		# main() after the factory resolves with noInitialRun=true, to
+		# register Options / initialise NNUE without entering the blocking
+		# USI REPL (main.cpp skips USI::loop under __EMSCRIPTEN__ anyway).
+		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
 		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=4294967296
 		LDFLAGS += -s STACK_SIZE=67108864
 		# LDFLAGS += -s PROXY_TO_PTHREAD
