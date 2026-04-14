@@ -1,28 +1,61 @@
 ---
 name: wasm-eval-runner
-description: Run the built YaneuraOu WASM engine inside headless Chromium via Playwright, send a fixed SFEN, and compare `score`/`bestmove` against the 3.1.43 baseline (`cp 381 / G*9g / depth 24`). Use to verify that a rebuild for a new emscripten version preserves search behaviour. This skill drives `script/wasm_eval_all.sh`, `script/wasm_eval_browser.ts`, and `script/wasm_eval_runner.html`. It does not build, does not edit engine source, does not edit Makefile flags.
+description: Run the built YaneuraOu WASM engine through BOTH a Node path (node:worker_threads) and a Playwright path (headless Chromium), send a fixed SFEN, and compare `score`/`bestmove` against the 3.1.43 baseline (`cp 381 / G*9g / depth 24`). Use to verify that a rebuild for a new emscripten version preserves search behaviour. This skill owns `script/wasm_eval_all.sh`, `script/wasm_eval_node.ts`, `script/wasm_eval_browser.ts`, `script/wasm_eval_runner.html`, `script/wasm_eval_common.ts`, and the per-generation loaders in `script/loaders/`. It does not build, does not edit engine source, does not edit Makefile flags.
 ---
 
 # Skill: WASM Runtime Eval Verifier
 
 You are the **eval verification** specialist. Given the path to a built
 `yaneuraou.<pkg>.js` (with its sibling `.wasm`), your job is to run it in
-headless Chromium through Playwright, issue a fixed USI search, collect the
-result, and tell the leader whether the output still matches the baseline.
+both headless Chromium (via Playwright) and Node (via `node:worker_threads`),
+issue a fixed USI search on each, collect the results, and tell the leader
+whether the outputs still match the baseline.
+
+Why both runners? They exercise different emscripten code paths:
+
+- **Node** (`wasm_eval_node.ts`) — runs the same artefact the production
+  tools (`cli`, tests) would run. Catches regressions that only show up
+  when the main thread is Node-polyfilled.
+- **Browser** (`wasm_eval_browser.ts`) — runs the same artefact the end-user
+  frontend ships. Catches regressions that only show up under real
+  Chromium's pthread+SharedArrayBuffer stack.
+
+If only one path passes and the other fails, that's **useful signal** —
+the divergence tells the leader where the break is.
 
 You do not build. You do not edit engine source. You do not edit Makefile
 flags. If you discover that the *runner* (not the engine) is what's broken,
-you are allowed to patch `script/wasm_eval_runner.html` or
-`script/wasm_eval_browser.ts` — but only the runner glue, never the engine.
+you are allowed to patch the runner glue — never the engine.
 
 ## Files you own
 
+### Runners (top level)
+
 | Path | Role |
 |---|---|
-| `script/wasm_eval_all.sh` | Batch runner over all `build/<ver>/<pkg>/lib/yaneuraou.*.js` artefacts. Edit freely. |
-| `script/wasm_eval_browser.ts` | Playwright host that spins a COOP/COEP static server on a random port and runs `wasm_eval_runner.html` in headless Chromium. Edit freely for runner-side shims (e.g. how stdout is piped back from pthread workers), **not** for engine bug workarounds. |
-| `script/wasm_eval_runner.html` | The in-browser driver. Contains the USI sequence: `usi` → `setoption` → `isready` → `position sfen …` → `go btime 0 wtime 0 byoyomi <thinkMs>`. Edit freely. |
-| `script/wasm_eval_test.mjs`, `script/wasm_eval_worker_shim.mjs` | Legacy Node runner, kept for 3.1.43 nostalgia. Leave untouched unless the leader explicitly asks. |
+| `script/wasm_eval_all.sh` | Batch runner. Iterates every `build/<ver>/<pkg>/lib/yaneuraou.*.js` artefact and invokes each enabled runner (`RUNNERS=node,browser` by default). |
+| `script/wasm_eval_node.ts` | Node entry point. Picks a loader from `script/loaders/node/` and drives `runUsiEval`. |
+| `script/wasm_eval_browser.ts` | Playwright host. Spins a COOP/COEP static server (that on-the-fly transpiles `.ts` via `Bun.Transpiler`), launches headless Chromium, and navigates to `runner.html`. |
+| `script/wasm_eval_runner.html` | The in-browser driver. Dynamic-imports `script/loaders/browser/` and `script/wasm_eval_common.ts`, picks a loader, runs `runUsiEval`. |
+| `script/wasm_eval_common.ts` | **Environment-agnostic** USI flow (`usi → setoption → isready → position → go`). Both runners use it. Change here to change the flow for *both*. |
+
+### Loaders (per-generation, per-environment)
+
+| Path | Role |
+|---|---|
+| `script/loaders/types.ts` | `EngineInstance`, `LoaderContext`, `Loader` interfaces. Do not change casually — both runners depend on the shapes. |
+| `script/loaders/version.ts` | Tiny semver helpers + `classifyVersion` that buckets emscripten versions into `classic-worker` / `esmodule-worker` / `ccall-only` generations. |
+| `script/loaders/detect.ts` | Pure string path → `LoaderContext`. Node passes the fs path; browser passes the URL + an explicit `versionOverride`. |
+| `script/loaders/node/worker_shim.ts` | Runs inside `worker_threads.Worker`. Emulates a web worker environment for the pthread entry — sets `self.name = "em-pthread"`, polyfills `importScripts`, `fetch(file://)`, and (when `workerData.teeStdout`) tees worker-side `console.log` back through `parentPort.postMessage({__yaneurao_stdout, text})`. |
+| `script/loaders/node/common.ts` | Node bootstrap: `ensureWebGlobals`, `installWorkerPolyfill` (node:worker_threads), `installMainConsoleTap`, `instantiateWithUnifiedStdout`. |
+| `script/loaders/node/classic_worker.ts` | Loader for emscripten `= 3.1.43`. |
+| `script/loaders/node/esmodule_worker.ts` | Loader for `3.1.44 ≤ v < 3.1.74`. |
+| `script/loaders/node/ccall_only.ts` | Loader for `v ≥ 3.1.74`. |
+| `script/loaders/node/index.ts` | Ordered registry of the Node loaders. |
+| `script/loaders/browser/common.ts` | Browser bootstrap: `loadEngine`, `installConsoleTap`, `installWorkerStdoutTap`, `loadEngineWithUnifiedStdout`. |
+| `script/loaders/browser/{classic,esmodule,ccall_only}_worker.ts` | Browser-side counterparts to the three Node loaders. |
+| `script/loaders/browser/index.ts` | Ordered registry of the browser loaders. |
+| `script/wasm_eval_test.mjs`, `script/wasm_eval_worker_shim.mjs` | **Legacy** Node runner kept for 3.1.43 parity tests. Leave untouched unless the leader explicitly asks. Prefer the new loader architecture for everything else. |
 | `docs/wasm_eval_results.md` | **You update this** at the end of each run. The leader owns the document structurally; you contribute per-version rows. |
 
 Files you **must not** touch:
@@ -55,48 +88,130 @@ Other packages do not have an officially frozen baseline — if the leader asks
 you to verify `halfkp` or `material`, note that a "correct" answer can only
 be defined by parity between 3.1.43 and the target version.
 
-## How the runner actually works
+## How the loader architecture works
 
-Two things to remember so you can debug fast when it misbehaves:
+Both runners share the same shape:
 
-1. **COOP/COEP headers are mandatory.** `wasm_eval_browser.ts` serves the
-   lib directory with `Cross-Origin-Opener-Policy: same-origin` and
-   `Cross-Origin-Embedder-Policy: require-corp`. Without these,
-   `crossOriginIsolated` is false, `SharedArrayBuffer` is unavailable, and
-   pthread startup will fail with a confusing error. If you ever see
-   "`not crossOriginIsolated`" in the runner output, that is always a
-   server-header problem, not an engine problem.
+```
+  wasm_eval_{node,browser}.ts          <-- entry point
+         │
+         ▼
+  buildContext(...) + pickLoader(...)  <-- detect.ts + version.ts
+         │
+         ▼
+  EngineInstance { sendCommand, onLine, dispose }
+         │
+         ▼
+  runUsiEval(engine, { sfen, thinkMs, … }) -> EvalResult   <-- wasm_eval_common.ts
+```
 
-2. **Main thread and worker stdout both take a non-default path.** Emscripten
-   ≥ 3.1.74 hard-codes main-thread stdout to `console.log` and ships an
-   empty pthread proxy handler list, so neither `Module.print` nor the
-   worker's stdout reach us through the normal emscripten channel. To work
-   around this:
-   - `wasm_eval_browser.ts` injects a prelude at server-response time that,
-     when loaded inside a pthread worker (`self.name === "em-pthread"`),
-     reroutes `console.log` through `postMessage({__yaneurao_stdout: true,
-     text: …})`.
-   - `wasm_eval_runner.html` patches `window.Worker` to `addEventListener`
-     every spawned pthread worker and collect those messages, and
-     additionally shadows `console.log` on the main thread to push into the
-     same `lines` buffer.
-   - USI commands are sent via `engine.ccall("usi_command", "number",
-     ["string"], [cmd])` synchronously instead of `engine.postMessage`,
-     because `Module.postRun` is no longer reliably invoked.
+What changes between environments is **how the `EngineInstance` is built**,
+which is the loader's responsibility.
 
-   **If you need to change how stdout flows, both files must stay in sync.**
-   The server-side prelude and the client-side Worker interceptor are two
-   halves of one mechanism.
+### Unified stdout tap — why it exists
+
+Every loader uses what we call the "unified triple-tap". Different
+emscripten generations route stdout through different places, and the
+generation-to-path mapping is not stable enough to special-case per
+version. So we always install every known tap and merge them:
+
+1. **Module factory `print` / `printErr` callbacks** — works when
+   `wasm_pre.js`'s `Module["print"]` override is still effective and
+   `INCOMING_MODULE_JS_API` has `print` whitelisted.
+2. **`addMessageListener`** — works when `wasm_pre.js`'s `Module.postRun`
+   queue wiring is still effective.
+3. **Out-of-band stdout tap** — catches whatever the first two miss:
+   - **Node**: `node:worker_threads` is started with `{ stdout: true,
+     stderr: true }`, and `pipeLines` reads the worker's stdout/stderr
+     streams line by line → `push()`. On top of that, the `worker_shim`
+     reroutes worker-side `console.log` through a `__yaneurao_stdout`
+     postMessage, which the Worker polyfill intercepts. And the **main
+     thread** installs `installMainConsoleTap` so that the Node runtime's
+     own `console.log` (which `emscripten.out()` falls back to when
+     `Module.print` is ignored) is also captured.
+   - **Browser**: `installConsoleTap` shadows `console.log` on the main
+     thread, and `installWorkerStdoutTap` patches `window.Worker` so every
+     pthread worker is listened to for `__yaneurao_stdout` messages. Those
+     messages are produced by a server-side prelude that
+     `wasm_eval_browser.ts` injects into the engine JS only: when the JS
+     loads inside an `em-pthread` worker, the prelude reroutes
+     `console.log` through `postMessage`.
+
+A consequence: **each loader also buffers** every pushed line into a
+local `buffered[]` array, and replays the buffer to the listener registered
+by `runUsiEval`. This is because stdout can start flowing *before*
+`runUsiEval` has had a chance to call `onLine` — especially in Node where
+`ensureWebGlobals` → `installWorkerPolyfill` → `instantiateEngine` each
+synchronously emit a few lines during initialisation.
+
+If you change the stdout flow, **change it in exactly one place**:
+`installWorker*`, `installConsoleTap`, or `instantiateWithUnifiedStdout` /
+`loadEngineWithUnifiedStdout`. Do not add new taps in the individual
+loader files unless the loader truly needs a version-specific path — and
+if it does, document *why* at the top of that file.
+
+### Commands always go through `ccall`
+
+Across every generation the loader's `sendCommand` calls
+`engine.ccall("usi_command", "number", ["string"], [cmd])` rather than
+`engine.postMessage`. On 3.1.43/3.1.70 both paths work; on 3.1.74+ only
+`ccall` is reliable; unifying them means the USI flow in
+`wasm_eval_common.ts` never has to know which generation it's driving.
+
+### Browser specifics
+
+- **COOP/COEP headers are mandatory.** `wasm_eval_browser.ts` serves every
+  file with `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`. Without those,
+  `crossOriginIsolated` is false, `SharedArrayBuffer` is unavailable, and
+  pthread startup fails with a confusing error. Any "not
+  crossOriginIsolated" error is always a server-header problem.
+- **`.ts` files are transpiled on the fly** via `Bun.Transpiler`. The
+  runner HTML imports `./loaders/*.ts` directly; the server sees `.ts`
+  requests and returns transpiled JavaScript. If you add a new browser
+  loader file, no build step is needed — just reference it by its `.ts`
+  path.
+- **Version must be passed in from outside**: the browser side can't
+  detect emscripten version from a served URL like `/engine/yaneuraou.k-p.js`,
+  so `wasm_eval_browser.ts` extracts the version from the on-disk path and
+  appends `?version=X.Y.Z` to the runner URL. `runner.html` passes that
+  through to `buildContext(..., versionOverride)`.
+
+### Node specifics
+
+- **Everything runs through `bun`**, not `node`. The loaders and runners
+  are `.ts` files and the legacy Node tools (`wasm_eval_test.mjs`) are the
+  only remaining `.mjs` — Bun runs both.
+- **`wasm_pre.js` still matters**. If you see "all three taps produced
+  zero lines" for a particular version, the first thing to check is that
+  the Makefile's `INCOMING_MODULE_JS_API` still whitelists `print`,
+  `printErr`, `postRun`, `preRun`. Without it, taps 1 and 2 silently
+  become no-ops, and tap 3 is your last line of defence.
+- **`ENVIRONMENT=web,worker,node` is required in `source/Makefile`.**
+  Without `node`, emscripten's generated JS does not include the Node
+  code path and you'll hit failure modes the polyfills can't recover
+  from. If a rebuilt artefact fails Node but succeeds browser, check the
+  build log for the `ENVIRONMENT=` flag.
 
 ## How to run one version
 
-For a single engine file the leader hands you:
+For a single engine file the leader hands you, run it through **both**
+runners and compare:
 
 ```bash
+bun script/wasm_eval_node.ts \
+  build/3.1.74_x86_64/k-p/lib/yaneuraou.k-p.js \
+  --think-ms 30000
+
 bun script/wasm_eval_browser.ts \
   build/3.1.74_x86_64/k-p/lib/yaneuraou.k-p.js \
   --think-ms 30000
 ```
+
+If only one runner passes, **that is the finding** — report it as such.
+Don't assume a passing runner means the build is good; conversely, don't
+assume a failing runner means the build is broken without checking the
+other one.
 
 The script:
 
@@ -141,13 +256,19 @@ Failure output (from inside the runner, e.g. the 3.1.74 timeout) looks like:
 THINK_MS=30000 PKG=k-p ./script/wasm_eval_all.sh
 ```
 
-This walks every `build/*/k-p/lib/yaneuraou.k-p.js` in sort order and
-appends to `build/eval_results_<timestamp>.jsonl`. For quick iteration use
-`THINK_MS=5000`.
+Environment knobs:
+- `THINK_MS` — think time in milliseconds (default 5000).
+- `PKG` — restrict to a single package (default: all present).
+- `RUNNERS` — comma-separated subset of `{node,browser}` (default: both).
 
-Prefer `run_in_background: true` for the 30 s runs — a full matrix of 9
-versions is ≥ 5 min even at 5 s think time, and at 30 s it's more like
-10–20 min.
+This walks every `build/*/k-p/lib/yaneuraou.k-p.js` in sort order and
+appends one result block per `(version, package, runner)` combination to
+`build/eval_results_<timestamp>.jsonl`. For quick iteration use
+`THINK_MS=5000`; the final verification gate is still 30000 ms per runner.
+
+Prefer `run_in_background: true` for the 30 s runs — a full matrix of
+9 versions × 2 runners is ≥ 10 min even at 5 s, and at 30 s it's more
+like 30+ minutes.
 
 ## Comparing to baseline — what counts as a pass
 
@@ -171,26 +292,33 @@ not a verdict against an imaginary baseline.
 
 ## Reporting
 
-Return to the leader a compact status block per version:
+Return to the leader a compact status block per `(version, runner)`:
 
 ```
-eval 3.1.74 k-p → PASS
-  score   : cp 381 (baseline cp 381)       ✅
-  bestmove: G*9g (baseline G*9g)           ✅
-  depth   : 24
-  nodes   : 22.71M (in band)
+eval 3.1.74 k-p node    → PASS
+eval 3.1.74 k-p browser → PASS
+  score   : cp 381 / cp 381 (baseline cp 381)  ✅ both runners
+  bestmove: G*9g / G*9g  (baseline G*9g)       ✅
+  depth   : 24 / 24
+  nodes   : 22.71M / 22.68M (both in band)
   thinkMs : 30000
 ```
 
-or:
+or, for a split result:
 
 ```
-eval 3.1.74 k-p → FAIL (runtime / worker-stdout)
-  error   : go timeout — workerMsgs delta=0 stdoutMsgs=0
-  source  : worker never posted back; likely INCOMING_MODULE_JS_API
-            drop still effective → hand back to wasm-build-config
-  log tail: (last 15 lines)
+eval 3.1.74 k-p node    → FAIL (usi timeout — all taps silent)
+eval 3.1.74 k-p browser → PASS  (cp 381 / G*9g / depth 24)
+  diagnosis: Node-side wasm_pre.js path broken but browser path works.
+             Check whether ENVIRONMENT=web,worker,node is actually set
+             in the build log. If yes, suspect a Node-specific regression
+             in wasm_pre.js or the Node loader's unified-tap wiring.
+             Hand back to wasm-code-fixer or wasm-build-config per
+             root cause.
 ```
+
+**Always include both runner verdicts**. "Browser passes" alone is not
+a green light.
 
 ## Updating the results doc
 
