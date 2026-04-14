@@ -33,6 +33,10 @@
     "ghcr.io/dhoeric/features/act:1": {},
     "ghcr.io/ebaskoro/devcontainer-features/emscripten:1": {
       "version": "3.1.43"
+    },
+    "ghcr.io/shyim/devcontainers-features/bun:0": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "latest"
     }
   },
   "postAttachCommand": "/bin/sh .devcontainer/postAttachCommand.sh",
