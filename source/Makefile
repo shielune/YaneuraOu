@@ -222,7 +222,11 @@ else
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
-		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker -s EXPORT_ES6=1 -s AUTO_NATIVE_LIBRARIES=0
+		# ENVIRONMENT includes `node` on top of `web,worker` so the same
+		# generated JS can also be driven from a Node-based runner
+		# (script/wasm_eval_node.ts) in addition to the Playwright+Chromium
+		# runner. Keeps a single artefact serving two verification pipelines.
+		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node -s EXPORT_ES6=1 -s AUTO_NATIVE_LIBRARIES=0
 		# emscripten 3.1.74 以降、INCOMING_MODULE_JS_API のデフォルトから
 		# print/printErr/postRun/preRun が外れ、wasm_pre.js の Module.print /
 		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの

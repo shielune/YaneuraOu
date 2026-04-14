@@ -15,119 +15,36 @@ window.__error = null;
 
 async function main() {
   const params = new URLSearchParams(location.search);
-  const engineJs = params.get("engine");      // e.g. "./yaneuraou.k-p.js"
+  const engineJs = params.get("engine");         // e.g. "/engine/yaneuraou.k-p.js"
   const sfen = params.get("sfen");
   const thinkMs = Number(params.get("think") || "30000");
   const threads = Number(params.get("threads") || "1");
   const hash = Number(params.get("hash") || "64");
+  const version = params.get("version");         // passed in by wasm_eval_browser.ts
 
+  if (!version) throw new Error("missing ?version= in runner URL");
+  if (!engineJs) throw new Error("missing ?engine= in runner URL");
   if (!crossOriginIsolated) {
     throw new Error("not crossOriginIsolated — SharedArrayBuffer unavailable");
   }
 
-  const lines = [];
+  // Dynamic-import the shared modules from the static server. The server
+  // transpiles .ts files on the fly so the browser sees ES modules.
+  const { buildContext, pickLoader } = await import("/loaders/detect.ts");
+  const { browserLoaders } = await import("/loaders/browser/index.ts");
+  const { runUsiEval } = await import("/script/wasm_eval_common.ts");
 
-  // Emscripten >= 3.1.74 hard-codes main-thread stdout to console.log and
-  // ignores Module.print, so YaneuraOu's wasm_pre.js listener wiring is
-  // bypassed. Shim console.log so main-thread engine stdout reaches us.
-  const origLog = console.log;
-  console.log = (...args) => {
-    const s = args.map(String).join(" ");
-    lines.push(s);
-  };
+  const ctx = buildContext("browser", engineJs, version);
+  const loader = pickLoader(browserLoaders, ctx.emscriptenVersion);
+  push("loader: " + loader.name);
 
-  // Pthread workers route their stdout via `postMessage({__yaneurao_stdout,
-  // text})` thanks to our server-side prelude. Intercept Worker construction
-  // so we can attach a message listener without touching the engine code.
-  const RealWorker = window.Worker;
-  window.Worker = class extends RealWorker {
-    constructor(url, opts) {
-      super(url, opts);
-      push("[Worker ctor] " + (url instanceof URL ? url.href : String(url)) + " name=" + (opts?.name ?? ""));
-      super.addEventListener("message", (ev) => {
-        window.__totalWorkerMsgs = (window.__totalWorkerMsgs ?? 0) + 1;
-        if (ev && ev.data && ev.data.__yaneurao_stdout) {
-          lines.push(ev.data.text);
-          window.__stdoutMsgs = (window.__stdoutMsgs ?? 0) + 1;
-        }
-      });
-      super.addEventListener("error", (ev) => {
-        (window.__workerErrors ??= []).push(String(ev.message ?? ev));
-      });
-      super.addEventListener("messageerror", (ev) => {
-        (window.__workerErrors ??= []).push("messageerror: " + String(ev));
-      });
-    }
-  };
+  const engine = await loader.load(ctx);
+  push("engine loaded (version=" + version + ", crossOriginIsolated=" + self.crossOriginIsolated + ")");
 
-  const mod = await import(engineJs);
-  const factory = mod.default ?? mod;
+  const result = await runUsiEval(engine, { sfen, thinkMs, threads, hash });
 
-  const engine = await factory({
-    print: (s) => { lines.push(s); },
-    printErr: (s) => push("[err] " + s),
-  });
-  push("engine loaded; cross=" + self.crossOriginIsolated);
-  // Engine.postMessage is wired via wasm_pre.js → y.postRun, but emscripten
-  // >= 3.1.74 never invokes Module.postRun (INCOMING_MODULE_JS_API default
-  // change), so the command queue never drains. Drive the engine by calling
-  // ccall directly for every USI command instead.
-  const sendSync = (cmd) => engine.ccall("usi_command", "number", ["string"], [cmd]);
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const waitFor = async (pred, timeout) => {
-    const start = performance.now();
-    while (performance.now() - start < timeout) {
-      if (pred()) return true;
-      await sleep(20);
-    }
-    return false;
-  };
-  // Some commands return 1 ("busy, retry later"). Fire-and-forget with backoff.
-  const sendWithRetry = async (cmd, timeout) => {
-    const deadline = performance.now() + timeout;
-    let backoff = 1;
-    while (performance.now() < deadline) {
-      if (!sendSync(cmd)) return true;
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, 500);
-    }
-    return false;
-  };
-
-  await sendWithRetry("usi", 5000);
-  if (!await waitFor(() => lines.includes("usiok"), 20000)) {
-    throw new Error("usi timeout — tail: " + JSON.stringify(lines.slice(-10)));
-  }
-  await sendWithRetry(`setoption name Threads value ${threads}`, 5000);
-  await sendWithRetry(`setoption name USI_Hash value ${hash}`, 5000);
-  await sendWithRetry("isready", 5000);
-  if (!await waitFor(() => lines.includes("readyok"), 60000)) {
-    throw new Error("isready timeout — tail: " + JSON.stringify(lines.slice(-10)));
-  }
-
-  await sendWithRetry(`position sfen ${sfen}`, 5000);
-  const goStart = lines.length;
-  const workerMsgBefore = window.__totalWorkerMsgs ?? 0;
-  const goRet = sendSync(`go btime 0 wtime 0 byoyomi ${thinkMs}`);
-  push("go immediate return=" + goRet);
-  if (!await waitFor(() => lines.slice(goStart).some((l) => l.startsWith("bestmove")), thinkMs + 15000)) {
-    throw new Error(
-      "go timeout — workerMsgs delta=" + ((window.__totalWorkerMsgs ?? 0) - workerMsgBefore) +
-      " stdoutMsgs=" + (window.__stdoutMsgs ?? 0) +
-      " errors=" + JSON.stringify(window.__workerErrors ?? []).slice(0, 200)
-    );
-  }
-
-  const goLines = lines.slice(goStart);
-  const infos = goLines.filter((l) => l.startsWith("info") && l.includes(" score "));
-  const lastInfo = infos[infos.length - 1] ?? null;
-  const bestmove = goLines.find((l) => l.startsWith("bestmove")) ?? null;
-
-  const m = lastInfo && lastInfo.match(/\bscore (cp|mate) (-?\d+)/);
-  const score = m ? { kind: m[1], value: Number(m[2]) } : null;
-
-  return { sfen, thinkMs, threads, hash, score, bestmove, lastInfo, infoCount: infos.length };
+  try { await engine.dispose(); } catch (e) { push("dispose error: " + e); }
+  return result;
 }
 
 main().then((r) => {
