@@ -614,6 +614,7 @@ const engine = await createYaneuraOuEdge({
   hash: 16,      // MB (省略時 usiHash と同値)
 });
 
+// --- 単発 (独立した 1 局面を評価) ---
 const result: EvalResult = await engine.eval({
   sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
   byoyomi: 500,     // ms。内部では `go movetime` として発行
@@ -623,14 +624,34 @@ const result: EvalResult = await engine.eval({
 // result.ponder        : "8c8d" | null
 // result.score         : { kind: "cp" | "mate", value: number, bound? }
 // result.depth/nodes/pv/...
+
+// --- 連続 (棋譜解析: N 局面を 1 エンジン instance で一括評価) ---
+const results: EvalResult[] = await engine.evalBatch(
+  sfens.map((sfen) => ({ sfen, byoyomi: 500 })),
+);
 ```
 
 - `createYaneuraOuEdge()` 内で `usi` → `setoption Threads/Hash` → `isready`
-  までを済ませ、以降は `eval()` の繰り返しで使い回せるようにしてある。
-- **連続 `eval()` 呼び出しは内部で自動直列化される**ので、呼び出し側で
-  ロックを取る必要は無い。
+  までを済ませ、以降は `eval()` / `evalBatch()` の繰り返しで使い回せる
+  ようにしてある。
+- **連続 `eval()` / `evalBatch()` 呼び出しは内部で自動直列化される**ので、
+  呼び出し側でロックを取る必要は無い。
 - `dispose()` で `Module.terminate()` を呼ぶ。Isolate が捨てられる前に
   呼ぶと綺麗だが、呼び忘れても実害は無い。
+
+#### `eval()` と `evalBatch()` の違い
+
+| | `eval(req)` | `evalBatch(reqs)` |
+|---|---|---|
+| 用途 | **独立した 1 局面** の評価 (対局時の 1 手思考、局面検討など) | **連続した局面列** の評価 (棋譜解析) |
+| 置換表 (TT) 状態 | 毎回 `usinewgame` でクリア | **Batch 最初に 1 回だけ** `usinewgame`。Batch 内は前の局面の TT を次の局面で再利用 |
+| option 適用 | 1 局面ごとに設定 (SkillLevel / MultiPV / DepthLimit / NodesLimit) | **配列先頭の要素から** まとめて取る。Batch 内では option 固定 |
+| 探索効率 | 単発なので局面ごと独立 | 連続局面では **同じ探索時間でも hash hit 率が上がり、実効探索深さが伸びる** |
+| 何件までまとめていいか | — | 1 Batch = 1 USI セッションなので Workers の CPU time 上限 30 s に収まる範囲で。`byoyomi=500 ms` なら 50〜55 局面が上限 |
+
+棋譜解析で option を要素ごとに変えたいときは Batch を分割する。
+これは TT 再利用のメリットを保ちたいための意図的な制約 (option
+変更は実質 TT flush と等価になり、Batch の旨味が消えるため)。
 
 #### option の分類 (Isolate-level vs Request-level)
 
