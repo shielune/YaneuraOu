@@ -13,6 +13,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { eq } from "../version.ts";
+import { installExternalQueue } from "../external_queue.ts";
 import { instantiateWithUnifiedStdout } from "./common.ts";
 
 const SHIM_URL = new URL("./worker_shim.ts", import.meta.url);
@@ -37,17 +38,11 @@ export const classicWorkerLoader: Loader = {
 
     const engine = await instantiateWithUnifiedStdout(ctx, SHIM_URL, push);
 
-    if (typeof engine.postMessage !== "function") {
-      throw new Error(
-        "classic-worker/node: engine.postMessage is missing — wasm_pre.js wiring failed",
-      );
-    }
+    const enqueue = installExternalQueue(engine);
 
     return {
       async sendCommand(cmd: string) {
-        // classic generation: let wasm_pre.js queue + drain, it retries
-        // internally on ccall busy returns.
-        engine.postMessage!(cmd);
+        enqueue(cmd);
       },
       onLine(listener) {
         listeners.push(listener);
