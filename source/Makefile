@@ -223,6 +223,11 @@ else
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
 		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker -s EXPORT_ES6=1 -s AUTO_NATIVE_LIBRARIES=0
+		# emscripten 3.1.74 以降、INCOMING_MODULE_JS_API のデフォルトから
+		# print/printErr/postRun/preRun が外れ、wasm_pre.js の Module.print /
+		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの
+		# stdout もメインスレッドに届かなくなる)。明示的に指定して復活させる。
+		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
 		LDFLAGS += -s PTHREAD_POOL_SIZE=32
 		# -s PTHREAD_POOL_SIZE_STRICT=32
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
