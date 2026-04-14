@@ -24,21 +24,23 @@ import { extname, dirname, basename, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectVersionFromJsPath } from "./loaders/detect.ts";
 
-const SFEN =
+const DEFAULT_SFEN =
   "lr5nl/2P2+S1k1/7p1/5bPPp/P3N4/4PP2P/1PR6/LK3G3/8L w G2S7Pb2gs2np 1";
 const DEFAULT_THINK_MS = 30000;
 
 const argv = process.argv.slice(2);
 if (argv.length < 1) {
   console.error(
-    "usage: bun script/wasm_eval_browser.ts <yaneuraou.<pkg>.js> [--think-ms N]",
+    "usage: bun script/wasm_eval_browser.ts <yaneuraou.<pkg>.js> [--think-ms N] [--sfen '<sfen>']",
   );
   process.exit(2);
 }
 const jsPath = resolve(argv[0]!);
 let thinkMs = DEFAULT_THINK_MS;
+let SFEN = DEFAULT_SFEN;
 for (let i = 1; i < argv.length; i++) {
   if (argv[i] === "--think-ms") thinkMs = Number(argv[++i]);
+  else if (argv[i] === "--sfen") SFEN = String(argv[++i]);
 }
 if (!existsSync(jsPath)) {
   console.error(`not found: ${jsPath}`);

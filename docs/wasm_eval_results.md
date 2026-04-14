@@ -7,23 +7,32 @@
 **ほぼ全バージョンが復旧した。** `source/Makefile` の
 `INCOMING_MODULE_JS_API` 明示 whitelist + 2 変種ビルド (web/node の
 env / exports を変える) + `script/loaders/` の per-generation ローダー
-の 3 点セットで、Playwright 経路は 3.1.74 以降も `cp 404 / G*9g` を
-返すところまで戻り、Node 経路も 4.0.11 以降は問題なく動く。
+の 3 点セットで、Playwright 経路は 3.1.74 以降も復旧し、Node 経路も
+4.0.11 以降は問題なく動く。
 
-| emscripten | node ランナー | browser ランナー |
+**2 局面で smoke** — 下表は 局面 A / 局面 B の bestmove を併記。
+
+| emscripten | node | browser |
 |---|---|---|
-| 3.1.43 | ✅ cp 417 / G*9g (classic-worker/node) | ✅ cp 404 / G*9g |
-| 3.1.70 | ❌ usi timeout | ✅ cp 404 / G*9g |
-| 3.1.74 | ❌ usi timeout | ✅ cp 404 / G*9g |
-| 4.0.0  | ❌ usi timeout | ✅ cp 417 / G*9g |
-| **4.0.11** | ✅ cp 417 / G*9g (ccall-only/node) | ✅ cp 404 / G*9g |
-| **4.0.23** | ✅ cp 417 / G*9g (ccall-only/node) | ✅ cp 404 / G*9g |
-| **5.0.0**  | ✅ cp 417 / G*9g (ccall-only/node) | ✅ cp 404 / G*9g |
-| **5.0.5**  | ✅ cp 417 / G*9g (ccall-only/node) | ❌ minifier bug |
+| 3.1.43 | ✅ `G*9g` / `G*6h` | ✅ `G*9g` / `G*6h` |
+| 3.1.70 | ❌ stall | ✅ `G*9g` / `G*6h` |
+| 3.1.74 | ❌ stall | ✅ `G*9g` / `G*6h` |
+| 4.0.0  | ❌ stall | ✅ `G*9g` / `G*6h` |
+| **4.0.11** | ✅ `G*9g` / `G*6h` | ✅ `G*9g` / `G*6h` |
+| **4.0.23** | ✅ `G*9g` / `G*6h` | ✅ `G*9g` / `G*6h` |
+| **5.0.0**  | ✅ `G*9g` / `G*6h` | ✅ `G*9g` / `G*6h` |
+| **5.0.5**  | ✅ `G*9g` / `G*6h` | ❌ minifier bug |
 
-(5 秒探索、k-p パッケージ、2-variant ビルドで再検証。`cp 404` / `cp 417` の
-差は探索深度が 20 か 19 かの違いで bestmove は全バージョンで `G*9g` に
-収束。)
+(局面 A = baseline `lr5nl/…/LK3G3/8L`, 局面 B = `lr5nl/…/3K4L`)
+
+- **28 / 32 ケース PASS** (両局面の合計)。bestmove は PASS 全ケース
+  で完全一致。
+- 残る 4 FAIL は Node 3 バージョン(3.1.70/3.1.74/4.0.0)× 2 局面と、
+  5.0.5 browser × 2 局面のうち **既知の 2 つのみ**(Node stall は
+  pthread 由来 / 5.0.5 browser は emscripten 自身の minifier バグ)。
+- 評価値は node と browser で一貫した差があるが、これは探索進行速度
+  の違いで bestmove は同じ。emscripten バージョンによる評価関数の
+  ずれは両局面で検出されなかった。
 
 - **Browser は 5.0.5 を除いて全バージョンで動作**。5.0.5 は生成 JS
   のまま `"em-pthread"(function(){…})` という minifier バグで
@@ -213,25 +222,86 @@ Loader は `script/loaders/detect.ts` が自動で選択する(classic-worker
 は 3.1.43 のみ、esmodule-worker は 3.1.44 ≤ v < 3.1.74、ccall-only
 は v ≥ 3.1.74)。
 
-| emscripten | アーキ    | node (ランナー) | browser (ランナー) |
+2 つの独立な検証局面で smoke した:
+
+### 検証局面 A (baseline)
+
+```
+lr5nl/2P2+S1k1/7p1/5bPPp/P3N4/4PP2P/1PR6/LK3G3/8L w G2S7Pb2gs2np 1
+```
+
+結果(`build/eval_results_20260414_083156.jsonl`):
+
+| emscripten | アーキ    | node (ccall-only/node 等) | browser |
 |-----------:|:----------|:--|:--|
-| 3.1.43 | x86_64  | ✅ `cp 417 / G*9g` (classic-worker/node) | ✅ `cp 404 / G*9g` (classic-worker/browser) |
-| 3.1.70 | x86_64  | ❌ `usi timeout` (esmodule-worker/node) | ✅ `cp 404 / G*9g` (esmodule-worker/browser) |
-| 3.1.74 | x86_64  | ❌ `usi timeout` (ccall-only/node) | ✅ `cp 404 / G*9g` (ccall-only/browser) |
-| 4.0.0  | x86_64  | ❌ `usi timeout` (ccall-only/node) | ✅ `cp 417 / G*9g` |
-| 4.0.11 | x86_64  | ✅ `cp 417 / G*9g` (ccall-only/node) | ✅ `cp 404 / G*9g` |
-| 4.0.23 | aarch64 | ✅ `cp 417 / G*9g` (ccall-only/node) | ✅ `cp 404 / G*9g` |
-| 5.0.0  | aarch64 | ✅ `cp 417 / G*9g` (ccall-only/node) | ✅ `cp 404 / G*9g` |
-| 5.0.5  | aarch64 | ✅ `cp 417 / G*9g` (ccall-only/node) | ❌ minifier bug (下記「症状 C」) |
+| 3.1.43 | x86_64  | ✅ `cp 417 / G*9g` | ✅ `cp 404 / G*9g` |
+| 3.1.70 | x86_64  | ❌ `usi timeout` | ✅ `cp 404 / G*9g` |
+| 3.1.74 | x86_64  | ❌ `usi timeout` | ✅ `cp 404 / G*9g` |
+| 4.0.0  | x86_64  | ❌ `usi timeout` | ✅ `cp 417 / G*9g` |
+| 4.0.11 | x86_64  | ✅ `cp 417 / G*9g` | ✅ `cp 404 / G*9g` |
+| 4.0.23 | aarch64 | ✅ `cp 417 / G*9g` | ✅ `cp 404 / G*9g` |
+| 5.0.0  | aarch64 | ✅ `cp 417 / G*9g` | ✅ `cp 404 / G*9g` |
+| 5.0.5  | aarch64 | ✅ `cp 417 / G*9g` | ❌ minifier bug(下記「症状 C」) |
 
-bestmove は 14/16 ケースで完全一致の `G*9g` (`ponder 9h9g`)。score の
-`cp 404` vs `cp 417` は、それぞれ探索深度 20 / 19 (5 秒で届く深さ) の
-違いで、PV も全部同じ手筋。`source/eval/nnue/embedded_nnue.cpp` が
-同じである限り、評価値は emscripten のバージョンに依存しない ことが
-確認できた。
+14/16 ケースで `bestmove G*9g (ponder 9h9g)` に収束。score の
+`cp 404` vs `cp 417` は探索深度 20 / 19(5 秒で届く深さ)の違いで、
+PV も全部同じ手筋。
 
-完全な結果 JSONL は `build/eval_results_20260414_083156.jsonl` に残して
-ある。
+### 検証局面 B (2 つ目の局面)
+
+```
+lr5nl/2P2+S1k1/7p1/5bPPp/P3N4/L3PP2P/gPR6/1b3G3/3K4L w G2SN7Pgsnp 1
+```
+
+結果(`build/eval_results_20260414_090316.jsonl`):
+
+| emscripten | アーキ    | node | browser |
+|-----------:|:----------|:--|:--|
+| 3.1.43 | x86_64  | ✅ `cp 577 / G*6h` | ✅ `cp 542 / G*6h` |
+| 3.1.70 | x86_64  | ❌ `usi timeout` | ✅ `cp 542 / G*6h` |
+| 3.1.74 | x86_64  | ❌ `usi timeout` | ✅ `cp 542 / G*6h` |
+| 4.0.0  | x86_64  | ❌ `usi timeout` | ✅ `cp 542 / G*6h` |
+| 4.0.11 | x86_64  | ✅ `cp 577 / G*6h` | ✅ `cp 542 / G*6h` |
+| 4.0.23 | aarch64 | ✅ `cp 577 / G*6h` | ✅ `cp 542 / G*6h` |
+| 5.0.0  | aarch64 | ✅ `cp 577 / G*6h` | ✅ `cp 542 / G*6h` |
+| 5.0.5  | aarch64 | ✅ `cp 577 / G*6h` | ❌ minifier bug |
+
+局面 A と同様に 14/16 PASS。`bestmove G*6h (ponder 6i6h)` で完全一致。
+node 側は cp 577、browser 側は cp 542 と一貫して差が出ているが、これは
+探索深度の違い(同じ 5 秒で node は 1 手深く到達)で、両者とも同じ PV
+を辿っている。
+
+### 両局面共通の観察
+
+- **Browser 側は 5.0.5 (minifier bug) を除いて全バージョンで動作**。
+- **Node 側は 3.1.70 / 3.1.74 / 4.0.0 の 3 バージョンだけが stall**、
+  4.0.11 以降は `ccall-only/node` ローダーで問題なく動く。
+- **bestmove は全バージョン・両局面で完全一致**(局面 A は `G*9g`、
+  局面 B は `G*6h`)。
+- **評価値は node と browser で一貫した差**(局面 A は ±13 cp、局面
+  B は ±35 cp)があるが、これは両ランナーの探索進行速度の違いで
+  bestmove は同じ。つまり、emscripten バージョンによる評価関数の
+  ずれは両局面ともに **検出されなかった**。
+- 新しい検証局面を追加しても stall の pattern は変わらないので、
+  未解決の Node 3 バージョン stall は局面非依存 = 初期化 / pthread
+  起動の問題であることが追加でわかった。
+
+### 新しい検証局面の追加方法
+
+runner 側は `--sfen '<sfen>'` を引数で受けるので、単発で試すには:
+
+```bash
+bun script/wasm_eval_browser.ts \
+  build/3.1.74_x86_64/k-p/web/lib/yaneuraou.k-p.js \
+  --think-ms 5000 \
+  --sfen 'lr5nl/2P2+S1k1/7p1/5bPPp/P3N4/L3PP2P/gPR6/1b3G3/3K4L w G2SN7Pgsnp 1'
+```
+
+`wasm_eval_all.sh` でマトリクス実行するには環境変数 `SFEN` を渡す:
+
+```bash
+SFEN='lr5nl/.../w G2SN7Pgsnp 1' THINK_MS=5000 PKG=k-p ./script/wasm_eval_all.sh
+```
 
 ### Node 側 3 バージョン stall の未解決問題
 

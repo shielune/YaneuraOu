@@ -11,6 +11,8 @@
 #   THINK_MS   — thinking time in ms (default 5000)
 #   PKG        — restrict to a single package (default: all present)
 #   RUNNERS    — comma-separated subset of {node,browser} (default: both)
+#   SFEN       — position to evaluate (default: the long-form baseline
+#                in script/wasm_eval_{node,browser}.ts)
 
 set -u
 cd "$(dirname "$0")/.."
@@ -18,9 +20,10 @@ cd "$(dirname "$0")/.."
 THINK_MS="${THINK_MS:-5000}"
 PKG_FILTER="${PKG:-}"
 RUNNERS="${RUNNERS:-node,browser}"
+SFEN="${SFEN:-}"
 OUT="build/eval_results_$(date +%Y%m%d_%H%M%S).jsonl"
 
-echo "writing results to $OUT (runners=$RUNNERS, think=${THINK_MS}ms)"
+echo "writing results to $OUT (runners=$RUNNERS, think=${THINK_MS}ms${SFEN:+, sfen=$SFEN})"
 
 collect_for_variant() {
   local variant="$1"
@@ -38,7 +41,11 @@ run_one() {
     browser) script="script/wasm_eval_browser.ts" ;;
     *)       echo "unknown runner: $runner" >&2; return 2 ;;
   esac
-  bun "$script" "$js" --think-ms "$THINK_MS" 2>&1 | tail -60
+  if [[ -n "$SFEN" ]]; then
+    bun "$script" "$js" --think-ms "$THINK_MS" --sfen "$SFEN" 2>&1 | tail -60
+  else
+    bun "$script" "$js" --think-ms "$THINK_MS" 2>&1 | tail -60
+  fi
 }
 
 IFS=',' read -ra RUNNER_LIST <<<"$RUNNERS"
