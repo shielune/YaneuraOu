@@ -8,7 +8,7 @@
 
 // 思考エンジンのバージョンとしてUSIプロトコルの"usi"コマンドに応答するときの文字列。
 // ただし、この値を数値として使用することがあるので数値化できる文字列にしておく必要がある。
-#define ENGINE_VERSION "7.61"
+#define ENGINE_VERSION "7.63"
 
 // --------------------
 //  思考エンジンの種類
@@ -208,12 +208,9 @@
 // ---------------------
 
 // 評価関数を教師局面から学習させるときに使うときのモード
+// "learn"コマンドが使えるようになる。(教師局面からの評価関数パラメーターの学習ができるようになる。)
+// "gensfen"コマンドも使えるようになる。(教師局面の生成もできるようになる。)
 //#define EVAL_LEARN
-
-
-// 教師生成用の特殊コマンド"gensfen2019"を使えるようにするモード。
-// 教師生成用の探索パラメーターも別途用意するといいかも。
-//#define GENSFEN2019
 
 
 // sfenを256bitにpackする機能、unpackする機能を有効にする。
@@ -285,6 +282,9 @@
 // ふかうら王でTensorRTを使う時はこちら。
 //#define TENSOR_RT
 
+// ふかうら王でCore MLを使う時はこちら。
+// ※　Mac専用。
+//#define COREML
 
 // ---------------------
 // 探索パラメーターの自動調整用
@@ -342,15 +342,14 @@
 // 長い利き(遠方駒の利き)のライブラリを用いるか。
 // 超高速1手詰め判定などではこのライブラリが必要。
 // do_move()のときに利きの差分更新を行なうので、do_move()は少し遅くなる。(その代わり、利きが使えるようになる)
-//#define LONG_EFFECT_LIBRARY
+// #define LONG_EFFECT_LIBRARY
 
 
 // position.hのStateInfoに直前の指し手、移動させた駒などの情報を保存しておくのか
 // これが保存されていると詰将棋ルーチンなどを自作する場合においてそこまでの手順を表示するのが簡単になる。
 // (Position::moves_from_start_pretty()などにより、わかりやすい手順が得られる。
 // ただし通常探索においてはやや遅くなるので思考エンジンとしてリリースするときには無効にしておくこと。
-
-//#define KEEP_LAST_MOVE
+// #define KEEP_LAST_MOVE
 
 
 // GlobalOptionという、EVAL_HASHを有効/無効を切り替えたり、置換表の有効/無効を切り替えたりする
@@ -364,7 +363,7 @@
 
 // "Threads"オプション が 8以下の設定の時でも強制的に bindThisThread()を呼び出して、指定されたNUMAで動作するようにする。
 // "ThreadIdOffset"オプションと併用して、狙ったNUMAで動作することを強制することができる。
-//#define FORCE_BIND_THIS_THREAD
+// #define FORCE_BIND_THIS_THREAD
 
 
 // PVの出力時の千日手に関する出力をすべて"rep_draw"に変更するオプション。
@@ -375,6 +374,11 @@
 // ニコニコ生放送の電王盤用
 // 電王盤はMultiPV非対応なので定跡を送るとき、"multipv"をつけずに1番目の候補手を送信する必要がある。
 // #define NICONICO
+
+
+// Pawn Historyの有効化。これ、計測したら少し弱くなっていたのでデフォルトでは無効化しておくことにした。
+// #define ENABLE_PAWN_HISTORY
+
 
 // ===============================================================
 // ここ以降では、↑↑↑で設定した内容に基づき必要なdefineを行う。
@@ -674,6 +678,8 @@ constexpr bool pretty_jp = false;
 #define HASH_KEY_BITS 64
 #endif
 
+// ここ、typedef ではなく usingで書きたいが、現時点でKey64が未定義なので…。
+
 #if HASH_KEY_BITS <= 64
 #define HASH_KEY Key64
 #elif HASH_KEY_BITS <= 128
@@ -686,6 +692,13 @@ constexpr bool pretty_jp = false;
 #define TT_CLUSTER_SIZE 3
 #endif
 
+
+// --- gensfen
+
+// LEARN版では"gensfen"コマンドが使えるようになる。
+#if defined(EVAL_LEARN)
+#define GENSFEN2019
+#endif
 
 // --- lastMove
 
@@ -813,8 +826,6 @@ constexpr bool pretty_jp = false;
 			#define EVAL_TYPE_NAME "ORT_CPU-" << EVAL_DEEP
 		#elif defined(ORT_DML)
 			#define EVAL_TYPE_NAME "ORT_DML-" << EVAL_DEEP
-		#elif defined(ORT_MKL)
-			#define EVAL_TYPE_NAME "ORT_MKL-" << EVAL_DEEP
 		#elif defined(ORT_TRT)
 			#define EVAL_TYPE_NAME "ORT_TRT-" << EVAL_DEEP
 		#else
@@ -823,6 +834,8 @@ constexpr bool pretty_jp = false;
 	#elif defined(TENSOR_RT)
 		#include "NvInferRuntimeCommon.h"
 		#define EVAL_TYPE_NAME "TensorRT" << std::to_string(getInferLibVersion()) << "-" << EVAL_DEEP
+	#elif defined(COREML)
+		#define EVAL_TYPE_NAME "CoreML-" << EVAL_DEEP
 	#endif
 
 #else

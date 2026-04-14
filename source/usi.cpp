@@ -152,7 +152,7 @@ namespace USI
 	// --------------------
 
 	// depth : iteration深さ
-	std::string pv(const Position& pos, Depth depth, Value alpha, Value beta)
+	std::string pv(const Position& pos, Depth depth)
 	{
 #if defined(YANEURAOU_ENGINE_DEEP)
 		// ふかうら王では、この関数呼び出さないからまるっと要らない。
@@ -171,7 +171,7 @@ namespace USI
 #endif
 		const auto& rootMoves = pos.this_thread()->rootMoves;
 		size_t pvIdx = pos.this_thread()->pvIdx;
-		size_t multiPV = std::min((size_t)Options["MultiPV"], rootMoves.size());
+		size_t multiPV = std::min(size_t(Options["MultiPV"]), rootMoves.size());
 
 		uint64_t nodes_searched = Threads.nodes_searched();
 
@@ -186,7 +186,7 @@ namespace USI
 
 			// 1より小さな探索depthで出力しない。
 			Depth d = updated ? depth : std::max(1, depth - 1);
-			Value v = updated ? rootMoves[i].score : rootMoves[i].previousScore;
+			Value v = updated ? rootMoves[i].usiScore : rootMoves[i].previousScore;
 
 			// multi pv時、例えば3個目の候補手までしか評価が終わっていなくて(PVIdx==2)、このとき、
 			// 3,4,5個目にあるのは前回のiterationまでずっと評価されていなかった指し手であるような場合に、
@@ -210,21 +210,17 @@ namespace USI
 				;
 
 			// これが現在探索中の指し手であるなら、それがlowerboundかupperboundかは表示させる
-			if (i == pvIdx)
-				ss << (v >= beta ? " lowerbound" : v <= alpha ? " upperbound" : "");
+	        if (i == pvIdx && /*!tb &&*/ updated) // tablebase- and previous-scores are exact
+				ss << (rootMoves[i].scoreLowerbound ? " lowerbound" : (rootMoves[i].scoreUpperbound ? " upperbound" : ""));
 
 			// 将棋所はmultipvに対応していないが、とりあえず出力はしておく。
 			if (multiPV > 1)
 				ss << " multipv " << (i + 1);
 
 			ss << " nodes " << nodes_searched
-			   << " nps "   << nodes_searched * 1000 / elapsed;
-
-			// 置換表使用率。経過時間が短いときは意味をなさないので出力しない。
-			if (elapsed > 1000)
-				ss << " hashfull " << TT.hashfull();
-
-			ss << " time " << elapsed
+			   << " nps "   << nodes_searched * 1000 / elapsed
+			   << " hashfull " << TT.hashfull()
+			   << " time " << elapsed
 			   << " pv";
 
 
@@ -243,14 +239,14 @@ namespace USI
 				auto pos_ = const_cast<Position*>(&pos);
 				Move moves[MAX_PLY + 1];
 				StateInfo si[MAX_PLY];
-				int ply = 0;
+				size_t ply = 0;
 
 				while ( ply < MAX_PLY )
 				{
 					// 千日手はそこで終了。ただし初手はPVを出力。
 					// 千日手がベストのとき、置換表を更新していないので
 					// 置換表上はMOVE_NONEがベストの指し手になっている可能性があるので早めに検出する。
-					auto rep = pos.is_repetition(ply);
+					auto rep = pos.is_repetition(int(ply));
 					if (rep != REPETITION_NONE && ply >= 1)
 					{
 						// 千日手でPVを打ち切るときはその旨を表示
@@ -260,10 +256,10 @@ namespace USI
 
 					Move m;
 
-					// MultiPVを考慮して初手は置換表からではなくrootMovesから取得
-					// rootMovesには宣言勝ちも含まれるので注意。
-					if (ply == 0)
-						m = rootMoves[i].pv[0];
+					// まず、rootMoves.pvを辿れるところまで辿る。
+					// rootMoves[i].pv[0]は宣言勝ちの指し手(MOVE_WIN)の可能性があるので注意。
+					if (ply < rootMoves[i].pv.size())
+						m = rootMoves[i].pv[ply];
 					else
 					{
 						// 次の手を置換表から拾う。
@@ -277,6 +273,10 @@ namespace USI
 							break;
 
 						m = pos.to_move(tte->move());
+
+						// leaf nodeはわりと高い確率でMOVE_NONE
+						if (m == MOVE_NONE)
+							break;
 
 						// 置換表にはpsudo_legalではない指し手が含まれるのでそれを弾く。
 						// 宣言勝ちでないならこれが合法手であるかのチェックが必要。
@@ -303,6 +303,12 @@ namespace USI
 
 					moves[ply] = m;
 					ss << " " << m;
+
+					// 注)
+					// このdo_moveで Position::nodesが加算されるので探索ノード数に影響が出る。
+					// benchコマンドで探索ノード数が一致しない場合、これが原因。
+					// → benchコマンドでは、ConsiderationMode = falseにすることで
+					// 　PV表示のためにdo_move()を呼び出さないようにした。
 
 					pos_->do_move(m, si[ply]);
 					++ply;
@@ -700,20 +706,6 @@ void go_cmd(const Position& pos, istringstream& is , StateListPtr& states , bool
 				limits.mate = stoi(token);
 		}
 
-#if defined(TANUKI_MATE_ENGINE)
-		// MateEngineのデバッグ用コマンド: 詰将棋の特定の変化に対する解析を効率的に行うことが出来る。
-		//	cf.https ://github.com/yaneurao/YaneuraOu/pull/115
-
-		else if (token == "matedebug") {
-			string token="";
-			Move16 m;
-			limits.pv_check.clear();
-			while (is >> token && (m = USI::to_move16(token)) != MOVE_NONE){
-				limits.pv_check.push_back(m);
-			}
-		}
-#endif
-
 		// パフォーマンステスト(Stockfishにある、合法手N手で到達できる局面を求めるやつ)
 		// このあとposition～goコマンドを使うとパフォーマンステストモードに突入し、ここで設定した手数で到達できる局面数を求める
 		else if (token == "perft")		is >> limits.perft;
@@ -737,6 +729,27 @@ void go_cmd(const Position& pos, istringstream& is , StateListPtr& states , bool
 				main_thread->position_is_dirty = true;
 			}
 		}
+
+		// --- やねうら王独自拡張
+
+		// "wait_stop"指定。
+		else if (token == "wait_stop")
+			limits.wait_stop = true;
+
+#if defined(TANUKI_MATE_ENGINE)
+		// MateEngineのデバッグ用コマンド: 詰将棋の特定の変化に対する解析を効率的に行うことが出来る。
+		//	cf.https ://github.com/yaneurao/YaneuraOu/pull/115
+
+		else if (token == "matedebug") {
+			string token="";
+			Move16 m;
+			limits.pv_check.clear();
+			while (is >> token && (m = USI::to_move16(token)) != MOVE_NONE){
+				limits.pv_check.push_back(m);
+			}
+		}
+#endif
+
 	}
 
 	// goコマンド、デバッグ時に使うが、そのときに"go btime XXX wtime XXX byoyomi XXX"と毎回入力するのが面倒なので
@@ -948,6 +961,7 @@ void usi_cmdexec(Position& pos, StateListPtr& states, string& cmd)
 				filename += ".txt";
 				sync_cout << "USI Commands from File = " << filename << sync_endl;
 				vector<string> lines;
+
 				SystemIO::ReadAllLines(filename, lines);
 				for (auto& line : lines)
 					std_input.push(line);
@@ -1134,29 +1148,38 @@ namespace {
 }
 
 #if defined(USE_PIECE_VALUE)
+/// Turns a Value to an integer centipawn number,
+/// without treatment of mate and similar special scores.
+// 詰みやそれに類似した特別なスコアの処理なしに、Valueを整数のセントポーン数に変換します、
+int USI::to_cp(Value v) {
+
+  return 100 * v / USI::NormalizeToPawnValue;
+}
+
 // スコアを歩の価値を100として正規化して出力する。
 // USE_PIECE_VALUEが定義されていない時は正規化しようがないのでこの関数は呼び出せない。
 std::string USI::value(Value v)
 {
 	ASSERT_LV3(-VALUE_INFINITE < v && v < VALUE_INFINITE);
 
-	std::stringstream s;
+	std::stringstream ss;
 
 	// 置換表上、値が確定していないことがある。
 	if (v == VALUE_NONE)
-		s << "none";
+		ss << "none";
 	else if (abs(v) < VALUE_MATE_IN_MAX_PLY)
-		s << "cp " << v * 100 / int(Eval::PawnValue);
+		//s << "cp " << v * 100 / int(Eval::PawnValue);
+		ss << "cp " << USI::to_cp(v);
 	else if (v == -VALUE_MATE)
 		// USIプロトコルでは、手数がわからないときには "mate -"と出力するらしい。
 		// 手数がわからないというか詰んでいるのだが…。これを出力する方法がUSIプロトコルで定められていない。
 		// ここでは"-0"を出力しておく。
 		// ※　ShogiGUIだと、これで"+詰"と出力されるようである。
-		s << "mate -0";
+		ss << "mate -0";
 	else
-		s << "mate " << (v > 0 ? VALUE_MATE - v : -VALUE_MATE - v);
+		ss << "mate " << (v > 0 ? VALUE_MATE - v : -VALUE_MATE - v);
 
-	return s.str();
+	return ss.str();
 }
 #endif
 

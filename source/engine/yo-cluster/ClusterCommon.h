@@ -63,7 +63,7 @@ namespace YaneuraouTheCluster
 	};
 
 	// USI_Messageの文字列化
-	std::string to_string(USI_Message usi);
+	extern std::string to_string(USI_Message usi);
 
 	// EngineNegotiatorに対してClusterObserverから送信するメッセージ。
 	// 
@@ -144,7 +144,7 @@ namespace YaneuraouTheCluster
 	};
 
 	// EngineNegotiatorStateを文字列化する。
-	std::string to_string(EngineState state);
+	extern std::string to_string(EngineState state);
 
 	// ---------------------------------------
 	//          文字列操作
