@@ -116,11 +116,14 @@ std::shared_ptr<T> MakeAlignedSharedPtr(ArgumentTypes&&... arguments) {
 
     // Trainerクラスのほうでゼロ初期化するのでここではゼロ初期化はされていないメモリで良い。
 
-	void* ptr_ = aligned_large_pages_alloc(sizeof(T));
+    void* ptr_ = LargeMemory::static_alloc(sizeof(T), alignof(T));
     const auto ptr = new(ptr_)
         T(std::forward<ArgumentTypes>(arguments)...);
+	LargeMemoryDeleter<T> deleter;
 
-    return std::shared_ptr<T>(ptr, LargePageDeleter<T>());
+    //sync_cout << "trainer.alloc(" << sizeof(T) << "," << alignof(T) << ")" << sync_endl;
+
+    return std::shared_ptr<T>(ptr,deleter);
 
 }
 

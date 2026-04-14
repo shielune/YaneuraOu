@@ -30,7 +30,7 @@ namespace {
 	// ----------------------------------
 
 	// N手詰みの局面を生成する。
-	void gen_mate([[maybe_unused]] Position& pos, std::istringstream& is)
+	void gen_mate(Position& pos, std::istringstream& is)
 	{
 #if !defined (EVAL_LEARN)
 		cout << "Error! genmate command is only for EVAL_LEARN" << endl;
@@ -119,7 +119,7 @@ namespace {
 					auto pv = Learner::search(pos, search_depth , 1);
 
 					Move m = pv.second[0];
-					if (m == Move::none())
+					if (m == MOVE_NONE)
 						break;
 
 					pos.do_move(m, states[ply + 1]);
@@ -133,8 +133,8 @@ namespace {
 
 					// mate_min_ply - 2で詰まなくて、
 					// mate_max_plyで詰むことを確認すれば良いはず。
-					if (solver.mate_odd_ply(newPos, min_ply - 2, true) == Move::none()
-						&& solver.mate_odd_ply(newPos, max_ply, true) != Move::none())
+					if (solver.mate_odd_ply(newPos, min_ply - 2, true) == MOVE_NONE
+						&& solver.mate_odd_ply(newPos, max_ply, true) != MOVE_NONE)
 					{
 						// 発見した。
 
@@ -470,7 +470,7 @@ namespace {
 		Move m = dfpn.mate_dfpn(pos, (u32)nodes);
 		cout << "time = " << time.elapsed() << endl;
 		auto nodes_searched = dfpn.get_nodes_searched();
-		if (m != Move::none() && m != Move::null())
+		if (m != MOVE_NONE && m != MOVE_NULL)
 		{
 			cout << "solved! , nodes_searched = " << nodes_searched << endl;
 
@@ -481,7 +481,7 @@ namespace {
 			cout << endl;
 		}
 		else {
-			if (m == Move::null())
+			if (m == MOVE_NULL)
 				cout << "solved! this is no mate. nodes_searched = " << nodes_searched << endl;
 			else if (dfpn.is_out_of_memory())
 				cout << "out of memory" << endl;
@@ -534,7 +534,7 @@ namespace {
 #endif
 
 	// MATE ENGINEのテスト。(ENGINEに対して局面図を送信する)
-	void mate_bench2([[maybe_unused]] Position& pos, [[maybe_unused]] std::istringstream& is)
+	void mate_bench2(Position& pos, std::istringstream& is)
 	{
 #if !defined (TANUKI_MATE_ENGINE) && !defined(YANEURAOU_MATE_ENGINE)
 		cout << "Error! : define TANUKI_MATE_ENGINE or YANEURAOU_MATE_ENGINE" << endl;
@@ -548,10 +548,8 @@ namespace {
 
 		Search::LimitsType limits;
 
-		// ConsiderationModeをオフにしておかないとPV出力の時に置換表を漁るのでその時にdo_move()をして
-		// 探索ノード数が加算されてしまい、depth固定のbenchなのに探索ノード数が変化することがある。
-		limits.consideration_mode = false;
-		// →　ただし、探索部でこのオプションの値を上書きしていないものとする。
+		// ベンチマークモードにしておかないとPVの出力のときに置換表を漁られて探索に影響がある。
+		limits.bench = true;
 
 		// 探索制限
 		limits.nodes = 0;
