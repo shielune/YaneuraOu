@@ -25,17 +25,49 @@
 
 ## 0. 前提: ビルド成果物のレイアウト
 
-`make build` 経由で `script/wasm_build.js` を呼ぶと、パッケージ 1 つあたり
-以下のファイルが生成される(`k-p` 例):
+`make build` 経由で `script/wasm_build.js` を呼ぶと、パッケージ 1 つに
+つき **web 変種と node 変種の 2 つ** が生成される。同じソースから
+`EM_ENVIRONMENT` / `EM_EXPORTED_RUNTIME_METHODS` だけ切り替えて別々に
+ビルドされる (`script/wasm_build.js` の `variants` 配列参照):
 
 ```
-build/<emscripten-ver>_<arch>/k-p/lib/
-├── yaneuraou.k-p.js          ← ES module factory (import 対象)
-├── yaneuraou.k-p.wasm        ← 本体
-├── yaneuraou.k-p.worker.js   ← ★3.1.43 のみ (classic worker)
-├── yaneuraou.k-p.{js,wasm}.{br,gz}   ← 配信用圧縮済み
-├── yaneuraou.k-p.d.ts        ← factory の型定義
-└── yaneuraou.module.d.ts     ← Module 型定義
+build/<emscripten-ver>_<arch>/k-p/
+├── web/                       ← ブラウザ向け
+│   └── lib/
+│       ├── yaneuraou.k-p.js          ← ES module factory (import 対象)
+│       ├── yaneuraou.k-p.wasm        ← 本体
+│       ├── yaneuraou.k-p.worker.js   ← ★3.1.43 のみ (classic worker)
+│       ├── yaneuraou.k-p.{js,wasm}.{br,gz}   ← 配信用圧縮済み
+│       ├── yaneuraou.k-p.d.ts
+│       └── yaneuraou.module.d.ts
+└── node/                      ← Node 向け
+    └── lib/
+        └── (同じ構成)
+```
+
+**web 変種** のビルドフラグ:
+
+```
+-s ENVIRONMENT=web,worker
+-s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
+```
+
+**node 変種** のビルドフラグ:
+
+```
+-s ENVIRONMENT=node
+-s "EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']"
+```
+
+両変種とも共通:
+
+```
+--pre-js wasm_pre.js
+-s EXPORT_ES6=1 -s MODULARIZE=1
+-s PTHREAD_POOL_SIZE=32
+-s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=<pkg> -s MAXIMUM_MEMORY=4294967296
+-s STACK_SIZE=67108864
+-s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,...    # 3.1.74+ 必須
 ```
 
 `yaneuraou.k-p.js` はすべてのバージョンで **ES module** (`-s
@@ -68,7 +100,8 @@ export interface YaneuraOuModule extends EmscriptenModule {
 ## 1. ブラウザ — 3.1.43 (classic worker)
 
 `engine/index.ts` が既に実装している正攻法。`postMessage` で駆動、
-`addMessageListener` で応答を受ける。
+`addMessageListener` で応答を受ける。import するのは **web 変種** の
+artefact(`build/<ver>_<arch>/k-p/web/lib/yaneuraou.k-p.js`)。
 
 ```ts
 import YaneuraOu_K_P from './lib/yaneuraou.k-p'
@@ -241,9 +274,10 @@ window.Worker = PatchedWorker
 
 ## 4. Node — 3.1.43 (worker_threads 経由)
 
-Node からブラウザ向けビルドを動かすには、`node:worker_threads` で
-`Worker` をポリフィルする必要がある。`ENVIRONMENT=web,worker` のみで
-ビルドされた artefact でも動く。
+Node から YaneuraOu を呼ぶときは **node 変種**
+(`build/<ver>_<arch>/k-p/node/lib/yaneuraou.k-p.js`) を使う。
+`ENVIRONMENT=node` でビルドされている分 Node 固有の runtime 分岐が
+生きていて、`engine.callMain` も露出している。
 
 ```ts
 import { Worker as NodeWorker } from 'node:worker_threads'
@@ -407,7 +441,7 @@ bun script/wasm_eval_browser.ts \
 
 ```bash
 bun script/wasm_eval_browser.ts \
-  build/<ver>_<arch>/<pkg>/lib/yaneuraou.<pkg>.js \
+  build/<ver>_<arch>/<pkg>/web/lib/yaneuraou.<pkg>.js \
   --think-ms 5000
 ```
 
@@ -418,11 +452,11 @@ bun script/wasm_eval_browser.ts \
 
 ```bash
 bun script/wasm_eval_node.ts \
-  build/3.1.43_x86_64/k-p/lib/yaneuraou.k-p.js \
+  build/3.1.43_x86_64/k-p/node/lib/yaneuraou.k-p.js \
   --think-ms 5000
 ```
 
-3.1.43 のみ動作。3.1.60+ は現状 stall。
+3.1.43 のみ動作確認済み。3.1.60+ は現状 stall(調査中)。
 
 ### 全バージョン/両ランナー一括実行
 
@@ -488,9 +522,10 @@ module worker かは loader 側の責任。アプリは USI コマンドのシ�
 
 ## 8. ビルドフラグ早見表
 
-| 項目 | browser / 3.1.43 | browser / 3.1.60 – 3.1.73 | browser / 3.1.74+ | node |
+| 項目 | web 変種 / 3.1.43 | web / 3.1.60–3.1.73 | web / 3.1.74+ | node 変種 |
 |---|---|---|---|---|
-| `ENVIRONMENT` | `web,worker` | `web,worker` | `web,worker` | `node` (検証中) |
+| ビルド出力先 | `build/.../k-p/web/lib/` | 同 | 同 | `build/.../k-p/node/lib/` |
+| `ENVIRONMENT` | `web,worker` | `web,worker` | `web,worker` | `node` |
 | `EXPORT_ES6` / `MODULARIZE` | 必須 | 必須 | 必須 | 必須 |
 | `EXPORTED_RUNTIME_METHODS` | `['FS','ccall']` | `['FS','ccall']` | `['FS','ccall']` | `['FS','ccall','callMain']` |
 | `INCOMING_MODULE_JS_API` 明示 | 不要 | 不要 | **必須** | **必須** |
@@ -498,7 +533,13 @@ module worker かは loader 側の責任。アプリは USI コマンドのシ�
 | `--pre-js wasm_pre.js` | 必須 | 必須 | 必須 | 必須 |
 | 別 `.worker.js` が出る | ✅ | ❌ | ❌ | ❌ |
 | サーバ側 COOP/COEP | 必須 | 必須 | 必須 | N/A |
-| アプリ側 `console.log` tap | 不要 | 不要 | 推奨 | **必須** |
+| アプリ側 `console.log` tap | 不要 | 不要 | 推奨 | 推奨 |
 | アプリ側 `Worker` patch | 不要 | 不要 | 推奨 | N/A |
+| アプリ側 `noInitialRun` + `callMain` | 不要 | 不要 | 不要 | **必須** (`source/main.cpp` 初期化用) |
 
-「検証中」のセルは `docs/wasm_eval_results.md` の進捗と連動して更新する。
+両変種とも `script/wasm_build.js` が同じソースから一度のビルド呼び出しで
+自動生成する。Makefile 側の差分は `EM_ENVIRONMENT` と
+`EM_EXPORTED_RUNTIME_METHODS` の 2 変数のみ。
+
+「推奨」「必須」のセルは `docs/wasm_eval_results.md` の進捗と連動して
+更新する。
