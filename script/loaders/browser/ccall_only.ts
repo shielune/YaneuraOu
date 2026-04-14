@@ -10,7 +10,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { gte } from "../version.ts";
-import { ccallWithRetry } from "../retry.ts";
+import { installExternalQueue } from "../external_queue.ts";
 import { loadEngineWithUnifiedStdout } from "./common.ts";
 
 export const ccallOnlyLoader: Loader = {
@@ -33,18 +33,11 @@ export const ccallOnlyLoader: Loader = {
 
     const engine = await loadEngineWithUnifiedStdout(ctx, push);
 
-    if (typeof engine.ccall !== "function") {
-      throw new Error(
-        "ccall-only/browser: engine.ccall is missing — are EXPORTED_RUNTIME_METHODS correct?",
-      );
-    }
+    const enqueue = installExternalQueue(engine);
 
     return {
       async sendCommand(cmd: string) {
-        await ccallWithRetry(
-          () => engine.ccall!("usi_command", "number", ["string"], [cmd]),
-          cmd,
-        );
+        enqueue(cmd);
       },
       onLine(listener) {
         listeners.push(listener);

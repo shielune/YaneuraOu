@@ -12,6 +12,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { gte, lt } from "../version.ts";
+import { installExternalQueue } from "../external_queue.ts";
 import { instantiateWithUnifiedStdout } from "./common.ts";
 
 const SHIM_URL = new URL("./worker_shim.ts", import.meta.url);
@@ -36,17 +37,11 @@ export const esmoduleWorkerLoader: Loader = {
 
     const engine = await instantiateWithUnifiedStdout(ctx, SHIM_URL, push);
 
-    if (typeof engine.postMessage !== "function") {
-      throw new Error(
-        "esmodule-worker/node: engine.postMessage is missing — wasm_pre.js wiring failed",
-      );
-    }
+    const enqueue = installExternalQueue(engine);
 
     return {
       async sendCommand(cmd: string) {
-        // esmodule generation: let wasm_pre.js queue + drain, it retries
-        // internally on ccall busy returns.
-        engine.postMessage!(cmd);
+        enqueue(cmd);
       },
       onLine(listener) {
         listeners.push(listener);
