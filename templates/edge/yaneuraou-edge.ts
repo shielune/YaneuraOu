@@ -136,14 +136,34 @@ export interface EvalResult {
 export interface YaneuraOuEdge {
   /**
    * 1 手分の思考 (iterative deepening search) を走らせ、bestmove と
-   * 評価値を返す。複数同時に呼ぶと内部で自動的に直列化されるので、
-   * 呼び出し側でロックを取る必要は無い。
+   * 評価値を返す。独立した局面評価用 — `usinewgame` を毎回送って
+   * 置換表をリセットするので、前回の `eval()` の hash は引き継がない。
+   *
+   * 複数同時に呼ぶと内部で自動的に直列化されるので、呼び出し側で
+   * ロックを取る必要は無い。
    *
    * JS グローバルの `eval` と名前は被るが、オブジェクトメソッドなので
    * 動作上の衝突は無い (linter の `no-eval` ルールが誤検知する場合は
    * `engine["eval"](…)` で呼ぶか、ローカル変数にエイリアスする)。
    */
   eval(req: EvalRequest): Promise<EvalResult>;
+  /**
+   * 連続局面の一括評価 (棋譜解析向け)。
+   *
+   * Batch 最初に `usinewgame` を 1 度だけ送ったあと、内部で直列に
+   * `position sfen` → `go movetime` を繰り返す。**Batch 内では
+   * `usinewgame` を送らないので、前の局面の置換表がそのまま次の
+   * 局面の探索で使われる**(TT 再利用)。棋譜のように手順が連続する
+   * 局面列では、同じ探索時間でも実効探索深さが伸びる。
+   *
+   * option は **配列先頭の要素から** まとめて取る (MultiPV /
+   * SkillLevel / DepthLimit / NodesLimit)。各要素ごとに option を
+   * 変えたい場合は Batch を分割すること。
+   *
+   * Batch は単一の `serial()` エントリとして流れるので、他の
+   * `eval()` / `evalBatch()` 呼び出しとは自動的に直列化される。
+   */
+  evalBatch(reqs: EvalRequest[]): Promise<EvalResult[]>;
   /** Isolate 解放前に呼ぶ。呼び忘れても致命的ではない。 */
   dispose(): void;
 }
@@ -196,26 +216,48 @@ export async function createYaneuraOuEdge(
     return next;
   };
 
+  // request-level option を USI engine に送る。
+  // 省略された値は USI 既定値 (MultiPV=1 / SkillLevel=20 /
+  // DepthLimit=0 / NodesLimit=0) で上書きするので、前回の
+  // eval() / evalBatch() の option を引きずらない。
+  function applyRequestOptions(req: EvalRequest): void {
+    instance.postMessage(
+      `setoption name MultiPV value ${req.multiPv ?? 1}`,
+    );
+    instance.postMessage(
+      `setoption name SkillLevel value ${req.skillLevel ?? 20}`,
+    );
+    instance.postMessage(
+      `setoption name DepthLimit value ${req.depthLimit ?? 0}`,
+    );
+    instance.postMessage(
+      `setoption name NodesLimit value ${req.nodesLimit ?? 0}`,
+    );
+  }
+
+  // 1 局面ぶんの position + go movetime + bestmove 待ち + parse。
+  async function runOnePosition(req: EvalRequest): Promise<EvalResult> {
+    instance.postMessage(`position sfen ${req.sfen}`);
+    const movetime = req.byoyomi ?? 500;
+    const goMark = lines.length;
+    instance.postMessage(`go movetime ${movetime}`);
+    const ok = await waitFor(
+      () =>
+        lines.slice(goMark).some((l) => l.startsWith("bestmove")),
+      movetime + 30_000,
+    );
+    if (!ok) {
+      throw new Error(`go movetime ${movetime} → bestmove timeout`);
+    }
+    const goLines = lines.slice(goMark);
+    return parseGoResult(goLines);
+  }
+
   async function evalPosition(req: EvalRequest): Promise<EvalResult> {
     return serial(async () => {
-      // request-level option は毎回明示的に再設定する。
-      // 省略された場合も USI 既定値で上書きしてリセットするので、
-      // 同じ Isolate に届いた前の eval() の値を引きずらない
-      // (edge 環境では複数ユーザーが同じ instance を共有する
-      // 前提になるため)。
-      instance.postMessage(
-        `setoption name MultiPV value ${req.multiPv ?? 1}`,
-      );
-      instance.postMessage(
-        `setoption name SkillLevel value ${req.skillLevel ?? 20}`,
-      );
-      instance.postMessage(
-        `setoption name DepthLimit value ${req.depthLimit ?? 0}`,
-      );
-      instance.postMessage(
-        `setoption name NodesLimit value ${req.nodesLimit ?? 0}`,
-      );
-
+      // 単発 eval() は **独立した局面評価** 用。
+      // 置換表をクリーンにするため毎回 usinewgame を送る。
+      applyRequestOptions(req);
       instance.postMessage("usinewgame");
       const readyMark = lines.length;
       await sendAndWait(
@@ -226,25 +268,46 @@ export async function createYaneuraOuEdge(
         "eval isready → readyok timeout",
       );
 
-      instance.postMessage(`position sfen ${req.sfen}`);
-      const movetime = req.byoyomi ?? 500;
-      const goMark = lines.length;
-      instance.postMessage(`go movetime ${movetime}`);
+      const result = await runOnePosition(req);
 
-      const ok = await waitFor(
-        () =>
-          lines.slice(goMark).some((l) => l.startsWith("bestmove")),
-        movetime + 30_000,
-      );
-      if (!ok) throw new Error(`go movetime ${movetime} → bestmove timeout`);
-
-      const goLines = lines.slice(goMark);
-
-      // 過剰なメモリ消費を避けるため、この go 分の行はここで破棄する。
-      // 以降の eval() は lines[0..] を見れば十分なので、単に切り詰める。
+      // 過剰なメモリ消費を避けるため、この eval 分の行はここで破棄する。
       lines.length = 0;
 
-      return parseGoResult(goLines);
+      return result;
+    });
+  }
+
+  async function evalBatchPositions(
+    reqs: EvalRequest[],
+  ): Promise<EvalResult[]> {
+    if (reqs.length === 0) return [];
+    return serial(async () => {
+      // Batch 内は同じ option で統一 (配列先頭の値を採用)。
+      // option を途中で変えると置換表の再利用が無意味になるため
+      // API 上もサポートしない。必要なら呼び出し側で Batch を分ける。
+      applyRequestOptions(reqs[0]!);
+
+      // Batch の最初に 1 度だけ usinewgame で TT をクリーンにする。
+      // 以降の position/go は usinewgame を挟まないので、
+      // 前の局面の探索結果が次の局面の hash hit に繋がる。
+      instance.postMessage("usinewgame");
+      const readyMark = lines.length;
+      await sendAndWait(
+        instance,
+        "isready",
+        () => lines.slice(readyMark).includes("readyok"),
+        readyTimeout,
+        "evalBatch isready → readyok timeout",
+      );
+
+      const results: EvalResult[] = [];
+      for (const req of reqs) {
+        results.push(await runOnePosition(req));
+      }
+
+      // Batch が終わったら lines を切り詰める。
+      lines.length = 0;
+      return results;
     });
   }
 
@@ -256,7 +319,11 @@ export async function createYaneuraOuEdge(
     }
   }
 
-  return { eval: evalPosition, dispose };
+  return {
+    eval: evalPosition,
+    evalBatch: evalBatchPositions,
+    dispose,
+  };
 }
 
 // ---------------------------------------------------------------
