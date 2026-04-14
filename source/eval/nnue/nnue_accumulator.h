@@ -15,8 +15,7 @@ namespace NNUE {
 
 // 入力特徴量をアフィン変換した結果を保持するクラス
 // 最終的な出力である評価値も一緒に持たせておく
-// AVX-512命令を使用する場合に64bytesのアライメントが要求される。
-struct alignas(64) Accumulator {
+struct alignas(32) Accumulator {
   std::int16_t
       accumulation[2][kRefreshTriggers.size()][kTransformedFeatureDimensions];
   Value score = VALUE_ZERO;

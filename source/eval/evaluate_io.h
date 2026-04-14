@@ -198,7 +198,7 @@ namespace EvalIO
 	// input.fe_end < output.fe_endのように、fe_endを拡張するとき、
 	// mapを引数で渡して、拡張された領域が元の領域とどう対応するのか表現する必要がある。
 	//
-	bool eval_convert(const EvalInfo& input, const EvalInfo& output, const std::vector<u16 /*BonaPiece*/>* map);
+	extern bool eval_convert(const EvalInfo& input, const EvalInfo& output, const std::vector<u16 /*BonaPiece*/>* map);
 
 }
 

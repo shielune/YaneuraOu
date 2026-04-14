@@ -1,7 +1,8 @@
 ﻿// NNUE評価関数で用いる入力特徴量とネットワーク構造の定義
 
 #include "../features/feature_set.h"
-#include "../features/half_kpe9.h"
+#include "../features/k.h"
+#include "../features/p.h"
 
 #include "../layers/input_slice.h"
 #include "../layers/affine_transform.h"
@@ -12,8 +13,7 @@ namespace Eval {
 namespace NNUE {
 
 // 評価関数で用いる入力特徴量
-using RawFeatures = Features::FeatureSet<
-    Features::HalfKPE9<Features::Side::kFriend>>;
+using RawFeatures = Features::FeatureSet<Features::K, Features::P>;
 
 // 変換後の入力特徴量の次元数
 constexpr IndexType kTransformedFeatureDimensions = 256;

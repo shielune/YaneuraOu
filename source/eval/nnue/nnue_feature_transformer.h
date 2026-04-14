@@ -24,7 +24,7 @@ namespace Eval::NNUE {
 #define VECTOR
 
 #if defined(USE_AVX512)
-using vec_t = __m512i;
+typedef __m512i vec_t;
 #define vec_load(a) _mm512_load_si512(a)
 #define vec_store(a, b) _mm512_store_si512(a, b)
 #define vec_add_16(a, b) _mm512_add_epi16(a, b)
@@ -33,7 +33,7 @@ using vec_t = __m512i;
 static constexpr IndexType kNumRegs = 8;  // only 8 are needed
 
 #elif defined(USE_AVX2)
-using vec_t = __m256i;
+typedef __m256i vec_t;
 #define vec_load(a) _mm256_load_si256(a)
 #define vec_store(a, b) _mm256_store_si256(a, b)
 #define vec_add_16(a, b) _mm256_add_epi16(a, b)
@@ -42,7 +42,7 @@ using vec_t = __m256i;
 static constexpr IndexType kNumRegs = 16;
 
 #elif defined(USE_SSE2)
-using vec_t = __m128i;
+typedef __m128i vec_t;
 #define vec_load(a) (*(a))
 #define vec_store(a, b) *(a) = (b)
 #define vec_add_16(a, b) _mm_add_epi16(a, b)
@@ -51,7 +51,7 @@ using vec_t = __m128i;
 static constexpr IndexType kNumRegs = Is64Bit ? 16 : 8;
 
 #elif defined(USE_MMX)
-using vec_t = __m64;
+typedef __m64 vec_t;
 #define vec_load(a) (*(a))
 #define vec_store(a, b) *(a) = (b)
 #define vec_add_16(a, b) _mm_add_pi16(a, b)
@@ -60,7 +60,7 @@ using vec_t = __m64;
 static constexpr IndexType kNumRegs = 8;
 
 #elif defined(USE_NEON)
-using vec_t = int16x8_t;
+typedef int16x8_t vec_t;
 #define vec_load(a) (*(a))
 #define vec_store(a, b) *(a) = (b)
 #define vec_add_16(a, b) vaddq_s16(a, b)
@@ -114,11 +114,11 @@ class FeatureTransformer {
 
 	// Read network parameters
 	// パラメータを読み込む
-	Tools::Result ReadParameters(std::istream& stream) {
+	bool ReadParameters(std::istream& stream) {
 		for (std::size_t i = 0; i < kHalfDimensions; ++i) biases_[i] = read_little_endian<BiasType>(stream);
 		for (std::size_t i = 0; i < kHalfDimensions * kInputDimensions; ++i)
 			weights_[i] = read_little_endian<WeightType>(stream);
-		return !stream.fail() ? Tools::ResultCode::Ok : Tools::ResultCode::FileReadError;
+		return !stream.fail();
 	}
 
 	// Write network parameters
@@ -190,12 +190,6 @@ class FeatureTransformer {
 				    _mm512_load_si512(&reinterpret_cast<const __m512i*>(accumulation[perspectives[p]][0])[j * 2 + 0]);
 				__m512i sum1 =
 				    _mm512_load_si512(&reinterpret_cast<const __m512i*>(accumulation[perspectives[p]][0])[j * 2 + 1]);
-				for (IndexType i = 1; i < kRefreshTriggers.size(); ++i) {
-					sum0 = _mm512_add_epi16(
-					    sum0, reinterpret_cast<const __m512i*>(accumulation[perspectives[p]][i])[j * 2 + 0]);
-					sum1 = _mm512_add_epi16(
-					    sum1, reinterpret_cast<const __m512i*>(accumulation[perspectives[p]][i])[j * 2 + 1]);
-				}
 				_mm512_store_si512(&out[j], _mm512_permutexvar_epi64(
 				                                kControl, _mm512_max_epi8(_mm512_packs_epi16(sum0, sum1), kZero)));
 			}
@@ -295,11 +289,7 @@ class FeatureTransformer {
 					const IndexType offset = kHalfDimensions * index;
 					auto accumulation      = reinterpret_cast<vec_t*>(&accumulator.accumulation[perspective][i][0]);
 					auto column            = reinterpret_cast<const vec_t*>(&weights_[offset]);
-#if defined(USE_AVX512)
-					constexpr IndexType kNumChunks = kHalfDimensions / kSimdWidth;
-#else
 					constexpr IndexType kNumChunks = kHalfDimensions / (kSimdWidth / 2);
-#endif
 					for (IndexType j = 0; j < kNumChunks; ++j) {
 						accumulation[j] = vec_add_16(accumulation[j], column[j]);
 					}
@@ -337,11 +327,7 @@ class FeatureTransformer {
 			RawFeatures::AppendChangedIndices(pos, kRefreshTriggers[i], removed_indices, added_indices, reset);
 			for (Color perspective : {BLACK, WHITE}) {
 #if defined(VECTOR)
-#if defined(USE_AVX512)
-				constexpr IndexType kNumChunks = kHalfDimensions / kSimdWidth;
-#else
 				constexpr IndexType kNumChunks = kHalfDimensions / (kSimdWidth / 2);
-#endif
 				auto accumulation              = reinterpret_cast<vec_t*>(&accumulator.accumulation[perspective][i][0]);
 #endif
 				if (reset[perspective]) {
