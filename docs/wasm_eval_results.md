@@ -40,6 +40,99 @@
   source patch が必要になった時のインフラとして残している。ビルド前に
   unified diff を apply、終了時 (成功/失敗問わず) に逆 apply。
 
+## 2026-04-14 追補 (続): YaneuraOu V8.50 まで到達 / V9.x 系は upstream 待ち
+
+同日に `a7229610 downgrade to V7.61` の上に upstream YaneuraOu 本体のバージョン
+を段階的に引き上げて再検証。emscripten は **5.0.0 固定** のまま。結論は
+**develop を V8.50 (`74d9b0e9`) まで上げて一旦停止**。V9.00 以降は upstream
+側の事情で追従不可と判明。
+
+### V7.61 → V8.50 の段階反映 (通った)
+
+develop に FF merge 済みの commit:
+
+| commit | description |
+|---|---|
+| `0b8a477b` | `feat(wasm): upgrade YaneuraOu source to V7.73r (1fcbef31)` |
+| `e62a47a2` | `feat(wasm): upgrade YaneuraOu source to V8.50 (74d9b0e9) + SF17 scrambled weight fix` |
+
+V7.61 → V7.62 → V7.63 → V7.73r → V8.50 の順に `git checkout <ver> -- source/`
+で source tree を書き換え、各段階で `script/wasm_build.js k-p` と
+`wasm_build.js halfkp` を 5.0.0 で build、`wasm_eval_node.ts` +
+`wasm_eval_browser.ts` を 30 秒 byoyomi で回して bestmove `B*6f` 方向を
+維持していることを確認した。
+
+V8.50 の段階で 2 つの WASM 特有の修正が必要だった:
+
+1. **Makefile の em++ block 再アップデート** — upstream V8.50 の
+   `source/Makefile` が wasm-eval-runner 側のフラグ (`EXPORT_ES6=1`、
+   `ENVIRONMENT`/`EXPORTED_RUNTIME_METHODS` の変数化、
+   `INCOMING_MODULE_JS_API` の明示 whitelist) を持っていなかったので、
+   develop 側に蓄積していた flag 群を V8.50 em++ block に再移植した。
+2. **SF17 scrambled weight layout の WASM 短絡** — commit 9c41f5b7
+   (Stockfish17 AffineTransform 移植) + 434a3392 (ClippedReLU AVX-512)
+   の組み合わせで、`GetWeightIndexScrambled()` 経由の重み配置が
+   `USE_SSSE3 || USE_NEON_DOTPROD` 下で有効になる。em++ ブロックの
+   `-DUSE_SSE42` が `config.h` 経由で `USE_SSSE3` まで連鎖するため WASM
+   ビルドも scrambled layout で重みを保存するのに、既存の
+   `USE_WASM_SIMD` ショートカット (`Propagate()` 内) が dense row-major
+   として読むせいで K-P 3 層の NNUE 出力が ~1200 cp 低く腐り、bestmove
+   が `8a8g+` に飛ぶ症状が出ていた。
+   `source/eval/nnue/layers/affine_transform.h` と
+   `affine_transform_sparse_input.h` の `GetWeightIndex()` に
+   `#if defined(USE_WASM_SIMD) return i;` の分岐を追加して dense を強制し、
+   bestmove を `B*6f` に戻した。
+
+V8.50 の smoke (30 秒 byoyomi, Threads=1, USI_Hash=64, k-p / halfkp 両方):
+
+| pkg | runner | score | bestmove | depth |
+|---|---|---|---|---|
+| k-p    | node    | `cp 1290`    | `B*6f ponder 3d3c+` | 24 |
+| k-p    | browser | `cp 756 lb`  | `B*6f ponder 3d3c+` | 27 |
+| halfkp | node    | `cp 1180`    | `B*6f ponder 3d3c+` | 26 |
+| halfkp | browser | `cp 1146`    | `B*6f ponder 3d3c+` | 29 |
+
+bestmove `B*6f` は V7.61 〜 V8.50 で不変。`cp` 値は upstream の探索パラメータ
+調整と reachable depth の変化で絶対値は動くが、PV も含めて同じ方向を指す。
+
+### V9.00 / V9.10 / V9.22 は upstream 都合で追従不可
+
+V9.00 (`a5ee2786`) / V9.10 (`08f7d99b`) / V9.22 (`9c5b226e`) はどれも
+`source/usi.cpp` の `#if defined(__EMSCRIPTEN__)` ブロック全体が
+**`#if 0  // TODO : 🚧 工事中 🚧`** の内部に埋め込まれている。したがって
+`usi_command` export 自体が wasm に出ず、`ccall("usi_command", ...)` が
+`func is not a function` で落ちる。
+
+`#if 0` を外せば直るわけではない:
+
+- `#if 0` を追加したのは `cc78f439`(V9.00beta 途中) だが、その 1 つ前の
+  `0ae12b89` (= `cc78f439^`) を試した時点で既に `usi.cpp:1729` 付近の
+  `usi_command` が V9.00 の新 API と不整合で compile fail する。具体的には:
+  - `Threads` (global) が削除 / Engine class 内の ThreadPool に移動
+  - `Thread::threadStarted` member 削除
+  - `usi_cmdexec(pos, states, cmd)` (free function) が
+    `USIEngine::usi_cmdexec(const std::string&)` member method に rename
+- つまり `cc78f439` は原因ではなく、upstream が V8.50→V9.00 の大規模
+  Engine class refactor (`b3ff1749`, `e32ed51b` 等) で壊れた WASM 対応を
+  build error から救うために `#if 0` でラップした「結果」コミット。
+- 追従するなら `usi_command` を V9.x の新 API に書き直す必要があり、
+  かつ `run_engine_entry()` で作られる `USIEngine` instance を global
+  からアクセスできる設計 (WASM 専用 main、instance の静的登録、等) を
+  入れないと WASM 環境からは command を送る手段がない。これは独自 fork
+  レベルの継続コストなので、**upstream が自前で WASM 対応を refactor
+  し終えるまで V9.x は見送り**。
+
+### このセッションで確定した固定点
+
+- **emscripten ターゲットは 5.0.0 固定** (5.0.5 は browser 側の
+  `"em-pthread" is not a function` minifier バグで保留、次期 emscripten
+  バージョンも追わない)。
+- **YaneuraOu source は V8.50 + SF17 scrambled fix 固定**
+  (develop HEAD `e62a47a2`)。
+- V7.61 の新 baseline (冒頭「2026-04-14 追補」の表) は **V8.50 上の新
+  baseline (上表) に更新**。bestmove は `B*6f` で一貫、score は V8.50 で
+  より深く探索した分ブレる。
+
 ---
 
 以下の旧 TL;DR 以降のセクションは V8.50 以降の「壊れた state」時代の記録。
