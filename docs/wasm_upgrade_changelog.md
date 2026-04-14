@@ -185,20 +185,19 @@ assertion test ではなく、`bun __tests__/<name>.ts` で逐次 stderr に
 |---|---|
 | `docs/wasm_eval_results.md` | TL;DR を「全バージョン dual-runner 動作確認レポート」に書き換え、最終 smoke マトリクスと、残っている Node 3 バージョン stall / 5.0.5 minifier バグの詳細、参考ファイルへのリンクを整理 |
 
-## 最終的な動作確認マトリクス (k-p, --think-ms 5000)
+## このセッションのマトリクスは記録しない
 
-| emscripten | node  | browser |
-|---|---|---|
-| 3.1.43 | ✅ cp 417 / G*9g | ✅ cp 404 / G*9g |
-| 3.1.70 | ❌ usi timeout | ✅ cp 404 / G*9g |
-| 3.1.74 | ❌ usi timeout | ✅ cp 404 / G*9g |
-| 4.0.0  | ❌ usi timeout | ✅ cp 417 / G*9g |
-| 4.0.11 | ✅ cp 417 / G*9g | ✅ cp 404 / G*9g |
-| 4.0.23 | ✅ cp 417 / G*9g | ✅ cp 404 / G*9g |
-| 5.0.0  | ✅ cp 417 / G*9g | ✅ cp 404 / G*9g |
-| 5.0.5  | ✅ cp 417 / G*9g | ❌ minifier bug |
-
-14 / 16 PASS、bestmove は全ケースで `G*9g` 一致。
+> ⚠️ このセッション中に計測した全バージョン動作確認マトリクスは、
+> 後日の bisection で **upstream YaneuraOu 本体のバージョンが V8.50
+> 以降で評価値が壊れる state** で取得した数値だったと判明したため、
+> 記録を削除した。当時観測していた `cp 381` / `cp 404` / `cp 417`
+> 帯や bestmove `G*9g` 方向は壊れた state の出力で、現在の正解
+> (`B*6f` 方向 / 異なる score 帯) とは一致しない。
+>
+> 現行の baseline は
+> `.claude/skills/wasm-leader/eval_results.md` 冒頭の
+> 「2026-04-14 追補: V7.61 downgrade 後の baseline 更新」を参照
+> (`a7229610 feat(wasm): downgrade YaneuraOu source to V7.61` 以降)。
 
 ## 残課題
 
@@ -237,3 +236,138 @@ ea83e7e9 feat(wasm): add Claude Code agent team skills for upgrade workflow
 ```
 
 (`813bc30b` 以前のコミットはこのセッション前の準備作業。)
+
+---
+
+# 2026-04-14 (後半): SkillLevel 再有効化 + edge variant 追加
+
+作業ブランチ: `feat/enable-skill-level` → `feat/wasm-workers-api`
+
+## セッション全体のゴール
+
+1. 長らくコメントアウトされていた SkillLevel UCI オプションを再度
+   有効化し、0-20 の手加減パラメータが動くようにする。
+2. V8 Isolate 系ランタイム (Cloudflare Workers / Vercel Edge /
+   Deno Deploy) 向けの pthread なし single-thread ビルド (`edge`
+   variant) を追加する。
+3. edge variant を呼び出すための最小ラッパーをテンプレートとして
+   用意し、エンドユーザーがコピペで自分のプロジェクトに組み込める
+   ようにする。
+4. 棋譜解析用途に備えた複数局面一括評価 API (`evalBatch`) を追加
+   する。
+
+## 論理単位ごとの変更一覧
+
+### 1. SkillLevel UCI オプション復活 (`b3e9d7e0`)
+
+**目的**: `source/engine/yaneuraou-engine/yaneuraou-search.cpp` で
+「使えていないので削除」の後にコメントアウト状態で残っていた
+SkillLevel オプションを再有効化する。
+
+**変更**: yaneuraou-search.cpp の 3 箇所:
+
+- `USI::extra_option` 内で `o["SkillLevel"] << Option(20, 0, 20)` の
+  コメントアウトを外す。
+- `output_final_pv` lambda と `Thread::search()` で、`Skill skill(
+  /*(int)Options["SkillLevel"]*/ 20, 0)` のハードコードを
+  `Skill skill((int)Options["SkillLevel"], 0)` に戻す。
+
+**動作確認**: 中盤局面で SkillLevel を 0-20 でスイープすると level 4-7
+で 2 番手候補 (`P*8h`) が選ばれるなど、Stockfish の Skill 実装どおり
+の確率的 pick_best 挙動が復活したことを確認。
+
+### 2. single-thread `edge` variant の新設 (`e92b712c`)
+
+**目的**: V8 Isolate 系ランタイム (Cloudflare Workers / Vercel Edge
+Functions / Cloudflare Pages Functions / Deno Deploy) は `Worker`
+コンストラクタと `SharedArrayBuffer` が使えないため、pthread 付きの
+web/node 変種はそのままでは動かない。これらを外した single-thread
+ビルドを `edge` variant として追加する。既存の web/node 変種は変更
+しない。
+
+**変更**:
+
+- `script/wasm_build.js`: `variants` 配列に `edge` エントリ
+  (`ENVIRONMENT=web`, `EM_PTHREAD=0`) を追加。さらに `VARIANT` 環境
+  変数で build する variant を絞り込めるフィルタを追加
+  (`VARIANT=edge node script/wasm_build.js k-p`)。
+- `source/Makefile`: `EM_PTHREAD` 変数を新設。`-pthread` と
+  `-s PTHREAD_POOL_SIZE=32` を `ifeq ($(EM_PTHREAD),1)` で条件分岐。
+- `source/thread.{cpp,h}`: `__EMSCRIPTEN_PTHREADS__` なしビルドでは
+  `NativeThread stdThread` メンバを省略し、`start_searching()` /
+  `wait_for_search_finished()` で `search()` を呼び出し元スレッドで
+  同期実行する経路を追加。`std::thread` コンストラクタが失敗を
+  throw して `-fno-exceptions` モードの terminate を引く問題を根本
+  から回避。
+- `source/wasm_pre.js`: `Module.terminate()` の
+  `PThread.terminateAllThreads()` 呼び出しを `typeof` でガード。
+  Closure Compiler が `PThread is undeclared` で落ちていた問題を解消。
+
+**成果物**: `build/<ver>_<arch>/k-p/edge/lib/yaneuraou.k-p.{js,wasm}`。
+wasm サイズ 1.41 MiB (pthread 付き web/node 変種と比べて -24 KiB)、
+Brotli 圧縮 479 KiB。`go movetime 500` の smoke test で
+**cold start ~620 ms / warm ~510 ms** を達成。
+
+### 3. edge variant ラッパーテンプレート (`021d7f33`, `7289e8ee`, `5b4b1641`)
+
+**目的**: edge variant をフレームワーク非依存で駆動する最小ラッパー
+を `templates/edge/yaneuraou-edge.ts` として提供する。エンドユーザー
+がコピペで自分の Workers / Edge プロジェクトに取り込む前提で、
+`@types/emscripten` にも依存しない自己完結型にする。
+
+**変更**:
+
+- `templates/edge/yaneuraou-edge.ts`: `createYaneuraOuEdge({ factory,
+  wasmBinary, usiHash, hash })` → `engine.eval(req)` /
+  `engine.evalBatch(reqs)` API。連続呼び出しは内部 Promise chain で
+  自動直列化される。
+- `docs/wasm_client_usage.md`: 9 節に edge variant ガイド
+  (9.1 制約 / 9.2 ラッパーテンプレート / 9.3 eval vs evalBatch /
+  9.4 option の扱い / 9.5 Cloudflare Workers 組み込み例 /
+  9.6 実測パフォーマンス) を追加。0 節と 8 節の早見表にも edge 列を
+  追加。
+
+**設計ポイント**:
+
+- **Request-level option は毎回 USI 既定値で上書き**
+  (`7289e8ee fix(templates): reset request-level options on every eval()`):
+  同じ Isolate を複数ユーザーが共有する前提のため、`MultiPV` /
+  `SkillLevel` / `DepthLimit` / `NodesLimit` は `eval()` を呼ぶ
+  たびに `setoption` で明示的に再設定する。省略時も既定値で上書き
+  するので、前のリクエストで立てた値を後続リクエストが引きずらない。
+  「user A が `eval({ skillLevel: 5 })` → user B が指定なしで
+  `eval()` → user B が user A の設定で思考される」という事故を防ぐ。
+- **棋譜解析向けの `evalBatch(reqs)`**
+  (`5b4b1641 feat(templates): add evalBatch() for kifu-style continuous analysis`):
+  Batch の最初に 1 度だけ `usinewgame` を送ったあと、以降は
+  `usinewgame` を挟まずに連続 `position` + `go movetime` を回す。
+  Batch 内で置換表が保持されるので、同じ探索時間でも次の局面の
+  hash hit 率が上がり実効探索深さが伸びる (smoke test で 2 局面目
+  depth 14→15, nodes 140k→188k を確認)。option は配列先頭の要素
+  から取り、Batch 内では固定 (途中で option 変更すると TT flush と
+  等価になり Batch の旨味が消えるため、意図的に Batch 内 option
+  固定としている)。
+- **Isolate-level / Request-level の 2 層分離**: `Threads` /
+  `USI_Hash` / `Hash` は `createYaneuraOuEdge()` で 1 度だけ設定
+  する (置換表の reallocate コストが高いので使い回す)。`MultiPV` /
+  `SkillLevel` / `DepthLimit` / `NodesLimit` は `eval()` /
+  `evalBatch()` の引数で request ごとに指定する。
+
+## 関連ドキュメント
+
+- `docs/wasm_client_usage.md` — ユーザー向け呼び出しガイド
+  (9 節に edge variant 用セクション)
+- `.claude/skills/wasm-leader/eval_results.md` — 全バージョンの
+  検証結果と症状の詳細 (`docs/` から `.claude/skills/wasm-leader/`
+  以下に移動済み)
+
+## このセッションで生まれたコミット
+
+```
+773ccda9 docs(wasm): flatten edge variant section structure
+5b4b1641 feat(templates): add evalBatch() for kifu-style continuous analysis
+7289e8ee fix(templates): reset request-level options on every eval()
+021d7f33 docs(wasm): document edge variant and add minimal wrapper template
+e92b712c feat(wasm): add single-thread edge variant for V8 Isolate runtimes
+b3e9d7e0 feat(engine): re-enable SkillLevel UCI option
+```

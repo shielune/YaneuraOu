@@ -32,10 +32,10 @@ context. Never paste a specialist's raw tool output back to the user — summari
 
 Read these files **before** doing anything:
 
-- `docs/wasm_eval_testing_plan.md` — the overall plan and history.
-- `docs/wasm_eval_results.md` — per-version status matrix and the current
-  understanding of what is broken. **This is the source of truth for the
-  baseline eval.**
+- `.claude/skills/wasm-leader/eval_results.md` — per-version status matrix
+  and the current understanding of what is broken. **This is the source of
+  truth for the baseline eval** — always re-read at the start of a session
+  instead of trusting memory/summary.
 - `source/Makefile` around the `em++` block (≈ lines 215–240) — the existing
   LDFLAGS, including the already-applied `-s INCOMING_MODULE_JS_API=…` fix.
 - `source/wasm_pre.js` — the pre-js that wires `Module.postMessage` /
@@ -44,7 +44,7 @@ Read these files **before** doing anything:
 - `script/wasm_build.js`, `script/wasm_multibuild.sh`, `script/wasm_eval_all.sh`,
   `script/wasm_eval_browser.ts`, `script/wasm_eval_runner.html`.
 
-**Baseline that must be preserved** (from `docs/wasm_eval_results.md`, 30 s
+**Baseline that must be preserved** (from `.claude/skills/wasm-leader/eval_results.md`, 30 s
 search on `lr5nl/2P2+S1k1/7p1/5bPPp/P3N4/4PP2P/1PR6/LK3G3/8L w G2S7Pb2gs2np 1`,
 Threads=1, USI_Hash=64):
 
@@ -78,7 +78,7 @@ from it is the regression you are chasing.
 When the user asks you to "move the emscripten version up", "fix the WASM
 build", or "verify that X.Y.Z still produces the right eval", run this loop:
 
-1. **Read the docs.** Always re-read `docs/wasm_eval_results.md` at the start
+1. **Read the docs.** Always re-read `.claude/skills/wasm-leader/eval_results.md` at the start
    of a session — it is the single source of truth for what is known broken
    and what the baseline is. A memory or earlier summary is not a substitute.
 
@@ -102,7 +102,7 @@ build", or "verify that X.Y.Z still produces the right eval", run this loop:
      workaround but the answer is usually "document and skip".
    - *Build + load OK, but search produces no `info`/`bestmove`* → this is the
      3.1.74+ pattern. The root cause is the pthread worker's stdout path and is
-     already documented in `docs/wasm_eval_results.md`. Verify the fix in
+     already documented in `.claude/skills/wasm-leader/eval_results.md`. Verify the fix in
      `source/Makefile` is in effect (re-read it — do not trust memory), then
      just rebuild and re-run.
    - *Everything runs but the score differs from baseline* → now you have a
@@ -117,7 +117,7 @@ build", or "verify that X.Y.Z still produces the right eval", run this loop:
    within the documented nodes delta) at 30 s of `byoyomi`. Shorter searches
    are OK for quick iteration but the final gate is the 30 s run.
 
-6. **Record every result in `docs/wasm_eval_results.md`.** Append a row to the
+6. **Record every result in `.claude/skills/wasm-leader/eval_results.md`.** Append a row to the
    status matrix and keep the TL;DR accurate. If a fix turned out not to work,
    say so — do not silently overwrite. This file is how future sessions (and
    future leaders) pick up the thread.
