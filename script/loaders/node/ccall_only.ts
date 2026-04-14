@@ -12,6 +12,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { gte } from "../version.ts";
+import { ccallWithRetry } from "../retry.ts";
 import { instantiateWithUnifiedStdout } from "./common.ts";
 
 const SHIM_URL = new URL("./worker_shim.ts", import.meta.url);
@@ -43,8 +44,11 @@ export const ccallOnlyLoader: Loader = {
     }
 
     return {
-      sendCommand(cmd: string) {
-        engine.ccall!("usi_command", "number", ["string"], [cmd]);
+      async sendCommand(cmd: string) {
+        await ccallWithRetry(
+          () => engine.ccall!("usi_command", "number", ["string"], [cmd]),
+          cmd,
+        );
       },
       onLine(listener) {
         listeners.push(listener);

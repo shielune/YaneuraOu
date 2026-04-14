@@ -36,15 +36,17 @@ export const esmoduleWorkerLoader: Loader = {
 
     const engine = await instantiateWithUnifiedStdout(ctx, SHIM_URL, push);
 
-    if (typeof engine.ccall !== "function") {
+    if (typeof engine.postMessage !== "function") {
       throw new Error(
-        "esmodule-worker/node: engine.ccall is missing — check EXPORTED_RUNTIME_METHODS",
+        "esmodule-worker/node: engine.postMessage is missing — wasm_pre.js wiring failed",
       );
     }
 
     return {
-      sendCommand(cmd: string) {
-        engine.ccall!("usi_command", "number", ["string"], [cmd]);
+      async sendCommand(cmd: string) {
+        // esmodule generation: let wasm_pre.js queue + drain, it retries
+        // internally on ccall busy returns.
+        engine.postMessage!(cmd);
       },
       onLine(listener) {
         listeners.push(listener);
