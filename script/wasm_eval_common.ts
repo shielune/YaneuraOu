@@ -48,25 +48,25 @@ export async function runUsiEval(
   const lines: string[] = [];
   engine.onLine((line) => lines.push(line));
 
-  engine.sendCommand("usi");
+  await engine.sendCommand("usi");
   if (!(await waitFor(() => lines.includes("usiok"), 20000))) {
     throw new Error(
       "usi timeout — tail: " + JSON.stringify(lines.slice(-10)),
     );
   }
 
-  engine.sendCommand(`setoption name Threads value ${config.threads}`);
-  engine.sendCommand(`setoption name USI_Hash value ${config.hash}`);
-  engine.sendCommand("isready");
+  await engine.sendCommand(`setoption name Threads value ${config.threads}`);
+  await engine.sendCommand(`setoption name USI_Hash value ${config.hash}`);
+  await engine.sendCommand("isready");
   if (!(await waitFor(() => lines.includes("readyok"), 60000))) {
     throw new Error(
       "isready timeout — tail: " + JSON.stringify(lines.slice(-10)),
     );
   }
 
-  engine.sendCommand(`position sfen ${config.sfen}`);
+  await engine.sendCommand(`position sfen ${config.sfen}`);
   const goStart = lines.length;
-  engine.sendCommand(`go btime 0 wtime 0 byoyomi ${config.thinkMs}`);
+  await engine.sendCommand(`go btime 0 wtime 0 byoyomi ${config.thinkMs}`);
 
   if (
     !(await waitFor(

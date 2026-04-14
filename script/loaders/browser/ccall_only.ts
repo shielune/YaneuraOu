@@ -10,6 +10,7 @@ import type {
   LoaderContext,
 } from "../types.ts";
 import { gte } from "../version.ts";
+import { ccallWithRetry } from "../retry.ts";
 import { loadEngineWithUnifiedStdout } from "./common.ts";
 
 export const ccallOnlyLoader: Loader = {
@@ -39,8 +40,11 @@ export const ccallOnlyLoader: Loader = {
     }
 
     return {
-      sendCommand(cmd: string) {
-        engine.ccall!("usi_command", "number", ["string"], [cmd]);
+      async sendCommand(cmd: string) {
+        await ccallWithRetry(
+          () => engine.ccall!("usi_command", "number", ["string"], [cmd]),
+          cmd,
+        );
       },
       onLine(listener) {
         listeners.push(listener);
