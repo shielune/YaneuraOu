@@ -44,26 +44,23 @@ void USI::extra_option(USI::OptionsMap& o)
     (*this)["DfPn_Min_Search_Millisecs"]   = USIOption(300, 0, int_max);
 #endif
 
-#if defined(MAKE_BOOK)
+#ifdef MAKE_BOOK
 	// 定跡を生成するときはPV出力は抑制したほうが良さげ。
     o["PV_Interval"]                 << USI::Option(0, 0, int_max);
     o["Save_Book_Interval"]          << USI::Option(100, 0, int_max);
 #else
     o["PV_Interval"]                 << USI::Option(500, 0, int_max);
-#endif // defined(MAKE_BOOK)
-	
-	// UCTノードの上限(この値を10億以上にするならWIN_TYPE_DOUBLEをdefineしてコンパイルしないと
-	// MCTSする時の勝率の計算精度足りないし、あとメモリも2TBは載ってないと足りないと思う…)
-	o["UCT_NodeLimit"]				 << USI::Option(10000000, 10, 1000000000);
+#endif // !MAKE_BOOK
 
-	// デバッグ用のメッセージ出力の有無
+	o["UCT_NodeLimit"]				 << USI::Option(10000000, 100000, 1000000000); // UCTノードの上限
+																				   // デバッグ用のメッセージ出力の有無
 	o["DebugMessage"]                << USI::Option(false);
 
 	// ノードを再利用するか。
     o["ReuseSubtree"]                << USI::Option(true);
 
 	// 勝率を評価値に変換する時の定数。
-	o["Eval_Coef"]                   << USI::Option(285, 1, 10000);
+	o["Eval_Coef"]                   << USI::Option(756, 1, 10000);
 
 	// 投了値 : 1000分率で
 	o["Resign_Threshold"]            << USI::Option(0, 0, 1000);
@@ -91,24 +88,44 @@ void USI::extra_option(USI::OptionsMap& o)
     o["C_base_root"]                 << USI::Option(25617, 10000, 100000);
 
 	// 探索のSoftmaxの温度
-	o["Softmax_Temperature"]		 << USI::Option( 174 , 1, 10000);
+	o["Softmax_Temperature"]		 << USI::Option( 1740 /* 方策分布を学習させた場合、1400から1500ぐらいが最適値らしいが… */ , 1, 5000);
 
 	// 各GPU用のDNNモデル名と、そのGPU用のUCT探索のスレッド数と、そのGPUに一度に何個の局面をまとめて評価(推論)を行わせるのか。
 	// GPUは最大で8個まで扱える。
 
 	// RTX 3090で10bなら4、15bなら2で最適。
     o["UCT_Threads1"]                << USI::Option(2, 0, 256);
-	for (int i = 2; i <= max_gpu ; ++i)
-		o["UCT_Threads" + std::to_string(i)] << USI::Option(0, 0, 256);
-
-#if defined(COREML)
-	// Core MLでは、ONNXではなく独自形式のモデルが必要。
-    o["DNN_Model1"]                  << USI::Option(R"(model.mlmodel)");
-#else
+    o["UCT_Threads2"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads3"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads4"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads5"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads6"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads7"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads8"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads9"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads10"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads11"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads12"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads13"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads14"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads15"]                << USI::Option(0, 0, 256);
+    o["UCT_Threads16"]                << USI::Option(0, 0, 256);
     o["DNN_Model1"]                  << USI::Option(R"(model.onnx)");
-#endif
-	for (int i = 2; i <= max_gpu ; ++i)
-		o["DNN_Model" + std::to_string(i)] << USI::Option("");
+    o["DNN_Model2"]                  << USI::Option("");
+    o["DNN_Model3"]                  << USI::Option("");
+    o["DNN_Model4"]                  << USI::Option("");
+    o["DNN_Model5"]                  << USI::Option("");
+    o["DNN_Model6"]                  << USI::Option("");
+    o["DNN_Model7"]                  << USI::Option("");
+    o["DNN_Model8"]                  << USI::Option("");
+    o["DNN_Model9"]                  << USI::Option("");
+    o["DNN_Model10"]                  << USI::Option("");
+    o["DNN_Model11"]                  << USI::Option("");
+    o["DNN_Model12"]                  << USI::Option("");
+    o["DNN_Model13"]                  << USI::Option("");
+    o["DNN_Model14"]                  << USI::Option("");
+    o["DNN_Model15"]                  << USI::Option("");
+    o["DNN_Model16"]                  << USI::Option("");
 
 #if defined(TENSOR_RT) || defined(ORT_TRT)
 	// 通常時の推奨128 , 検討の時は推奨256。
@@ -116,23 +133,40 @@ void USI::extra_option(USI::OptionsMap& o)
 #elif defined(ONNXRUNTIME)
 	// CPUを使っていることがあるので、default値、ちょっと少なめにしておく。
 	o["DNN_Batch_Size1"]             << USI::Option(32, 1, 1024);
-#elif defined(COREML)
-	// M1チップで8程度でスループットが飽和する。
-	o["DNN_Batch_Size1"]             << USI::Option(8, 1, 1024);
 #endif
-	for (int i = 2; i <= max_gpu ; ++i)
-		o["DNN_Batch_Size" + std::to_string(i)] << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size2"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size3"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size4"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size5"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size6"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size7"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size8"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size9"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size10"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size11"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size12"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size13"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size14"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size15"]             << USI::Option(0, 0, 1024);
+	o["DNN_Batch_Size16"]             << USI::Option(0, 0, 1024);
+
+#if defined(ORT_MKL)
+	// nn_onnx_runtime.cpp の NNOnnxRuntime::load() で使用するオプション。
+	// グラフ全体のスレッド数?（default値1）ORT_MKLでは効果が無いかもしれない。
+	o["InterOpNumThreads"]           << USI::Option(1, 1, 65536);
+	// ノード内の実行並列化の際のスレッド数設定（default値4、NNUE等でのThreads相当）
+	o["IntraOpNumThreads"]           << USI::Option(4, 1, 65536);
+#endif
 
     //(*this)["Const_Playout"]               = USIOption(0, 0, int_max);
-	// →　Playout数固定。これはNodesLimitでできるので不要。
-
-	// PV lineの即詰みを調べるスレッドの数と1局面当たりの最大探索ノード数。
-	o["PV_Mate_Search_Threads"]     << USI::Option(1, 0, 256);
-	o["PV_Mate_Search_Nodes"]       << USI::Option(500000, 0, UINT32_MAX);
+	// →　Playout数固定。これはNodeLimitでできるので不要。
 
 	// → leaf nodeではdf-pnに変更。
 	// 探索ノード数の上限値を設定する。0 : 呼び出さない。
 	o["LeafDfpnNodesLimit"]			<< USI::Option(40, 0, 10000);
+
+	// root nodeでのdf-pn詰将棋探索の最大ノード数
+	o["RootMateSearchNodesLimit"]	<< USI::Option(1000000, 0, UINT32_MAX);
 }
 
 // "isready"コマンドに対する初回応答
@@ -158,6 +192,8 @@ void Search::clear()
 
 	searcher.SetPvInterval((TimePoint)Options["PV_Interval"]);
 
+	searcher.SetGetnerateAllLegalMoves(Options["GenerateAllLegalMoves"]);
+
 	// ノードを再利用するかの設定。
 	searcher.SetReuseSubtree(Options["ReuseSubtree"]);
 
@@ -172,22 +208,25 @@ void Search::clear()
 
 	// スレッド数と各GPUのbatchsizeをsearcherに設定する。
 
-	std::vector<int> new_thread;
-	std::vector<int> new_policy_value_batch_maxsize;
+	const int new_thread[max_gpu] = {
+		(int)Options["UCT_Threads1"], (int)Options["UCT_Threads2"], (int)Options["UCT_Threads3"], (int)Options["UCT_Threads4"],
+		(int)Options["UCT_Threads5"], (int)Options["UCT_Threads6"], (int)Options["UCT_Threads7"], (int)Options["UCT_Threads8"],
+		(int)Options["UCT_Threads9"], (int)Options["UCT_Threads10"], (int)Options["UCT_Threads11"], (int)Options["UCT_Threads12"],
+		(int)Options["UCT_Threads13"], (int)Options["UCT_Threads14"], (int)Options["UCT_Threads15"], (int)Options["UCT_Threads16"]
+	};
+	const int new_policy_value_batch_maxsize[max_gpu] = {
+		(int)Options["DNN_Batch_Size1"], (int)Options["DNN_Batch_Size2"], (int)Options["DNN_Batch_Size3"], (int)Options["DNN_Batch_Size4"],
+		(int)Options["DNN_Batch_Size5"], (int)Options["DNN_Batch_Size6"], (int)Options["DNN_Batch_Size7"], (int)Options["DNN_Batch_Size8"],
+		(int)Options["DNN_Batch_Size9"], (int)Options["DNN_Batch_Size10"], (int)Options["DNN_Batch_Size11"], (int)Options["DNN_Batch_Size12"],
+		(int)Options["DNN_Batch_Size13"], (int)Options["DNN_Batch_Size14"], (int)Options["DNN_Batch_Size15"], (int)Options["DNN_Batch_Size16"]
+	};
 
-	for (int i = 1; i <= max_gpu; ++i)
-	{
-		// GPU_unlimited() なら、すべてUCT_Threads1, DNN_Batch_Size1を参照する。
-		new_thread.emplace_back((int)Options["UCT_Threads" + std::to_string(i)]);
-		new_policy_value_batch_maxsize.emplace_back((int)Options["DNN_Batch_Size" + std::to_string(i)]);
-	}
-	
 	// 対応デバイス数を取得する
 	int device_count = NN::get_device_count();
 
 	std::vector<int> thread_nums;
 	std::vector<int> policy_value_batch_maxsizes;
-	for (int i = 0; i < max_gpu ; ++i)
+	for (int i = 0; i < max_gpu; ++i)
 	{
 		// 対応デバイス数以上のデバイスIDのスレッド数は 0 として扱う(デバイスの無効化)
 		thread_nums.push_back(i < device_count ? new_thread[i] : 0);
@@ -212,12 +251,12 @@ void Search::clear()
 	search_options.c_base_root          = (NodeCountType)Options["C_base_root"         ];
 
 	// softmaxの時のボルツマン温度設定
-	// これは、dlshogiの"Softmax_Temperature"の値。(174) = 1.74
-	// ※ 100分率で指定する。
+	// これは、dlshogiの"Softmax_Temperature"の値。(1740) = 1.740
+	// ※ dlshogiは100分率で指定する。ふかうら王では1000分率で指定する。
 	// hcpe3から学習させたmodelの場合、1.40～1.50ぐらいにしないといけない。
 	// cf. https://tadaoyamaoka.hatenablog.com/entry/2021/04/05/215431
 
-	Eval::dlshogi::set_softmax_temperature(Options["Softmax_Temperature"] / 100.0f);
+	Eval::dlshogi::set_softmax_temperature(Options["Softmax_Temperature"] / 1000.0f);
 
 	searcher.SetDrawValue(
 		(int)Options["DrawValueBlack"],
@@ -227,12 +266,7 @@ void Search::clear()
 
 	// UCT_NodeLimit : これはノード制限ではなく、ノード上限を示す。この値を超えたら思考を中断するが、
 	// 　この値を超えていなくとも、持ち時間制御によって思考は中断する。
-	// ※　探索ノード数を固定したい場合は、NodesLimitオプションを使うべし。
 	searcher.InitializeUctSearch((NodeCountType)Options["UCT_NodeLimit"]);
-
-	// PV lineの詰み探索の設定
-	searcher.SetPvMateSearch(int(Options["PV_Mate_Search_Threads"]), int(Options["PV_Mate_Search_Nodes"]));
-
 
 #if 0
 	// dlshogiでは、
@@ -323,7 +357,6 @@ void Thread::search()
 //{
 //	searcher.FinalizeUctSearch();
 //}
-// ⇨　まあ、プロセス終了するんだから開放されるやろ…。
 
 namespace dlshogi
 {
@@ -349,7 +382,8 @@ namespace dlshogi
 			Move m = child.move;
 			// move_count == 0であって欲しくはないのだが…。
 			float win = child.move_count == 0 ? child.nnrate : (float)child.win / child.move_count;
-			result.emplace_back(std::pair<Move, float>(m, win));
+//			result.emplace_back(std::pair<Move, float>(m, win));
+			result[i] = std::pair<Move, float>(m, win);
 		}
 	}
 
@@ -518,13 +552,7 @@ namespace dlshogi
 	{
 		return (u64)searcher.search_limits.nodes_searched;
 	}
-}
 
-// USIの"gameover"に対して呼び出されるハンドラ。
-void gameover_handler(const std::string& cmd)
-{
-	// dlshogiのゲームオーバーのハンドラを呼び出す。
-	searcher.GameOver();
 }
 
 #endif // defined(YANEURAOU_ENGINE_DEEP)

@@ -34,7 +34,6 @@ namespace Eval {
 	// このあとのdo_move()のあとのevaluate()で差分計算ができるように、
 	// 現在の前局面から差分計算ができるときだけ計算しておく。
 	// 評価値自体は返さない。
-	// 備考) 差分計算型の評価関数ではないときは、この関数は何もしなくて良い。
 	void evaluate_with_no_return(const Position& pos);
 
 	// 評価値の内訳表示(デバッグ用)
@@ -61,7 +60,7 @@ namespace Eval {
 	void print_softname(u64 check_sum);
 #else
 	static u64 calc_check_sum() { return 0; }
-	static void print_softname([[maybe_unused]] u64 check_sum) {}
+	static void print_softname(u64 check_sum) {}
 #endif
 
 #if defined (USE_PIECE_VALUE)
@@ -84,30 +83,18 @@ namespace Eval {
 		KingValue = 15000,
 	};
 
-	// 駒の価値のテーブル
-	// ※　後手の駒は負の値なので注意。
-	// →　後手の駒に対してプラスの値が欲しいなら、PieceValue[type_of(pc)]のようにする。
-	//   StockfishのPieceValue()は、負の値は返ってこないので注意。
+	// 駒の価値のテーブル(後手の駒は負の値)
 	extern int PieceValue[PIECE_NB];
 
 	// 駒の交換値(＝捕獲したときの価値の上昇値)
 	// 例)「と」を取ったとき、評価値の変動量は手駒歩+盤面の「と」。
 	// MovePickerとSEEの計算で用いる。
-	// ※  後手の駒に対してもプラスの値が返るので注意。
 	extern int CapturePieceValue[PIECE_NB];
 
 	// 駒を成ったときの成る前との価値の差。SEEで用いる。
 	// 駒の成ったものと成っていないものとの価値の差
 	// ※　PAWNでもPRO_PAWNでも　と金 - 歩 の価値が返る。
-	// ※  後手の駒に対してもプラスの値が返るので注意。
 	extern int ProDiffPieceValue[PIECE_NB];
-
-	// 指し手moveによってtoの地点の駒が捕獲できることがわかっている時の、駒を捕獲する価値
-	// moveが成りの指し手である場合、その価値も上乗せして計算する。
-	// ※　move.to_sq()に駒がない場合もこの関数の呼び出しは合法。(VALUE_NONEが返る)
-	// ※  後手の駒に対してもプラスの値が返るので注意。
-	Value CapturePieceValuePlusPromote(const Position& pos, Move move);
-
 #endif
 
 
@@ -391,10 +378,10 @@ namespace Eval {
 
 #if defined(USE_EVAL_HASH)
 	// EvalHashのリサイズ
-	void EvalHash_Resize(size_t mbSize);
+	extern void EvalHash_Resize(size_t mbSize);
 
 	// EvalHashのクリア
-	void EvalHash_Clear();
+	extern void EvalHash_Clear();
 #endif
 
 }

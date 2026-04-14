@@ -10,7 +10,7 @@
 namespace {
 
 	// これぐらい自分が指すと終局すると考えて計画を練る。
-	// 近年、将棋ソフトは終局までの平均手数が伸びているので160に設定しておく。
+	// 近年、将棋ソフトは終局までの平均手数が伸びているので 160に設定しておく。
 	const int MoveHorizon = 160;
 
 	// 思考時間のrtimeが指定されたときに用いる乱数
@@ -110,31 +110,19 @@ void Timer::init_(const Search::LimitsType& limits, Color us, int ply)
 		return;
 	}
 
-	// 切れ負けであるか？
-	bool time_forfeit = limits.inc[us] == 0 && limits.byoyomi[us] == 0;
-
-	// 1. 切れ負けルールの時は、MoveHorizonを + 40して考える。
-	// 2. ゲーム開始直後～40手目ぐらいまでは定跡で進むし、そこまで進まなかったとしても勝負どころはそこではないので
-	// 　ゲーム開始直後～40手目付近のMoveHorizonは少し大きめに考える必要がある。逆に40手目以降、MoveHorizonは40ぐらい減らして考えていいと思う。
-	// 3. 切れ負けでないなら、100手時点で残り60手ぐらいのつもりで指していいと思う。(これくらいしないと勝負どころすぎてからの持ち時間が余ってしまう..)
-	// (現在の大会のフィッシャールールは15分+inctime5秒とか5分+inctime10秒そんな感じなので、160手目ぐらいで持ち時間使い切って問題ない)
-	int move_horizon;
-	if (time_forfeit)
-		move_horizon = MoveHorizon + 40 - std::min(ply , 40);
-	else
-		// + 20は調整項
-		move_horizon = MoveHorizon + 20 - std::min(ply , 80);
-
-
-	// 残りの自分の手番の回数
-	// ⇨　plyは平手の初期局面が1。256手ルールとして、max_game_ply == 256だから、256手目の局面においてply == 256
-	// 　その1手前の局面においてply == 255。ply == 255 or 256のときにMTGが1にならないといけない。だから2足しておくのが正解。
-	const int MTG = std::min(limits.max_game_ply - ply + 2, move_horizon ) / 2;
+	// 残り手数
+	// plyは平手の初期局面が1。
+	// なので、256手ルールとして、max_game_ply == 256
+	// 256手目の局面においてply == 256
+	// その1手前の局面においてply == 255
+	// これらのときにMTGが1にならないといけない。
+	// だから2足しておくのが正解。
+	const int MTG = std::min((limits.max_game_ply - ply + 2) / 2, MoveHorizon);
 
 	if (MTG <= 0)
 	{
 		// 本来、終局までの最大手数が指定されているわけだから、この条件で呼び出されるはずはないのだが…。
-		sync_cout << "info string Error! : max_game_ply is too small." << sync_endl;
+		sync_cout << "info string max_game_ply is too small." << sync_endl;
 		return;
 	}
 	if (MTG == 1)
@@ -182,7 +170,7 @@ void Timer::init_(const Search::LimitsType& limits, Color us, int ply)
 
 
 		// 切れ負けルールにおいては、5分を切っていたら、このratioを抑制する。
-		if (time_forfeit)
+		if (limits.inc[us] == 0 && limits.byoyomi[us] == 0)
 		{
 			// 3分     : ratio = 3.0
 			// 2分     : ratio = 2.0
@@ -219,7 +207,7 @@ void Timer::init_(const Search::LimitsType& limits, Color us, int ply)
 
 	// 残り時間 - network_delay2よりは短くしないと切れ負けになる可能性が出てくる。
 	minimumTime = std::min(round_up(minimumTime), remain_time);
-	optimumTime = std::min(         optimumTime , remain_time);
+	optimumTime = std::min(optimumTime, remain_time);
 	maximumTime = std::min(round_up(maximumTime), remain_time);
 
 }

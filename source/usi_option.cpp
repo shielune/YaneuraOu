@@ -1,11 +1,7 @@
-﻿
-//#include "evaluate.h"
-#include "misc.h"
-//#include "search.h
-//#include "syzygy/tbprobe.h"
-#include "thread.h"
-//#include "tt.h"
+﻿#include "thread.h"
+#include "tt.h"
 #include "usi.h"
+#include "misc.h"
 
 using std::string;
 
@@ -13,16 +9,6 @@ using std::string;
 USI::OptionsMap Options;
 
 namespace USI {
-
-	/// 'On change' actions, triggered by an option's value change
-	// オプションの値が変更された時に呼び出されるOn changeアクション。
-
-	//static void on_clear_hash(const Option&) { Search::clear(); }
-	//static void on_hash_size(const Option& o) { TT.resize(size_t(o)); }
-	static void on_logger(const Option& o) { start_logger(o); }
-	//static void on_threads(const Option& o) { Threads.set(size_t(o)); }
-	//static void on_tb_path(const Option& o) { Tablebases::init(o); }
-	//static void on_eval_file(const Option&) { Eval::NNUE::init(); }
 
 	// --- やねうら王独自拡張分の前方宣言
 
@@ -65,24 +51,24 @@ namespace USI {
 
 		// ※　やねうら王独自改良
 		// スレッド数の変更やUSI_Hashのメモリ確保をそのハンドラでやってしまうと、
-		// そのあとLargePageEnableを送られても困ることになる。
+		// そのあとThreadIdOffsetや、LargePageEnableを送られても困ることになる。
 		// ゆえにこれらは、"isready"に対する応答で行うことにする。
 		// そもそもで言うとsetoptionに対してそんなに時間のかかることをするとGUI側がtimeoutになる懸念もある。
 		// Stockfishもこうすべきだと思う。
 
 #if !defined(__EMSCRIPTEN__)
-		o["Threads"] << Option(4, 1, 1024, []([[maybe_unused]] const Option& o) { /* on_threads(o); */ });
+		o["Threads"] << Option(4, 1, 512, [](const Option& o) { /* Threads.set(o); */ });
 #else
 		// yaneuraou.wasm
 		// スレッド数などの調整
 		// stockfish.wasmの数値を基本的に使用している
-		o["Threads"] << Option(1, 1, 32, []([[maybe_unused]] const Option& o) { /* on_threads(o); */ });
+		o["Threads"] << Option(1, 1, 32, [](const Option& o) { /* Threads.set(o); */ });
 #endif
 #endif
 
 #if !defined(TANUKI_MATE_ENGINE) && !defined(YANEURAOU_MATE_ENGINE)
 		// 置換表のサイズ。[MB]で指定。
-		o["USI_Hash"] << Option(1024, 1, MaxHashMB, []([[maybe_unused]] const Option& o) { /* on_hash_size(o); */ });
+		o["USI_Hash"] << Option(1024, 1, MaxHashMB, [](const Option& o) { /* TT.resize(o); */ });
 
 #if defined(USE_EVAL_HASH)
 		// 評価値用のcacheサイズ。[MB]で指定。
@@ -95,9 +81,6 @@ namespace USI {
 #endif // defined(FOR_TOURNAMENT)
 #endif // defined(USE_EVAL_HASH)
 
-		// Stockfishには、探索部を初期化するエンジンオプションがあるが使わないので未サポートとする。
-	    //o["Clear Hash"]            << Option(on_clear_hash);
-
 		// ponderの有無
 		o["USI_Ponder"] << Option(false);
 
@@ -105,8 +88,7 @@ namespace USI {
 		o["Stochastic_Ponder"] << USI::Option(false);
 
 		// その局面での上位N個の候補手を調べる機能
-		// ⇨　これMAX_MOVESで十分。
-		o["MultiPV"] << Option(1, 1, MAX_MOVES);
+		o["MultiPV"] << Option(1, 1, 800);
 
 		// 指し手がGUIに届くまでの時間。
 #if defined(YANEURAOU_ENGINE_DEEP)
@@ -183,7 +165,7 @@ namespace USI {
 #endif // !defined(TANUKI_MATE_ENGINE) && !defined(YANEURAOU_MATE_ENGINE)
 
 		// cin/coutの入出力をファイルにリダイレクトする
-		o["WriteDebugLog"] << Option("", [](const Option& o) { on_logger(o); });
+		o["WriteDebugLog"] << Option("", [](const Option& o) { start_logger(o); });
 
 		// 読みの各局面ですべての合法手を生成する
 		// (普通、歩の2段目での不成などは指し手自体を生成しないが、
@@ -215,6 +197,18 @@ namespace USI {
 		// そこでこの隠しオプションでisready時の評価関数の読み込みを抑制して、
 		// test evalconvertコマンドを叩く。
 		o["SkipLoadingEval"] << Option(false);
+#endif
+
+#if defined(_WIN32)
+		// 3990XのようなWindows上で複数のプロセッサグループを持つCPUで、思考エンジンを同時起動したときに
+		// 同じプロセッサグループに割り当てられてしまうのを避けるために、スレッドオフセットを
+		// 指定できるようにしておく。
+		// 例) 128スレッドあって、4つ思考エンジンを起動してそれぞれにThreads = 32を指定する場合、
+		// それぞれの思考エンジンにはThreadIdOffset = 0,32,64,96をそれぞれ指定する。
+		// (プロセッサグループは64論理コアごとに1つ作られる。上のケースでは、ThreadIdOffset = 0,0,64,64でも同じ意味。)
+		//	※　1つのPCで複数の思考エンジンを同時に起動して対局させる場合はこれを適切に設定すべき。
+
+		o["ThreadIdOffset"] << Option(0, 0, std::thread::hardware_concurrency() - 1);
 #endif
 
 #if defined(_WIN64)
@@ -299,9 +293,10 @@ namespace USI {
 		defaultValue = currentValue = v;
 	}
 
+	// Stockfishでは、これdoubleになっているが、あまりいいと思えないので数値型はs64のみのサポートにする。
 	Option::operator s64() const {
 		ASSERT_LV1(type == "check" || type == "spin");
-		return (type == "spin" ? std::stoll(currentValue) : currentValue == "true");
+		return (type == "spin" ? stoll(currentValue) : currentValue == "true");
 	}
 
 	Option::operator std::string() const {
@@ -456,7 +451,7 @@ namespace USI {
 		// ";"で区切って複数指定できるものとする。
 		auto v = StringExtension::Split(options, ";");
 		for (auto line : v)
-			build_option(std::string(line));
+			build_option(line);
 	}
 
 	// カレントフォルダに"engine_options.txt"(これは引数で指定されている)が
