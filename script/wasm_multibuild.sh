@@ -7,6 +7,13 @@ PKG="${PKG:-k-p}"
 LOGDIR="build/multibuild_logs"
 mkdir -p "$LOGDIR"
 
+# Multi-version smoke list.
+#
+# 5.0.0 is the canonical pinned target for the YaneuraOu upgrade
+# (Makefile's `make build` defaults to it). The other versions are
+# kept here so future regressions can be re-bisected against the
+# same matrix the dual-runner smoke documented in
+# docs/wasm_eval_results.md was generated from.
 VERSIONS=(
   3.1.50
   3.1.60
