@@ -568,36 +568,31 @@ module worker かは loader 側の責任。アプリは USI コマンドのシ�
 
 ## 9. edge 変種 (V8 Isolate 系ランタイム向け)
 
-### 9.1 対象ランタイム
+Cloudflare Workers / Vercel Edge Functions / Deno Deploy 等、
+`Worker` コンストラクタと `SharedArrayBuffer` が使えない V8 Isolate
+型ランタイム向けの single-thread ビルド。対応ターゲット:
 
-V8 Isolate を JS 実行モデルとするエッジランタイムでは、`Worker`
-コンストラクタと `SharedArrayBuffer` が使えないため、pthread 付きの
-web/node variant はそのままでは動作しない。edge 変種はこれらを
-外した single-thread ビルド。代表的なターゲット:
+- Cloudflare Workers / Cloudflare Pages Functions / Durable Objects
+- Vercel Edge Functions / Next.js Edge Runtime
+- Deno Deploy
 
-- **Cloudflare Workers** / **Cloudflare Pages Functions** / **Durable Objects**
-- **Vercel Edge Functions** / **Next.js Edge Runtime**
-- **Deno Deploy**
-
-### 9.2 制約
+### 9.1 制約
 
 | 項目 | 挙動 |
 |---|---|
-| `Threads` | 1 固定。`setoption name Threads value N` は実質無視 (`source/thread.{cpp,h}` が single-thread パスで search() を呼び出し元スレッドで同期実行) |
-| `USI_Ponder` / `Stochastic_Ponder` | 機能しない。探索と別スレッドで USI ループを回す手段が無い |
-| 探索中の `stop` / `setoption` / 次の `position` | 送れない。`go` は呼び出しスレッドをブロックする同期呼び出しとして動く |
+| `Threads` | 1 固定。`setoption name Threads value N` は実質無視 (`source/thread.{cpp,h}` の single-thread 経路で `search()` を呼び出し元スレッドで同期実行) |
+| `USI_Ponder` / `Stochastic_Ponder` | 動かない (探索と別スレッドで USI ループを回す手段が無い) |
+| 探索中の `stop` / `setoption` / `position` | 送れない。`go` は呼び出しスレッドをブロックする同期呼び出し |
 | `go btime/wtime/byoyomi` | `MinimumThinkingTime` / `NetworkDelay` に削られるので非推奨 |
 | `go movetime N` | 推奨。ほぼ N ms で打ち切る |
-| `MultiPV` / `SkillLevel` / 探索系 option 全般 | 動く |
-| `USI_Hash` / `EvalHash` | 動くが、並列 init が無いので `isready` 応答が変種比で遅め |
+| `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | 動く |
+| `USI_Hash` / `EvalHash` | 動くが並列 init が無いので `isready` 応答が他変種比でやや遅め |
 
-### 9.3 最小ラッパー: `templates/edge/yaneuraou-edge.ts`
+### 9.2 ラッパーテンプレート
 
-フレームワーク非依存の最小ラッパーをリポジトリに用意してある。
-**コピペで自分のプロジェクトに取り込んで使う前提** で、`@types/emscripten`
-にも依存しない形にしてある。
-
-提供している API:
+フレームワーク非依存の最小ラッパーを
+`templates/edge/yaneuraou-edge.ts` に用意してある。コピペで自分の
+プロジェクトに取り込む前提で、`@types/emscripten` にも依存しない。
 
 ```ts
 import {
@@ -613,77 +608,73 @@ const engine = await createYaneuraOuEdge({
   usiHash: 16,   // MB (省略時 16)
   hash: 16,      // MB (省略時 usiHash と同値)
 });
+```
 
-// --- 単発 (独立した 1 局面を評価) ---
+- `createYaneuraOuEdge()` の中で `usi` → `setoption Threads/Hash` →
+  `isready` まで済ませる。以降は `eval()` / `evalBatch()` を繰り返し
+  呼ぶだけ。
+- 連続呼び出しは内部で自動直列化される。呼び出し側でロックを取る必要は無い。
+- `dispose()` で `Module.terminate()`。呼び忘れても致命的ではない。
+
+### 9.3 `eval()` と `evalBatch()` の使い分け
+
+| | `eval(req)` | `evalBatch(reqs)` |
+|---|---|---|
+| 用途 | 独立した 1 局面の評価 | 連続した局面列の評価 (棋譜解析) |
+| TT 状態 | 毎回 `usinewgame` でクリア | Batch 最初の 1 回だけ `usinewgame`。以降は前の局面の TT を次の局面で再利用 |
+| option | 1 局面ごとに設定 | 配列先頭の要素から取り、Batch 内は固定 |
+| 探索効率 | 局面ごと独立 | 同じ思考時間でも hash hit 率が上がり、実効探索深さが伸びる |
+| 何件まとめていいか | — | 1 Batch = 1 USI セッション。Workers の CPU time 30 s 上限内で、`byoyomi=500 ms` なら 50〜55 局面が上限 |
+
+```ts
+// 単発 (独立した 1 局面)
 const result: EvalResult = await engine.eval({
   sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
-  byoyomi: 500,     // ms。内部では `go movetime` として発行
-  skillLevel: 20,   // 0–20, 省略可
+  byoyomi: 500,
+  skillLevel: 20,
 });
-// result.bestmove      : "6i7h"
-// result.ponder        : "8c8d" | null
-// result.score         : { kind: "cp" | "mate", value: number, bound? }
-// result.depth/nodes/pv/...
 
-// --- 連続 (棋譜解析: N 局面を 1 エンジン instance で一括評価) ---
+// 連続 (棋譜解析)
 const results: EvalResult[] = await engine.evalBatch(
   sfens.map((sfen) => ({ sfen, byoyomi: 500 })),
 );
 ```
 
-- `createYaneuraOuEdge()` 内で `usi` → `setoption Threads/Hash` → `isready`
-  までを済ませ、以降は `eval()` / `evalBatch()` の繰り返しで使い回せる
-  ようにしてある。
-- **連続 `eval()` / `evalBatch()` 呼び出しは内部で自動直列化される**ので、
-  呼び出し側でロックを取る必要は無い。
-- `dispose()` で `Module.terminate()` を呼ぶ。Isolate が捨てられる前に
-  呼ぶと綺麗だが、呼び忘れても実害は無い。
+棋譜解析で option を要素ごとに変えたい場合は Batch を分割する
+(option 変更は実質 TT flush で Batch の旨味が消えるため、Batch 内
+option 固定は意図的な制約)。
 
-#### `eval()` と `evalBatch()` の違い
+### 9.4 option の扱い (Isolate-level vs Request-level)
 
-| | `eval(req)` | `evalBatch(reqs)` |
+同じ Isolate に複数ユーザーのリクエストが届く前提なので、option を
+2 層に分けている:
+
+| option | 層 | 適用タイミング |
 |---|---|---|
-| 用途 | **独立した 1 局面** の評価 (対局時の 1 手思考、局面検討など) | **連続した局面列** の評価 (棋譜解析) |
-| 置換表 (TT) 状態 | 毎回 `usinewgame` でクリア | **Batch 最初に 1 回だけ** `usinewgame`。Batch 内は前の局面の TT を次の局面で再利用 |
-| option 適用 | 1 局面ごとに設定 (SkillLevel / MultiPV / DepthLimit / NodesLimit) | **配列先頭の要素から** まとめて取る。Batch 内では option 固定 |
-| 探索効率 | 単発なので局面ごと独立 | 連続局面では **同じ探索時間でも hash hit 率が上がり、実効探索深さが伸びる** |
-| 何件までまとめていいか | — | 1 Batch = 1 USI セッションなので Workers の CPU time 上限 30 s に収まる範囲で。`byoyomi=500 ms` なら 50〜55 局面が上限 |
+| `Threads` / `USI_Hash` / `Hash` | **Isolate-level** | `createYaneuraOuEdge()` で 1 度だけ。置換表の reallocate コストが高いので使い回す |
+| `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | **Request-level** | `eval()` / `evalBatch()` 呼び出しのたびに毎回 `setoption` で上書き |
 
-棋譜解析で option を要素ごとに変えたいときは Batch を分割する。
-これは TT 再利用のメリットを保ちたいための意図的な制約 (option
-変更は実質 TT flush と等価になり、Batch の旨味が消えるため)。
+Request-level option は **省略時も USI 既定値で毎回上書き** されるので、
+前の呼び出しで立てた値を後続リクエストが引きずらない。これは
+「user A が `eval({ skillLevel: 5 })` → user B が skillLevel 指定なしで
+`eval()`」というパターンで user B が user A の設定で思考される事故を
+防ぐため。
 
-#### option の分類 (Isolate-level vs Request-level)
+### 9.5 組み込み例 (Cloudflare Workers)
 
-エッジ環境では **1 つの Isolate に複数ユーザーのリクエストが届く**
-前提になるので、option を 2 層に分けて管理している:
-
-| option | 層 | 振る舞い |
-|---|---|---|
-| `Threads` / `USI_Hash` / `Hash` | **Isolate-level** | `createYaneuraOuEdge()` で 1 度だけ設定。置換表の reallocate コストが高いので使い回す |
-| `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | **Request-level** | `eval()` 呼び出しのたびに毎回 `setoption` で上書き。指定省略時は USI 既定値 (`MultiPV=1` / `SkillLevel=20` / `DepthLimit=0` / `NodesLimit=0`) で上書きする |
-
-Request-level option は **省略された場合も既定値で上書き** されるので、
-前の `eval()` で設定された値が後続リクエストに漏れない。これは
-「user A が SkillLevel=5 で `eval()` → user B が SkillLevel を指定せずに
-`eval()`」というパターンで、user B が user A の設定で思考されてしまう
-事故を防ぐため。
-
-### 9.4 Cloudflare Workers への組み込み例
-
-wrangler で wasm と JS を bundle して、module scope にエンジンを
-1 個持っておく構成:
+wrangler で wasm と JS を bundle し、module scope にエンジンを 1 つ
+持っておく構成:
 
 ```ts
 // src/index.ts
 import YaneuraOu_K_P from "./yaneuraou.k-p.js";
-import wasmBinary from "./yaneuraou.k-p.wasm"; // wrangler.toml で data 扱い
+import wasmBinary from "./yaneuraou.k-p.wasm";
 import {
   createYaneuraOuEdge,
   type YaneuraOuFactory,
 } from "./yaneuraou-edge";
 
-// Isolate 寿命中は同じエンジンを使い回す。cold start 時のみ初期化コストを払う。
+// Isolate 寿命中は同じエンジンを使い回す (cold start 時のみ初期化コスト)
 const enginePromise = createYaneuraOuEdge({
   factory: YaneuraOu_K_P as unknown as YaneuraOuFactory,
   wasmBinary,
@@ -702,8 +693,7 @@ export default {
 };
 ```
 
-`wrangler.toml` 側で `.wasm` をバイナリとして import できるよう
-`rules` を設定する (Workers の場合):
+`wrangler.toml` 側で `.wasm` をバイナリとして import できるように:
 
 ```toml
 [[rules]]
@@ -712,27 +702,25 @@ globs = ["**/*.wasm"]
 fallthrough = true
 ```
 
-Vercel Edge Functions / Deno Deploy も同様のパターンで動く。
-`yaneuraou.k-p.js` を ES module として import し、`.wasm` を
-ArrayBuffer として渡すだけで差し替えられる。
+Vercel Edge Functions / Deno Deploy も同パターン。`yaneuraou.k-p.js`
+を ES module として import し、`.wasm` を ArrayBuffer として渡すだけ。
 
-### 9.5 実測パフォーマンス (k-p, em++ 5.0.5, aarch64)
+### 9.6 実測パフォーマンス (k-p, em++ 5.0.5, aarch64)
 
-`templates/edge/yaneuraou-edge.ts` + `go movetime 500` で中盤局面
-1 手、Node (bun) で実行:
+`templates/edge/yaneuraou-edge.ts` + `go movetime 500`、中盤局面 1 手、
+Node (bun):
 
 | phase | 時間 |
 |---|---|
 | ① `factory(...)` ロード (WASM compile + runtime init) | ~90 ms |
 | ② `usi` → `usiok` + 初回 `setoption` → `isready` → `readyok` | ~30 ms |
 | ③ `go movetime 500` → `bestmove` | ~505 ms |
-| **cold 合計 (1 リクエスト目)** | **~620 ms** |
-| **warm 合計 (Isolate 再利用)** | **~510 ms** (①② が省略される) |
+| **cold 合計** | **~620 ms** |
+| **warm 合計** (Isolate 再利用、① ② が省略される) | **~510 ms** |
 
-Cloudflare Workers Paid プランの **CPU time 30 s 上限** に対して ~2%
-の消費で収まる。Free プランの 10 ms CPU は当然無理 (思考だけで
-500 ms 消費する)。
+**wasm サイズ**: `yaneuraou.k-p.wasm` 約 1.41 MiB / Brotli 圧縮後
+479 KiB。Workers の bundle size 上限 (Paid 10 MiB / Free 3 MiB) に対し余裕。
 
-wasm サイズ: `yaneuraou.k-p.wasm` が約 **1.41 MiB**、Brotli 圧縮後で約
-**479 KiB**。Workers の bundle size 上限(Paid 10 MiB / Free 3 MiB)に対して
-十分な余裕がある。
+**CPU time**: Cloudflare Workers Paid プランの 30 s 上限に対して
+1 リクエスト ~500 ms で ~2% 消費。Free プランの 10 ms CPU は当然無理
+(思考だけで 500 ms 消費する)。
