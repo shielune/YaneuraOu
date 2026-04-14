@@ -632,6 +632,22 @@ const result: EvalResult = await engine.eval({
 - `dispose()` で `Module.terminate()` を呼ぶ。Isolate が捨てられる前に
   呼ぶと綺麗だが、呼び忘れても実害は無い。
 
+#### option の分類 (Isolate-level vs Request-level)
+
+エッジ環境では **1 つの Isolate に複数ユーザーのリクエストが届く**
+前提になるので、option を 2 層に分けて管理している:
+
+| option | 層 | 振る舞い |
+|---|---|---|
+| `Threads` / `USI_Hash` / `Hash` | **Isolate-level** | `createYaneuraOuEdge()` で 1 度だけ設定。置換表の reallocate コストが高いので使い回す |
+| `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | **Request-level** | `eval()` 呼び出しのたびに毎回 `setoption` で上書き。指定省略時は USI 既定値 (`MultiPV=1` / `SkillLevel=20` / `DepthLimit=0` / `NodesLimit=0`) で上書きする |
+
+Request-level option は **省略された場合も既定値で上書き** されるので、
+前の `eval()` で設定された値が後続リクエストに漏れない。これは
+「user A が SkillLevel=5 で `eval()` → user B が SkillLevel を指定せずに
+`eval()`」というパターンで、user B が user A の設定で思考されてしまう
+事故を防ぐため。
+
 ### 9.4 Cloudflare Workers への組み込み例
 
 wrangler で wasm と JS を bundle して、module scope にエンジンを
