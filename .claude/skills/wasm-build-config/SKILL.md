@@ -43,7 +43,7 @@ ifneq (,$(findstring em++,$(COMPILER)))
     CPPFLAGS += -s STRICT=1
     LDFLAGS += --pre-js wasm_pre.js
     LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" \
-               -s ENVIRONMENT=web,worker -s EXPORT_ES6=1 \
+               -s ENVIRONMENT=web,worker,node -s EXPORT_ES6=1 \
                -s AUTO_NATIVE_LIBRARIES=0
     # emscripten >= 3.1.74: INCOMING_MODULE_JS_API default dropped
     # print/printErr/postRun/preRun → wasm_pre.js overrides were ignored.
@@ -71,7 +71,7 @@ numbers will drift.
 |---|---|
 | `-s INCOMING_MODULE_JS_API=...` | Whitelist of `Module.*` keys the runtime is allowed to read. Emscripten 3.1.74 trimmed the default; our override restores `print`, `printErr`, `postRun`, `preRun`. If you add a new hook in `wasm_pre.js`, you probably need to add its key here too. |
 | `-s EXPORTED_RUNTIME_METHODS=['FS','ccall']` | What JS sees on the `Module` object. `ccall` is how the eval runner sends USI commands synchronously when `postRun` is broken. Do not remove these. |
-| `-s ENVIRONMENT=web,worker` | Excludes `node`. Browser-only paths. Do not add `node` just to unblock a Node polyfill — the eval strategy is Playwright. |
+| `-s ENVIRONMENT=web,worker,node` | The verification pipeline runs the same artefact through **both** `script/wasm_eval_node.ts` (Node) and `script/wasm_eval_browser.ts` (Playwright/Chromium). Keep all three — dropping `node` breaks the Node runner; dropping `web`/`worker` breaks the browser runner. |
 | `-s EXPORT_ES6=1 -s MODULARIZE=1` | ES-module factory output. The eval runner `import(engineJs)` depends on this. |
 | `-s PTHREAD_POOL_SIZE=32` | Pre-spawned worker pool. Needed for SharedArrayBuffer / pthreads. |
 | `-s INITIAL_MEMORY=… -s MAXIMUM_MEMORY=4294967296` | Memory bounds per package. Each package in `script/wasm_build.js` passes a package-specific initial size via `EM_INITIAL_MEMORY_SIZE`. |
@@ -140,7 +140,9 @@ Your loop:
 ## Flag changes that need leader approval first
 
 - Toggling `--closure 1`.
-- Changing `-s ENVIRONMENT=...`.
+- **Removing** any entry from `-s ENVIRONMENT=web,worker,node` (the
+  verification pipeline depends on all three). Adding entries is also
+  discouraged — there is no other environment we target.
 - Changing `-s EXPORT_ES6` or `-s MODULARIZE`.
 - Dropping `-s STRICT=1`.
 - Bumping `MAXIMUM_MEMORY` beyond 4 GB.
