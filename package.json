@@ -1,7 +1,5 @@
 {
-  "name": "app",
-  "module": "index.ts",
-  "type": "module",
+  "name": "yaneuraou-wasm-eval",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
