@@ -1,6 +1,35 @@
 #  WASM 評価値検証 — 全バージョン dual-runner 動作確認レポート
 
-最終更新: 2026-04-14 (V7.61 再 baseline / emscripten 5.0.0 固定)
+最終更新: 2026-04-15 (素の Node/bun での node variant 実測を追記)
+
+## 2026-04-15 追補: 素の Node/bun で node variant を直接 import すると落ちる
+
+`feat/wasm-edge-more-packages` セッションの延長で、「`script/loaders/node/` の shim を使わず、素の bun から `build/5.0.0_aarch64/k-p/node/lib/yaneuraou.k-p.js` を直接 `import()` → `factory({ wasmBinary })` で起動したら動くか」を検証した結果、**動かない** ことを実測した。
+
+- factory ロード自体は成功 (`engine loaded in 296.8 ms`)
+- その直後に `worker_threads.Worker` 経由で **pthread worker が 4 本起動**
+- 各 worker で以下のエラーを吐いて die:
+
+  ```
+  worker sent an error! undefined:undefined:
+    call_indirect to a signature that does not match
+    (evaluating 'getWasmTableEntry(ptr)(arg)')
+  at yaneuraou.k-p.js:1:13644
+  ```
+
+- 4 worker 全部 die した後、main 側で `engine.postMessage("usi")` を呼ぶと内部の `poll()` から `Module.ccall("usi_command", ...)` に到達し、`TypeError: func is not a function` で落ちる (= `_usi_command` export が main 側から見えない二次被害)
+- **`Module.postMessage` は `wasm_pre.js` 内で ccall を wrap しているだけ**なので、呼び出し側を `ccall` から `postMessage` に変えても同じ経路を踏む
+- 一方、`script/loaders/node/` shim 経由 (`wasm_eval_node.ts` / `bun script/wasm_eval_node.ts …`) では V7.61 時代に `cp 1658 / B*6f`、V8.50 時代に `cp 1290 / B*6f` の動作記録あり。shim は Worker polyfill + `instantiateWasm` override を挟んで table mismatch を迂回している形
+- edge variant (pthread なし、`ENVIRONMENT=web`) は worker を一切立てないので **この症状を踏まず、素の bun で cold ~620 ms / warm ~510 ms で動く** (同日の smoke test で確認済み)
+
+原因仮説: emscripten 3.1.60+ で pthread worker の wasm ロード経路が ES module worker 方式に切り替わった際、Node の `worker_threads.Worker` 経由で worker に渡される wasm instance が main 側と別テーブルを保持してしまい、`call_indirect` の function-type index がズレる。3.1.43 / 3.1.70 では素の bun でも動いていたので、3.1.44–3.1.72 のどこかに境界 commit があるはず。
+
+詳細 bisection と fix は **棚上げ**。edge variant で運用が回るので本質課題ではない、とユーザー判断 (2026-04-15)。将来サーバー側で「shim なしに node variant を素で import したい」というユースケースが発生した場合、以下の順で着手する:
+
+1. `-sASSERTIONS=1` でリビルドして table mismatch の詳細 (expected signature vs actual) を取る
+2. 3.1.44 / 3.1.50 / 3.1.60 / 3.1.70 / 3.1.72 / 3.1.74 の順で bisection し、境界 commit を特定
+3. emscripten changelog から pthread + node worker 関連の変更を突合
+4. 上流 issue を検索、未報告なら最小再現付きで報告
 
 ## 2026-04-14 追補: V7.61 downgrade 後の baseline 更新
 
