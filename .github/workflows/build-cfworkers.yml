@@ -118,6 +118,8 @@ jobs:
           cd yaneuraou-cfworkers
           tar czf "../yaneuraou-cfworkers-v${{ steps.version.outputs.version }}.tar.gz" \
             package.json \
+            README.md \
+            SPEC.md \
             dist/index.js \
             dist/index.d.ts \
             dist/yaneuraou.js \
