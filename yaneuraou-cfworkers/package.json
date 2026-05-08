@@ -1,0 +1,31 @@
+{
+  "name": "@ultemica/yaneuraou-cfworkers",
+  "version": "0.1.0",
+  "description": "YaneuraOu shogi engine for Cloudflare Workers (Wasm, no embedded eval)",
+  "license": "GPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/yaneuraou.js",
+    "dist/yaneuraou.wasm"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./wasm": "./dist/yaneuraou.wasm",
+    "./engine": "./dist/yaneuraou.js"
+  },
+  "scripts": {
+    "build:wasm": "../script/build_cfworkers.sh",
+    "build:loader": "tsc",
+    "build": "npm run build:wasm && npm run build:loader"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
