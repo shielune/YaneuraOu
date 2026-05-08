@@ -44,7 +44,8 @@ jobs:
               EM_PTHREAD=0 \
               EM_INITIAL_MEMORY_SIZE=67108864 \
               EM_MAXIMUM_MEMORY_SIZE=134217728 \
-              EM_STACK_SIZE=2097152
+              EM_STACK_SIZE=2097152 \
+              EM_CLOSURE=0
 
       - name: verify artifacts
         run: |
