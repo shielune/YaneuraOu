@@ -9,7 +9,8 @@
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "lib": ["ES2022"]
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"]
   },
   "include": ["src"]
 }
