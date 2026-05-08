@@ -1,6 +1,9 @@
 name: Build cfworkers WASM package
 
 on:
+  push:
+    tags:
+      - "cfworkers-v*"
   workflow_dispatch:
     inputs:
       emsdk_version:
@@ -60,5 +63,80 @@ jobs:
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: yaneuraou-cfworkers_${{ github.run_number }}_${{ github.sha }}
+          name: yaneuraou-cfworkers-dist
           path: yaneuraou-cfworkers/dist/
+
+  release-cfworkers:
+    needs: build-cfworkers
+    if: startsWith(github.ref, 'refs/tags/cfworkers-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/cfworkers-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: yaneuraou-cfworkers-dist
+          path: yaneuraou-cfworkers/dist/
+
+      - name: Compile TypeScript loader
+        working-directory: yaneuraou-cfworkers
+        run: |
+          npm install --ignore-scripts
+          npx tsc
+
+      - name: Update package.json version
+        run: |
+          cd yaneuraou-cfworkers
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${{ steps.version.outputs.version }}';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Create release archive
+        run: |
+          cd yaneuraou-cfworkers
+          tar czf "../yaneuraou-cfworkers-v${{ steps.version.outputs.version }}.tar.gz" \
+            package.json \
+            dist/index.js \
+            dist/index.d.ts \
+            dist/yaneuraou.js \
+            dist/yaneuraou.wasm \
+            dist/yaneuraou.wasm.br
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-cfworkers ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu WASM for Cloudflare Workers (k-p.noeval, edge variant)
+
+            - NNUE K-P256 / single-thread / SIMD enabled
+            - Memory: 64MB initial, 128MB max
+            - Eval / book files are NOT embedded -- load via `FS.writeFile` at runtime
+
+            ```ts
+            import { createEngine } from "@ultemica/yaneuraou-cfworkers";
+            ```
+          files: |
+            yaneuraou-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
