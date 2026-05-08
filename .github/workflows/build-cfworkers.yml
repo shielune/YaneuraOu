@@ -141,5 +141,24 @@ jobs:
             ```ts
             import { createEngine } from "@ultemica/yaneuraou-cfworkers";
             ```
+
+            ## Required: NNUE eval file
+
+            This package does NOT include the eval file. Download separately and serve via Static Assets or R2.
+
+            | File | Architecture | Size | URL |
+            |---|---|---|---|
+            | suishopetite nn.bin | KP256 | 873KB | Included in [suishopetite_20211123.k_p.nnue.cpp.gz](https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz) (embedded format, extract with build tools) |
+
+            > HalfKP eval (62MB) is NOT compatible -- exceeds the 128MB WASM memory limit.
+
+            ## Optional: opening book
+
+            | Book | Positions | Size | URL |
+            |---|---|---|---|
+            | 100T-shock | ~40,000 | 4.7MB | [100T-shock-book.zip](https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip) |
+            | 700T-shock | ~400,000 | 32MB | [700T-shock-book.zip](https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip) |
+
+            > 700T-shock (32MB) causes OOM on Workers (128MB limit). Use 100T-shock for Workers.
           files: |
             yaneuraou-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
