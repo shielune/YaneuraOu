@@ -28,6 +28,7 @@
     "build": "npm run build:wasm && npm run build:loader"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240000.0",
     "typescript": "^5.0.0"
   }
 }
