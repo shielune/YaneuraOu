@@ -23,6 +23,7 @@ import { extname, resolve, join } from "node:path";
 const ROOT = resolve(join(import.meta.dir, ".."));
 const DIST = join(ROOT, "yaneuraou-cfworkers", "dist");
 const EVAL_FILE = join(ROOT, ".dl", "nn.bin");
+const BOOK_FILE = join(ROOT, ".dl", "user_book1.db");
 
 if (!existsSync(join(DIST, "yaneuraou.js"))) {
   console.error("yaneuraou-cfworkers/dist/yaneuraou.js not found. Build first.");
@@ -85,6 +86,8 @@ function staticServer(): Promise<{ url: string; close: () => void }> {
         filePath = join(DIST, url.pathname.slice(6));
       } else if (url.pathname === "/nn.bin") {
         filePath = EVAL_FILE;
+      } else if (url.pathname === "/test_book.db") {
+        filePath = BOOK_FILE;
       } else if (url.pathname === "/runner.html") {
         filePath = join(ROOT, "script", "cfworkers_test_runner.html");
       }
@@ -127,28 +130,25 @@ page.on("console", (msg) => {
 // Navigate to runner
 await page.goto(`${server.url}/runner.html`);
 
-// Run tests inside the browser
-const results = await page.evaluate(async (positions) => {
-  // @ts-ignore - loaded via script in HTML
+type TestResult = {
+  name: string;
+  bestmove: string;
+  score: string;
+  depth: number | null;
+  nodes: number | null;
+  timeMs: number | null;
+  pv: string;
+  ok: boolean;
+  error?: string;
+};
+
+// -- Phase 1: eval-only (no book) --
+const evalResults = await page.evaluate(async (positions) => {
   const { createEngine } = await import("/dist/index.js");
-  // @ts-ignore
   const YaneuraOu = (await import("/dist/yaneuraou.js")).default;
+  const evalBin = await fetch("/nn.bin").then((r: Response) => r.arrayBuffer());
 
-  const evalResp = await fetch("/nn.bin");
-  const evalBin = await evalResp.arrayBuffer();
-
-  const out: Array<{
-    name: string;
-    bestmove: string;
-    score: string;
-    depth: number | null;
-    nodes: number | null;
-    timeMs: number | null;
-    pv: string;
-    ok: boolean;
-    error?: string;
-  }> = [];
-
+  const out: any[] = [];
   let engine: any;
   try {
     engine = await createEngine({
@@ -165,48 +165,93 @@ const results = await page.evaluate(async (positions) => {
 
   for (const pos of positions) {
     try {
-      const result = await engine.eval({
-        sfen: pos.sfen,
-        byoyomi: pos.thinkMs,
-      });
+      const result = await engine.eval({ sfen: pos.sfen, byoyomi: pos.thinkMs });
       out.push({
         name: pos.name,
         bestmove: result.bestmove,
         score: result.score ? `${result.score.kind} ${result.score.value}` : "none",
-        depth: result.depth,
-        nodes: result.nodes,
-        timeMs: result.timeMs,
+        depth: result.depth, nodes: result.nodes, timeMs: result.timeMs,
         pv: (result.pv ?? []).slice(0, 5).join(" "),
         ok: result.bestmove !== "resign" && result.bestmove !== "(none)",
       });
     } catch (e: any) {
-      out.push({
-        name: pos.name,
-        bestmove: "",
-        score: "",
-        depth: null,
-        nodes: null,
-        timeMs: null,
-        pv: "",
-        ok: false,
-        error: e.message,
-      });
+      out.push({ name: pos.name, bestmove: "", score: "", depth: null, nodes: null, timeMs: null, pv: "", ok: false, error: e.message });
     }
   }
-
   engine.dispose();
   return out;
-}, TEST_POSITIONS);
+}, TEST_POSITIONS) as TestResult[];
 
-// Report
+// -- Phase 2: eval + book (100T-shock) --
+const bookResults = await page.evaluate(async (positions) => {
+  const { createEngine } = await import("/dist/index.js");
+  const YaneuraOu = (await import("/dist/yaneuraou.js")).default;
+  const evalBin = await fetch("/nn.bin").then((r: Response) => r.arrayBuffer());
+  const bookDb = await fetch("/test_book.db").then((r: Response) => r.arrayBuffer());
+
+  const out: any[] = [];
+  let engine: any;
+  try {
+    engine = await createEngine({
+      factory: YaneuraOu,
+      wasmBinary: undefined,
+      evalBin,
+      bookDb,
+      bookFile: "user_book1.db",
+      usiHash: 16,
+      handshakeTimeoutMs: 10000,
+      readyTimeoutMs: 30000,
+    });
+  } catch (e: any) {
+    return [{ name: "BOOK-INIT", bestmove: "", score: "", depth: null, nodes: null, timeMs: null, pv: "", ok: false, error: e.message }];
+  }
+
+  for (const pos of positions) {
+    try {
+      const result = await engine.eval({ sfen: pos.sfen, byoyomi: pos.thinkMs });
+      out.push({
+        name: `[book] ${pos.name}`,
+        bestmove: result.bestmove,
+        score: result.score ? `${result.score.kind} ${result.score.value}` : "none",
+        depth: result.depth, nodes: result.nodes, timeMs: result.timeMs,
+        pv: (result.pv ?? []).slice(0, 5).join(" "),
+        ok: result.bestmove !== "resign" && result.bestmove !== "(none)",
+      });
+    } catch (e: any) {
+      out.push({ name: `[book] ${pos.name}`, bestmove: "", score: "", depth: null, nodes: null, timeMs: null, pv: "", ok: false, error: e.message });
+    }
+  }
+  engine.dispose();
+  return out;
+}, TEST_POSITIONS) as TestResult[];
+
+// -- Report --
+const allResults = [...evalResults, ...bookResults];
+
 console.log("");
-console.log("=== Cloudflare Workers (V8) eval test ===");
+console.log("=== Cloudflare Workers (V8) integration test ===");
 console.log(`Engine: YaneuraOu NNUE KP256, Eval: suishopetite nn.bin (873KB)`);
+console.log(`Book: 100T-shock user_book1.db (4.7MB)`);
 console.log(`Runtime: Chromium ${browser.version()} (V8)`);
 console.log("");
 
+console.log("--- Phase 1: eval only (no book) ---");
 let allOk = true;
-for (const r of results) {
+for (const r of evalResults) {
+  const status = r.ok ? "PASS" : "FAIL";
+  if (!r.ok) allOk = false;
+  console.log(`[${status}] ${r.name}`);
+  if (r.error) {
+    console.log(`  error: ${r.error}`);
+  } else {
+    console.log(`  bestmove: ${r.bestmove}  score: ${r.score}  depth: ${r.depth}  nodes: ${r.nodes}  time: ${r.timeMs}ms`);
+    console.log(`  pv: ${r.pv}`);
+  }
+}
+
+console.log("");
+console.log("--- Phase 2: eval + book (100T-shock) ---");
+for (const r of bookResults) {
   const status = r.ok ? "PASS" : "FAIL";
   if (!r.ok) allOk = false;
   console.log(`[${status}] ${r.name}`);
