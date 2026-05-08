@@ -217,6 +217,7 @@ else
 		EM_INITIAL_MEMORY_SIZE=$(shell if [ $(MATERIAL_LEVEL) -ge 5 ]; then echo 385875968; else echo 138412032; fi)
 		EM_MAXIMUM_MEMORY_SIZE ?= 4294967296
 		EM_STACK_SIZE ?= 67108864
+		EM_CLOSURE ?= 1
 		# web / node の 2 variant を同じ source から吐くので、ENVIRONMENT と
 		# EXPORTED_RUNTIME_METHODS は make 呼び出し側 (script/wasm_build.js)
 		# から上書きできるように ?= で default を置く。
@@ -252,7 +253,7 @@ else
 		# LDFLAGS += -s PROXY_TO_PTHREAD
 		# LDFLAGS += -s ALLOW_UNIMPLEMENTED_SYSCALLS
 		# LDFLAGS += -s ASSERTIONS
-		LDFLAGS += -s --closure 1
+		LDFLAGS += --closure $(EM_CLOSURE)
 	endif
 endif
 
