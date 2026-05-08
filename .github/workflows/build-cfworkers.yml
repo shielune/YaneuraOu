@@ -1,0 +1,64 @@
+name: Build cfworkers WASM package
+
+on:
+  workflow_dispatch:
+    inputs:
+      emsdk_version:
+        description: "emscripten/emsdk Docker tag"
+        required: false
+        default: "5.0.5"
+
+jobs:
+  build-cfworkers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: docker pull
+        run: |
+          docker pull emscripten/emsdk:${{ inputs.emsdk_version || '5.0.5' }}
+
+      - name: build wasm (k-p.noeval, edge variant)
+        run: |
+          EMSDK_VERSION="${{ inputs.emsdk_version || '5.0.5' }}"
+          DIST_DIR="yaneuraou-cfworkers/dist"
+          mkdir -p "$DIST_DIR"
+
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src/source \
+            "emscripten/emsdk:${EMSDK_VERSION}" \
+            make -j$(nproc) clean tournament \
+              COMPILER=em++ \
+              TARGET_CPU=WASM \
+              YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE_KP256 \
+              TARGET="../${DIST_DIR}/yaneuraou.js" \
+              EM_EXPORT_NAME=YaneuraOu_K_P \
+              EM_ENVIRONMENT=web \
+              "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall']" \
+              EM_PTHREAD=0 \
+              EM_INITIAL_MEMORY_SIZE=67108864 \
+              EM_MAXIMUM_MEMORY_SIZE=134217728 \
+              EM_STACK_SIZE=2097152
+
+      - name: verify artifacts
+        run: |
+          ls -lh yaneuraou-cfworkers/dist/yaneuraou.{js,wasm}
+
+      - name: compress
+        run: |
+          cd yaneuraou-cfworkers/dist
+          for f in yaneuraou.js yaneuraou.wasm; do
+            brotli -f --best "$f" -o "${f}.br" || true
+            gzip  -f --best -k "$f" || true
+          done
+          echo "--- compressed ---"
+          ls -lh yaneuraou.*
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-cfworkers_${{ github.run_number }}_${{ github.sha }}
+          path: yaneuraou-cfworkers/dist/
