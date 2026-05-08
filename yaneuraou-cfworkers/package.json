@@ -10,7 +10,9 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/yaneuraou.js",
-    "dist/yaneuraou.wasm"
+    "dist/yaneuraou.wasm",
+    "README.md",
+    "SPEC.md"
   ],
   "exports": {
     ".": {
