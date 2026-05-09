@@ -24,8 +24,8 @@
   },
   "scripts": {
     "build:wasm": "act workflow_dispatch -W ../.github/workflows/build-mate-cfworkers.yml --bind",
-    "build:loader": "tsc",
-    "build": "npm run build:wasm && npm run build:loader"
+    "build:loader": "bun tsc",
+    "build": "bun run build:wasm && bun run build:loader"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240000.0",
