@@ -62,7 +62,14 @@ void  Search::clear()
 // 終了条件は NodesLimit と USI_Hash 上限のみ。`go mate <ms>` の時間制限は無視。
 void MainThread::search()
 {
-	u64 nodes_limit = Options["NodesLimit"];
+	// NodesLimit=0 (無制限) のままだと Cloudflare Workers の CPU 制限を超える可能性があるため、
+	// シングルスレッド WASM ビルドでは保守的なデフォルト上限を適用する。
+	const u64 user_nodes_limit = Options["NodesLimit"];
+	const u64 SINGLE_THREAD_DEFAULT_NODES_LIMIT = 1000000;
+	const u64 nodes_limit = user_nodes_limit == 0 ? SINGLE_THREAD_DEFAULT_NODES_LIMIT : user_nodes_limit;
+	if (user_nodes_limit == 0)
+		sync_cout << "info string NodesLimit is 0 (unlimited); applying single-thread default cap = "
+		          << SINGLE_THREAD_DEFAULT_NODES_LIMIT << sync_endl;
 
 	Timer time;
 	time.reset();
