@@ -79,10 +79,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: "22"
+          bun-version: "1.3.13"
 
       - name: Extract version from tag
         id: version
@@ -101,13 +101,13 @@ jobs:
       - name: Compile TypeScript loader
         working-directory: yaneuraou-mate-cfworkers
         run: |
-          npm install --ignore-scripts
-          npx tsc
+          bun install --frozen-lockfile --ignore-scripts
+          bun tsc
 
       - name: Update package.json version
+        working-directory: yaneuraou-mate-cfworkers
         run: |
-          cd yaneuraou-mate-cfworkers
-          node -e "
+          bun -e "
             const pkg = require('./package.json');
             pkg.version = '${{ steps.version.outputs.version }}';
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
