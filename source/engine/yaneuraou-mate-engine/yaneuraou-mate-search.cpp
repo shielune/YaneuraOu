@@ -56,6 +56,52 @@ void  Search::clear()
 	solver.alloc(mem);
 }
 
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+// シングルスレッド WASM (Cloudflare Workers 等) 向け。
+// std::thread が使えないので、mate_dfpn を同期的に走らせ、
+// 終了条件は NodesLimit と USI_Hash 上限のみ。`go mate <ms>` の時間制限は無視。
+void MainThread::search()
+{
+	// NodesLimit=0 (無制限) のままだと Cloudflare Workers の CPU 制限を超える可能性があるため、
+	// シングルスレッド WASM ビルドでは保守的なデフォルト上限を適用する。
+	const u64 user_nodes_limit = Options["NodesLimit"];
+	const u64 SINGLE_THREAD_DEFAULT_NODES_LIMIT = 1000000;
+	const u64 nodes_limit = user_nodes_limit == 0 ? SINGLE_THREAD_DEFAULT_NODES_LIMIT : user_nodes_limit;
+	if (user_nodes_limit == 0)
+		sync_cout << "info string NodesLimit is 0 (unlimited); applying single-thread default cap = "
+		          << SINGLE_THREAD_DEFAULT_NODES_LIMIT << sync_endl;
+
+	Timer time;
+	time.reset();
+
+	Move move = solver.mate_dfpn(rootPos, nodes_limit);
+
+	// 最終PVを1回出力。
+	auto elapsed = time.elapsed();
+	u64 nodes_searched = solver.get_nodes_searched();
+	u64 nps = elapsed > 0 ? nodes_searched * 1000 / elapsed : 0;
+	sync_cout << "info time " << elapsed << " nodes " << nodes_searched << " nps " << nps
+		      << " hashfull " << solver.hashfull() << " pv" << USI::move(solver.get_current_pv()) << sync_endl;
+
+	if (move == Move::none())
+	{
+		if (solver.is_out_of_memory())
+			sync_cout << "info string Out Of Memory." << sync_endl;
+		else if (solver.get_nodes_searched() >= nodes_limit)
+			sync_cout << "info string Exceeded NodesLimit." << sync_endl;
+
+		sync_cout << "checkmate none" << sync_endl;
+	}
+	else if (move == Move::null())
+	{
+		sync_cout << "checkmate nomate" << sync_endl;
+	}
+	else {
+		auto pv = solver.get_pv();
+		sync_cout << "checkmate" << USI::move(pv) << sync_endl;
+	}
+}
+#else
 // 探索開始時に呼び出される。
 void MainThread::search()
 {
@@ -133,6 +179,7 @@ void MainThread::search()
 		sync_cout << "checkmate" << USI::move(pv) << sync_endl;
 	}
 }
+#endif
 
 // 探索本体。並列化している場合、ここがslaveのエントリーポイント。
 void Thread::search()
