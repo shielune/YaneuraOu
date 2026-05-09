@@ -31,7 +31,14 @@ const server = Bun.serve({
   fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname === "/" ? "/test/index.html" : url.pathname;
-    const filePath = join(ROOT, path);
+    // Strip leading slash and resolve against ROOT, then assert the result
+    // stays within ROOT — `path.join(ROOT, "/../etc/passwd")` normalises to
+    // `/etc/passwd`, so without this check a crafted request could read
+    // arbitrary host files.
+    const filePath = resolve(join(ROOT, path.replace(/^\/+/, "")));
+    if (filePath !== ROOT && !filePath.startsWith(`${ROOT}/`)) {
+      return new Response("forbidden", { status: 403 });
+    }
     if (!existsSync(filePath) || !statSync(filePath).isFile()) {
       return new Response(`not found: ${path}`, { status: 404 });
     }
