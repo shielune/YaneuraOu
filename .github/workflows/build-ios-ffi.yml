@@ -1,0 +1,101 @@
+name: Build iOS FFI library
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/native-ffi-bridge
+
+jobs:
+  build-ios-slice:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        edition:
+          - YANEURAOU_ENGINE_NNUE
+          - YANEURAOU_ENGINE_NNUE_KP256
+          - YANEURAOU_MATE_ENGINE
+        slice:
+          - sdk: iphoneos
+            target: arm64-apple-ios14.0
+            min_flag: -mios-version-min=14.0
+            name: ios-arm64
+          - sdk: iphonesimulator
+            target: arm64-apple-ios14.0-simulator
+            min_flag: -mios-simulator-version-min=14.0
+            name: iossim-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive engine name
+        id: name
+        run: |
+          case "${{ matrix.edition }}" in
+            YANEURAOU_ENGINE_NNUE)        echo "name=halfkp" >> "$GITHUB_OUTPUT" ;;
+            YANEURAOU_ENGINE_NNUE_KP256)  echo "name=kp256"  >> "$GITHUB_OUTPUT" ;;
+            YANEURAOU_MATE_ENGINE)        echo "name=mate"   >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Build static library (${{ steps.name.outputs.name }} / ${{ matrix.slice.name }})
+        run: |
+          cd source
+          SDK_PATH=$(xcrun --sdk ${{ matrix.slice.sdk }} --show-sdk-path)
+          echo "Using SDK: $SDK_PATH"
+          make -j$(sysctl -n hw.ncpu) \
+            COMPILER=clang++ \
+            TARGET_CPU=APPLEIOS_ARM64 \
+            YANEURAOU_EDITION=${{ matrix.edition }} \
+            EXTRA_CPPFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64 ${{ matrix.slice.min_flag }}" \
+            EXTRA_LDFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64" \
+            ffi-static
+          mv libyaneuraou.a libyaneuraou-${{ steps.name.outputs.name }}-${{ matrix.slice.name }}.a
+          ls -lh libyaneuraou-${{ steps.name.outputs.name }}-${{ matrix.slice.name }}.a
+          lipo -info libyaneuraou-${{ steps.name.outputs.name }}-${{ matrix.slice.name }}.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libyaneuraou-${{ steps.name.outputs.name }}-${{ matrix.slice.name }}
+          path: source/libyaneuraou-${{ steps.name.outputs.name }}-${{ matrix.slice.name }}.a
+
+  assemble-xcframework:
+    needs: build-ios-slice
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [halfkp, kp256, mate]
+
+    steps:
+      - name: Download device slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-${{ matrix.engine }}-ios-arm64
+          path: ios-arm64/
+
+      - name: Download simulator slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-${{ matrix.engine }}-iossim-arm64
+          path: iossim-arm64/
+
+      - name: Create xcframework
+        run: |
+          xcodebuild -create-xcframework \
+            -library ios-arm64/libyaneuraou-${{ matrix.engine }}-ios-arm64.a \
+            -library iossim-arm64/libyaneuraou-${{ matrix.engine }}-iossim-arm64.a \
+            -output yaneuraou-${{ matrix.engine }}.xcframework
+
+      - name: Inspect xcframework
+        run: |
+          ls -la yaneuraou-${{ matrix.engine }}.xcframework/
+          cat yaneuraou-${{ matrix.engine }}.xcframework/Info.plist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-${{ matrix.engine }}-xcframework
+          path: yaneuraou-${{ matrix.engine }}.xcframework/**
