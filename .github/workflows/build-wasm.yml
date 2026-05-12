@@ -182,14 +182,30 @@ jobs:
 
             > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP256 cfworkers variant does not exist (eval exceeds Workers memory budget).
 
-            ## NNUE eval file (required for NNUE builds)
+            ## Required: NNUE eval file (NNUE builds only)
 
-            | Eval | Engine | Size |
-            |---|---|---|
-            | suishopetite nn.bin | NNUE KP256 | ~873 KB |
-            | suisho5 nn.bin | NNUE HalfKP256 | ~62 MB |
+            WASM bundle には評価関数を内蔵していないので、別途 nn.bin を取得して `FS.writeFile` で MEMFS に書いて `EvalDir` USI option で読み込ませる。
 
-            > KP256 and HalfKP256 evals are NOT interchangeable. Mate engine doesn't use eval.
+            | Eval | Engine | Size | URL |
+            |---|---|---|---|
+            | suisho5 nn.bin | HalfKP256 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
+
+            > 上記は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。
+
+            > KP256 と HalfKP256 の eval は互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。
+
+            ## Optional: opening book
+
+            `BookDir` / `BookFile` USI option で読み込ませる。
+
+            | Book | 局面数 | Size | URL |
+            |---|---|---|---|
+            | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
+            | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
+            | 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
+
+            > 700T-shock (32 MB) は cfworkers の 128 MB heap だと OOM。cfworkers で book を使う場合は 100T-shock まで。petabook は pthread variant でも heap 圧迫するので注意。
           files: |
             yaneuraou-wasm-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
