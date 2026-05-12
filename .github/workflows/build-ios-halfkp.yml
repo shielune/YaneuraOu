@@ -1,0 +1,81 @@
+name: Build ios-halfkp .a / xcframework
+
+on:
+  push:
+    tags:
+      - "ios-halfkp-v*"
+    branches:
+      - feature/native-ffi-bridge
+  workflow_dispatch:
+
+jobs:
+  build-ios-halfkp-slice:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        slice:
+          - sdk: iphoneos
+            target: arm64-apple-ios14.0
+            min_flag: -mios-version-min=14.0
+            name: ios-arm64
+          - sdk: iphonesimulator
+            target: arm64-apple-ios14.0-simulator
+            min_flag: -mios-simulator-version-min=14.0
+            name: iossim-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static library (HalfKP256, ${{ matrix.slice.name }})
+        run: |
+          cd source
+          SDK_PATH=$(xcrun --sdk ${{ matrix.slice.sdk }} --show-sdk-path)
+          echo "Using SDK: $SDK_PATH"
+          make -j$(sysctl -n hw.ncpu) \
+            COMPILER=clang++ \
+            TARGET_CPU=APPLEIOS_ARM64 \
+            YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE \
+            EXTRA_CPPFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64 ${{ matrix.slice.min_flag }}" \
+            EXTRA_LDFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64" \
+            ffi-static
+          mv libyaneuraou.a libyaneuraou-halfkp-${{ matrix.slice.name }}.a
+          ls -lh libyaneuraou-halfkp-${{ matrix.slice.name }}.a
+          lipo -info libyaneuraou-halfkp-${{ matrix.slice.name }}.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libyaneuraou-halfkp-${{ matrix.slice.name }}
+          path: source/libyaneuraou-halfkp-${{ matrix.slice.name }}.a
+
+  assemble-ios-halfkp-xcframework:
+    needs: build-ios-halfkp-slice
+    runs-on: macos-latest
+
+    steps:
+      - name: Download device slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-halfkp-ios-arm64
+          path: ios-arm64/
+
+      - name: Download simulator slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-halfkp-iossim-arm64
+          path: iossim-arm64/
+
+      - name: Create xcframework
+        run: |
+          xcodebuild -create-xcframework \
+            -library ios-arm64/libyaneuraou-halfkp-ios-arm64.a \
+            -library iossim-arm64/libyaneuraou-halfkp-iossim-arm64.a \
+            -output yaneuraou-halfkp.xcframework
+          ls -la yaneuraou-halfkp.xcframework/
+          cat yaneuraou-halfkp.xcframework/Info.plist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-halfkp-xcframework
+          path: yaneuraou-halfkp.xcframework/**
