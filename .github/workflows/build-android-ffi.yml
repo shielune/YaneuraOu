@@ -1,0 +1,77 @@
+name: Build Android FFI library
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/native-ffi-bridge
+
+jobs:
+  build-android-ffi:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        edition:
+          - YANEURAOU_ENGINE_NNUE
+          - YANEURAOU_ENGINE_NNUE_KP256
+          - YANEURAOU_MATE_ENGINE
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate or install Android NDK
+        run: |
+          # 1. プリインストール済みを探す (catthehacker/runner-* や GH-hosted runner)
+          NDK_PATH=""
+          for p in /opt/hostedtoolcache/ndk/r26d/x64 \
+                   /usr/local/lib/android/sdk/ndk/26.* \
+                   /usr/local/lib/android/sdk/ndk/25.*; do
+            [ -d "$p" ] && NDK_PATH="$p" && break
+          done
+
+          # 2. なければダウンロード
+          if [ -z "$NDK_PATH" ]; then
+            echo "::group::Download Android NDK r26d"
+            cd /tmp
+            curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+            unzip -q ndk.zip
+            NDK_PATH=/tmp/android-ndk-r26d
+            echo "::endgroup::"
+          fi
+
+          echo "Using NDK at: $NDK_PATH"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          # ndk-build スクリプトもパスに足す (NDK_PATH 直下にある)
+          echo "$NDK_PATH" >> "$GITHUB_PATH"
+
+      - name: Derive engine short name
+        id: name
+        run: |
+          case "${{ matrix.edition }}" in
+            YANEURAOU_ENGINE_NNUE)        echo "name=halfkp" >> "$GITHUB_OUTPUT" ;;
+            YANEURAOU_ENGINE_NNUE_KP256)  echo "name=kp256"  >> "$GITHUB_OUTPUT" ;;
+            YANEURAOU_MATE_ENGINE)        echo "name=mate"   >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: ndk-build (${{ steps.name.outputs.name }}, arm64-v8a)
+        run: |
+          cd jni
+          ndk-build \
+            NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT=./Android-ffi.mk \
+            NDK_APPLICATION_MK=./Application-ffi.mk \
+            YANEURAOU_EDITION=${{ matrix.edition }} \
+            -j2
+
+      - name: List produced library
+        run: ls -la jni/libs/arm64-v8a/
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !env.ACT }}
+        with:
+          name: libyaneuraou-${{ steps.name.outputs.name }}-android-arm64-v8a
+          path: jni/libs/arm64-v8a/lib*.so

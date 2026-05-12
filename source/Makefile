@@ -729,6 +729,40 @@ pgo:
 	@touch $(SOURCES)
 	$(MAKE) profuse
 
+# --- FFI ライブラリビルド (iOS / Android / Linux ネイティブ向け) ---
+# main.cpp の代わりに yaneuraou_ffi.cpp を含めて lib を出す。
+# OBJDIR を分離して通常ビルドと干渉しない。
+
+FFI_SOURCES = $(filter-out main.cpp, $(SOURCES)) yaneuraou_ffi.cpp
+FFI_OBJDIR  = ../obj/ffi
+FFI_OBJECTS = $(addprefix $(FFI_OBJDIR)/, $(FFI_SOURCES:.cpp=.o))
+FFI_LIB_A   = libyaneuraou.a
+FFI_LIB_SO  = libyaneuraou.so
+AR ?= ar
+
+ffi-static:
+	$(MAKE) OBJDIR=$(FFI_OBJDIR) CPPFLAGS='$(CPPFLAGS) -DYANEURAOU_FFI -fPIC' _ffi_static_build
+
+ffi-shared:
+	$(MAKE) OBJDIR=$(FFI_OBJDIR) CPPFLAGS='$(CPPFLAGS) -DYANEURAOU_FFI -fPIC' _ffi_shared_build
+
+ffi-test:
+	$(MAKE) OBJDIR=$(FFI_OBJDIR) CPPFLAGS='$(CPPFLAGS) -DYANEURAOU_FFI' _ffi_test_build
+
+_ffi_static_build: $(FFI_OBJECTS)
+	$(AR) rcs $(FFI_LIB_A) $(FFI_OBJECTS)
+
+_ffi_shared_build: $(FFI_OBJECTS)
+	$(COMPILER) -shared -o $(FFI_LIB_SO) $(FFI_OBJECTS) $(LDFLAGS)
+
+_ffi_test_build: $(FFI_OBJECTS) $(FFI_OBJDIR)/ffi_test_main.o
+	$(COMPILER) -o yaneuraou_ffi_test $(FFI_OBJECTS) $(FFI_OBJDIR)/ffi_test_main.o $(LDFLAGS)
+
+clean-ffi:
+	rm -rf $(FFI_OBJDIR) $(FFI_LIB_A) $(FFI_LIB_SO) yaneuraou_ffi_test
+
+.PHONY: ffi-static ffi-shared ffi-test _ffi_static_build _ffi_shared_build _ffi_test_build clean-ffi
+
 clean:
 	rm -f $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS) $(DEPENDS) $(TARGET) ${OBJECTS:.o=.gcda}
 
