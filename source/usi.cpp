@@ -1190,23 +1190,27 @@ void USI::UnitTest(Test::UnitTester& tester)
 	}
 }
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(YANEURAOU_FFI)
 // --------------------
-// EMSCRIPTEN support
+// EMSCRIPTEN / FFI support
 // --------------------
 static StateListPtr states(new StateList(1));
 
-// USI応答部 emscriptenインターフェース
-EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char *c_cmd) {
+#if defined(__EMSCRIPTEN__)
+EMSCRIPTEN_KEEPALIVE
+#endif
+extern "C" int usi_command(const char *c_cmd) {
 	std::string cmd(c_cmd);
 
 	static Position pos;
 	string token;
 
+#if defined(__EMSCRIPTEN__)
 	for (Thread* th : Threads) {
 		if (!th->threadStarted)
 			return 1;
 	}
+#endif
 
 	usi_cmdexec(pos, states, cmd);
 
