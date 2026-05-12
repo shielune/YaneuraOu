@@ -21,16 +21,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { extname, resolve, join } from "node:path";
 
 const ROOT = resolve(join(import.meta.dir, ".."));
-const DIST = join(ROOT, "yaneuraou-cfworkers", "dist");
+const DIST = join(ROOT, "yaneuraou-wasm-cfworkers", "dist");
 const EVAL_FILE = join(ROOT, ".dl", "nn.bin");
 const BOOK_FILE = join(ROOT, ".dl", "user_book1.db");
 
 if (!existsSync(join(DIST, "yaneuraou.js"))) {
-  console.error("yaneuraou-cfworkers/dist/yaneuraou.js not found. Build first.");
+  console.error("yaneuraou-wasm-cfworkers/dist/yaneuraou.js not found. Build first.");
   process.exit(2);
 }
 if (!existsSync(join(DIST, "index.js"))) {
-  console.error("yaneuraou-cfworkers/dist/index.js not found. Run tsc first.");
+  console.error("yaneuraou-wasm-cfworkers/dist/index.js not found. Run tsc first.");
   process.exit(2);
 }
 if (!existsSync(EVAL_FILE)) {

@@ -5,7 +5,7 @@ on:
     tags:
       - "ios-halfkp-v*"
     branches:
-      - feature/native-ffi-bridge
+      - feature/native-ffi-release
   workflow_dispatch:
 
 jobs:
@@ -79,3 +79,73 @@ jobs:
         with:
           name: yaneuraou-halfkp-xcframework
           path: yaneuraou-halfkp.xcframework/**
+
+  release-ios-halfkp:
+    needs: assemble-ios-halfkp-xcframework
+    if: startsWith(github.ref, 'refs/tags/ios-halfkp-v')
+    runs-on: macos-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/ios-halfkp-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download device slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-halfkp-ios-arm64
+          path: ios-arm64/
+
+      - name: Download simulator slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-halfkp-iossim-arm64
+          path: iossim-arm64/
+
+      - name: Download xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: yaneuraou-halfkp-xcframework
+          path: yaneuraou-halfkp.xcframework/
+
+      - name: Create release archive
+        run: |
+          tar czf "yaneuraou-ios-halfkp-v${{ steps.version.outputs.version }}.tar.gz" \
+            ios-arm64/libyaneuraou-halfkp-ios-arm64.a \
+            iossim-arm64/libyaneuraou-halfkp-iossim-arm64.a \
+            yaneuraou-halfkp.xcframework
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-ios-halfkp ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu NNUE HalfKP256 iOS static library + xcframework.
+
+            - `YANEURAOU_ENGINE_NNUE` (default HalfKP256), Xcode 16 / iOS 14.0+
+            - Slices: `arm64-apple-ios14.0` (device) + `arm64-apple-ios14.0-simulator` (Apple Silicon Mac)
+            - Linked against libc++, `-fPIC`, exception/RTTI disabled
+            - Driven via the FFI C ABI (`yaneuraou_init` / `_set_recv` / `_send` / `_shutdown` — see `source/yaneuraou_ffi.h`)
+
+            ## Contents
+
+            - `ios-arm64/libyaneuraou-halfkp-ios-arm64.a` — device slice
+            - `iossim-arm64/libyaneuraou-halfkp-iossim-arm64.a` — simulator slice
+            - `yaneuraou-halfkp.xcframework/` — combined, ready to drag into Xcode
+
+            ## Required: NNUE eval file (HalfKP256)
+
+            The library does NOT bundle the eval. Bundle the eval file (~62 MB) into your app and pass its path via the `EvalDir` USI option.
+
+            > KP256 eval (~1 MB) is not compatible — use `yaneuraou-ios-kp256` instead.
+          files: |
+            yaneuraou-ios-halfkp-v${{ steps.version.outputs.version }}.tar.gz

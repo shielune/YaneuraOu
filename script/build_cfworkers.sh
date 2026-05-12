@@ -6,7 +6,7 @@
 #
 # Default EMSDK_VERSION: 5.0.5
 # Runs .github/workflows/build-cfworkers.yml locally with act.
-# Artifacts are produced in yaneuraou-cfworkers/dist/.
+# Artifacts are produced in yaneuraou-wasm-cfworkers/dist/.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -5,7 +5,7 @@ on:
     tags:
       - "android-mate-v*"
     branches:
-      - feature/native-ffi-bridge
+      - feature/native-ffi-release
   workflow_dispatch:
 
 jobs:
@@ -51,3 +51,51 @@ jobs:
         with:
           name: libyaneuraou-mate-android-arm64-v8a
           path: jni/libs/arm64-v8a/libyaneuraou-mate.so
+
+  release-android-mate:
+    needs: build-android-mate
+    if: startsWith(github.ref, 'refs/tags/android-mate-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/android-mate-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-mate-android-arm64-v8a
+          path: jni/libs/arm64-v8a/
+
+      - name: Create release archive
+        run: |
+          tar czf "yaneuraou-android-mate-v${{ steps.version.outputs.version }}.tar.gz" \
+            -C jni/libs arm64-v8a/libyaneuraou-mate.so
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-android-mate ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu Mate Solver Android shared library (.so).
+
+            - `YANEURAOU_MATE_ENGINE` (詰将棋専用、評価関数なし)、Android NDK r26d, API 24+
+            - ABI: arm64-v8a only
+            - Linked against `c++_static` STL, `-fPIC`, exception/RTTI disabled
+            - Driven via the FFI C ABI (`yaneuraou_init` / `_set_recv` / `_send` / `_shutdown` — see `source/yaneuraou_ffi.h`)
+
+            ## No eval / book file required
+
+            Mate engine は詰探索専用で評価関数ファイルが不要。`isready` 後すぐ `go mate` で詰み手順を返す。
+          files: |
+            yaneuraou-android-mate-v${{ steps.version.outputs.version }}.tar.gz
