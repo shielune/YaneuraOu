@@ -5,7 +5,7 @@ on:
     tags:
       - "android-kp256-v*"
     branches:
-      - feature/native-ffi-bridge
+      - feature/native-ffi-release
   workflow_dispatch:
 
 jobs:
@@ -51,3 +51,57 @@ jobs:
         with:
           name: libyaneuraou-kp256-android-arm64-v8a
           path: jni/libs/arm64-v8a/libyaneuraou-kp256.so
+
+  release-android-kp256:
+    needs: build-android-kp256
+    if: startsWith(github.ref, 'refs/tags/android-kp256-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/android-kp256-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-kp256-android-arm64-v8a
+          path: jni/libs/arm64-v8a/
+
+      - name: Create release archive
+        run: |
+          tar czf "yaneuraou-android-kp256-v${{ steps.version.outputs.version }}.tar.gz" \
+            -C jni/libs arm64-v8a/libyaneuraou-kp256.so
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-android-kp256 ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu NNUE KP256 Android shared library (.so).
+
+            - `YANEURAOU_ENGINE_NNUE_KP256` (~1 MB eval), Android NDK r26d, API 24+
+            - ABI: arm64-v8a only
+            - Linked against `c++_static` STL, `-fPIC`, exception/RTTI disabled
+            - Driven via the FFI C ABI (`yaneuraou_init` / `_set_recv` / `_send` / `_shutdown` — see `source/yaneuraou_ffi.h`)
+
+            ## Required: NNUE eval file (KP256)
+
+            The `.so` does NOT bundle the eval. Pass it at runtime via the `EvalDir` USI option.
+
+            | File | Architecture | Size |
+            |---|---|---|
+            | suishopetite nn.bin | KP256 | ~873 KB |
+
+            > HalfKP256 eval (~62 MB) is not compatible — use `yaneuraou-android-halfkp` instead.
+          files: |
+            yaneuraou-android-kp256-v${{ steps.version.outputs.version }}.tar.gz

@@ -1,0 +1,151 @@
+name: Build wasm-mate-cfworkers WASM package
+
+on:
+  push:
+    tags:
+      - "wasm-mate-cfworkers-v*"
+  workflow_dispatch:
+    inputs:
+      emsdk_version:
+        description: "emscripten/emsdk Docker tag"
+        required: false
+        default: "5.0.5"
+
+jobs:
+  build-wasm-mate-cfworkers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: docker pull
+        run: |
+          docker pull emscripten/emsdk:${{ inputs.emsdk_version || '5.0.5' }}
+
+      - name: build wasm (yaneuraou-mate, single-thread)
+        run: |
+          EMSDK_VERSION="${{ inputs.emsdk_version || '5.0.5' }}"
+          DIST_DIR="yaneuraou-wasm-mate-cfworkers/dist"
+          mkdir -p "$DIST_DIR"
+
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src/source \
+            "emscripten/emsdk:${EMSDK_VERSION}" \
+            make -j$(nproc) clean tournament \
+              COMPILER=em++ \
+              TARGET_CPU=WASM \
+              YANEURAOU_EDITION=YANEURAOU_MATE_ENGINE \
+              TARGET="../${DIST_DIR}/yaneuraou.js" \
+              EM_EXPORT_NAME=YaneuraOu_MATE \
+              EM_ENVIRONMENT=web \
+              "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','HEAPU8']" \
+              EM_PTHREAD=0 \
+              EM_INITIAL_MEMORY_SIZE=67108864 \
+              EM_MAXIMUM_MEMORY_SIZE=134217728 \
+              EM_STACK_SIZE=2097152 \
+              EM_CLOSURE=0
+
+      - name: verify artifacts
+        run: |
+          ls -lh yaneuraou-wasm-mate-cfworkers/dist/yaneuraou.{js,wasm}
+
+      - name: compress
+        run: |
+          cd yaneuraou-wasm-mate-cfworkers/dist
+          for f in yaneuraou.js yaneuraou.wasm; do
+            brotli -f --best "$f" -o "${f}.br" || true
+            gzip  -f --best -k "$f" || true
+          done
+          echo "--- compressed ---"
+          ls -lh yaneuraou.*
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-wasm-mate-cfworkers-dist
+          path: yaneuraou-wasm-mate-cfworkers/dist/
+
+  release-wasm-mate-cfworkers:
+    needs: build-wasm-mate-cfworkers
+    if: startsWith(github.ref, 'refs/tags/wasm-mate-cfworkers-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/wasm-mate-cfworkers-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: yaneuraou-wasm-mate-cfworkers-dist
+          path: yaneuraou-wasm-mate-cfworkers/dist/
+
+      - name: Compile TypeScript loader
+        working-directory: yaneuraou-wasm-mate-cfworkers
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun tsc
+
+      - name: Update package.json version
+        working-directory: yaneuraou-wasm-mate-cfworkers
+        run: |
+          bun -e "
+            const pkg = require('./package.json');
+            pkg.version = '${{ steps.version.outputs.version }}';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Create release archive
+        run: |
+          cd yaneuraou-wasm-mate-cfworkers
+          tar czf "../yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz" \
+            package.json \
+            README.md \
+            SPEC.md \
+            dist/index.js \
+            dist/index.d.ts \
+            dist/yaneuraou.js \
+            dist/yaneuraou.wasm \
+            dist/yaneuraou.wasm.br
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-wasm-mate-cfworkers ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu mate (tsume) solver WASM for Cloudflare Workers / browser
+
+            - `YANEURAOU_MATE_ENGINE` (DfPn) / single-thread / SIMD enabled
+            - Memory: 64MB initial, 128MB max
+            - **No SharedArrayBuffer / no COOP/COEP headers required** — works on any web host
+            - No eval / book files — just `position sfen` + `go mate`
+
+            ```ts
+            import { createMateEngine } from "@ultemica/yaneuraou-wasm-mate-cfworkers";
+            ```
+
+            ## Caveats
+
+            - `go mate <ms>` time limit is **ignored** in single-thread WASM. Use `nodesLimit` instead.
+            - DfPn returns *a* forced mate, not always the shortest one. For shortest-mate guarantees, run iterative deepening above this engine.
+          files: |
+            yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
