@@ -1,0 +1,70 @@
+name: Build pthread-halfkp WASM package
+
+on:
+  push:
+    tags:
+      - "pthread-halfkp-v*"
+    branches:
+      - feature/native-ffi-bridge
+  workflow_dispatch:
+    inputs:
+      emsdk_version:
+        description: "emscripten/emsdk Docker tag"
+        required: false
+        default: "5.0.5"
+
+jobs:
+  build-pthread-halfkp:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: docker pull
+        run: |
+          sudo docker pull emscripten/emsdk:${{ inputs.emsdk_version || '5.0.5' }}
+
+      - name: build wasm (NNUE HalfKP256, pthread)
+        run: |
+          EMSDK_VERSION="${{ inputs.emsdk_version || '5.0.5' }}"
+          DIST_DIR="yaneuraou-pthread-halfkp/dist"
+          mkdir -p "$DIST_DIR"
+
+          sudo docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src/source \
+            "emscripten/emsdk:${EMSDK_VERSION}" \
+            make -j$(nproc) clean tournament \
+              COMPILER=em++ \
+              TARGET_CPU=WASM \
+              YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE \
+              TARGET="../${DIST_DIR}/yaneuraou.js" \
+              EM_EXPORT_NAME=YaneuraOu_HalfKP \
+              EM_ENVIRONMENT=web,worker \
+              "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall']" \
+              EM_PTHREAD=1 \
+              EM_INITIAL_MEMORY_SIZE=268435456 \
+              EM_MAXIMUM_MEMORY_SIZE=2147483648 \
+              EM_STACK_SIZE=2097152 \
+              EM_CLOSURE=0
+
+      - name: verify artifacts
+        run: |
+          ls -lh yaneuraou-pthread-halfkp/dist/
+
+      - name: compress
+        run: |
+          cd yaneuraou-pthread-halfkp/dist
+          for f in yaneuraou.js yaneuraou.wasm; do
+            brotli -f --best "$f" -o "${f}.br" || true
+            gzip  -f --best -k "$f" || true
+          done
+          echo "--- compressed ---"
+          ls -lh
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-pthread-halfkp-dist
+          path: yaneuraou-pthread-halfkp/dist/
