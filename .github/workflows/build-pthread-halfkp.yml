@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "pthread-halfkp-v*"
+    branches:
+      - feature/native-ffi-bridge
   workflow_dispatch:
     inputs:
       emsdk_version:
