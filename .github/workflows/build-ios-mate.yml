@@ -1,0 +1,81 @@
+name: Build ios-mate .a / xcframework
+
+on:
+  push:
+    tags:
+      - "ios-mate-v*"
+    branches:
+      - feature/native-ffi-bridge
+  workflow_dispatch:
+
+jobs:
+  build-ios-mate-slice:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        slice:
+          - sdk: iphoneos
+            target: arm64-apple-ios14.0
+            min_flag: -mios-version-min=14.0
+            name: ios-arm64
+          - sdk: iphonesimulator
+            target: arm64-apple-ios14.0-simulator
+            min_flag: -mios-simulator-version-min=14.0
+            name: iossim-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static library (Mate, ${{ matrix.slice.name }})
+        run: |
+          cd source
+          SDK_PATH=$(xcrun --sdk ${{ matrix.slice.sdk }} --show-sdk-path)
+          echo "Using SDK: $SDK_PATH"
+          make -j$(sysctl -n hw.ncpu) \
+            COMPILER=clang++ \
+            TARGET_CPU=APPLEIOS_ARM64 \
+            YANEURAOU_EDITION=YANEURAOU_MATE_ENGINE \
+            EXTRA_CPPFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64 ${{ matrix.slice.min_flag }}" \
+            EXTRA_LDFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64" \
+            ffi-static
+          mv libyaneuraou.a libyaneuraou-mate-${{ matrix.slice.name }}.a
+          ls -lh libyaneuraou-mate-${{ matrix.slice.name }}.a
+          lipo -info libyaneuraou-mate-${{ matrix.slice.name }}.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libyaneuraou-mate-${{ matrix.slice.name }}
+          path: source/libyaneuraou-mate-${{ matrix.slice.name }}.a
+
+  assemble-ios-mate-xcframework:
+    needs: build-ios-mate-slice
+    runs-on: macos-latest
+
+    steps:
+      - name: Download device slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-mate-ios-arm64
+          path: ios-arm64/
+
+      - name: Download simulator slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-mate-iossim-arm64
+          path: iossim-arm64/
+
+      - name: Create xcframework
+        run: |
+          xcodebuild -create-xcframework \
+            -library ios-arm64/libyaneuraou-mate-ios-arm64.a \
+            -library iossim-arm64/libyaneuraou-mate-iossim-arm64.a \
+            -output yaneuraou-mate.xcframework
+          ls -la yaneuraou-mate.xcframework/
+          cat yaneuraou-mate.xcframework/Info.plist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-mate-xcframework
+          path: yaneuraou-mate.xcframework/**
