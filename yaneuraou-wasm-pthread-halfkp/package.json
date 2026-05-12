@@ -1,0 +1,35 @@
+{
+  "name": "@ultemica/yaneuraou-wasm-pthread-halfkp",
+  "version": "8.50.0",
+  "description": "YaneuraOu shogi engine for browsers (Wasm, multi-threaded via pthread / SharedArrayBuffer, NNUE HalfKP256)",
+  "license": "GPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/yaneuraou.js",
+    "dist/yaneuraou.wasm",
+    "README.md",
+    "SPEC.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./wasm": "./dist/yaneuraou.wasm",
+    "./engine": "./dist/yaneuraou.js"
+  },
+  "scripts": {
+    "build:wasm": "act workflow_dispatch -W ../.github/workflows/build-pthread-kp256.yml --bind",
+    "build:loader": "bun tsc",
+    "build": "bun run build:wasm && bun run build:loader",
+    "test:e2e": "bun run test/run.ts"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1",
+    "typescript": "^5.0.0"
+  }
+}
