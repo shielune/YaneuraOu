@@ -657,6 +657,11 @@ else ifeq ($(TARGET_CPU),APPLESSE42)
 	CPPFLAGS += -DIS_64BIT -DUSE_SSE42 -target x86_64-apple-macos11
 else ifeq ($(TARGET_CPU),APPLEM1)
 	CPPFLAGS += -DIS_64BIT -DUSE_NEON -target arm64-apple-macos11
+else ifeq ($(TARGET_CPU),APPLEIOS_ARM64)
+	# iOS / iPadOS arm64 (device or simulator). The workflow appends
+	# `-target arm64-apple-ios... -isysroot $(xcrun --show-sdk-path)`
+	# via EXTRA_CPPFLAGS / EXTRA_LDFLAGS.
+	CPPFLAGS += -DIS_64BIT -DUSE_NEON
 else ifeq ($(TARGET_CPU),WASM)
 
 else ifeq ($(TARGET_CPU),OTHER)
