@@ -153,10 +153,31 @@ jobs:
 
             Raw slices are also included under `ios-arm64/` and `iossim-arm64/` if you need to assemble the xcframework yourself.
 
+            ## Required: NNUE eval file
+
+            xcframework には評価関数を内蔵していないので、別途 nn.bin をアプリの bundle に入れて `EvalDir` USI option で読み込ませる。
+
+            | Eval | Engine | URL |
+            |---|---|---|
+            | suisho5 nn.bin (HalfKP256, ~62 MB) | HalfKP256 | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | suishopetite nn.bin (KP256, ~873 KB) | KP256 | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
+
+            > 上記は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻して使う。
+
+            > KP256 と HalfKP256 の eval は互換性なし。Mate engine は eval 不要。
+
+            ## Optional: opening book
+
+            `BookDir` / `BookFile` USI option で読み込ませる。
+
+            | Book | 局面数 | Size | URL |
+            |---|---|---|---|
+            | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
+            | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
+            | 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
+
             ## Usage
 
-            Drag the appropriate `.xcframework` into your Xcode project (or Flutter `ios/` runner), bundle the eval file into the app, and point the engine at it via the `EvalDir` USI option.
-
-            > KP256 and HalfKP256 evals are NOT interchangeable.
+            Drag the appropriate `.xcframework` into your Xcode project (or Flutter `ios/` runner).
           files: |
             yaneuraou-ios-v${{ steps.version.outputs.version }}.tar.gz
