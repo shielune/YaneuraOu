@@ -50,14 +50,10 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "Anthropic.claude-code",
         "EditorConfig.EditorConfig",
-        "GitHub.copilot",
-        "GitHub.copilot-chat",
         "PKief.material-icon-theme",
         "antfu.file-nesting",
         "bierner.github-markdown-preview",
-        "bierner.markdown-mermaid",
         "bierner.markdown-preview-github-styles",
         "eamodio.gitlens",
         "ms-vscode.cpptools",
