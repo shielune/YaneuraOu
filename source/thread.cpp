@@ -8,6 +8,27 @@
 
 ThreadPool Threads;		// Global object
 
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+// edge variant: single-thread emscripten build.
+// std::thread を生成できないため、search() を呼び出し元スレッドで同期実行する。
+
+Thread::Thread(size_t n) : idx(n)
+{
+	// idle_loop 相当の初期化: searching == true 状態ではないものとして扱う
+	searching = false;
+#if defined(__EMSCRIPTEN__)
+	threadStarted = true;
+#endif
+}
+
+Thread::~Thread()
+{
+	ASSERT_LV3(!searching);
+	exit = true;
+}
+
+#else
+
 Thread::Thread(size_t n) : idx(n) , stdThread(&Thread::idle_loop, this)
 {
 #if !defined(__EMSCRIPTEN__)
@@ -39,6 +60,8 @@ Thread::~Thread()
 	start_searching();
 	stdThread.join();
 }
+
+#endif
 
 // このクラスが保持している探索で必要なテーブル(historyなど)をクリアする。
 void Thread::clear()
@@ -85,17 +108,31 @@ void Thread::clear()
 // 待機していたスレッドを起こして探索を開始させる
 void Thread::start_searching()
 {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+	// edge variant: search() を呼び出しスレッドで同期実行する。
+	if (exit)
+		return;
+	searching = true;
+	search();
+	searching = false;
+#else
 	mutex.lock();
 	searching = true;
     mutex.unlock(); // Unlock before notifying saves a few CPU-cycles
 	cv.notify_one(); // idle_loop()で回っているスレッドを起こす。(次の処理をさせる)
+#endif
 }
 
 // 探索が終わるのを待機する。(searchingフラグがfalseになるのを待つ)
 void Thread::wait_for_search_finished()
 {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+	// edge variant: start_searching() が同期実行するため、既に終わっている。
+	return;
+#else
 	std::unique_lock<std::mutex> lk(mutex);
 	cv.wait(lk, [&] { return !searching; });
+#endif
 }
 
 // 探索するときのmaster,slave用のidle_loop。探索開始するまで待っている。

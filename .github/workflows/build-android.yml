@@ -1,0 +1,146 @@
+name: Build android
+
+on:
+  push:
+    tags:
+      - "android-v*"
+    branches:
+      - feature/native-ffi-release-combined
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        engine:
+          - { edition: YANEURAOU_ENGINE_NNUE,       name: halfkp }
+          - { edition: YANEURAOU_ENGINE_NNUE_KP256, name: kp256  }
+          - { edition: YANEURAOU_MATE_ENGINE,        name: mate   }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate or install Android NDK
+        run: |
+          NDK_PATH=""
+          for p in /opt/hostedtoolcache/ndk/r26d/x64 \
+                   /usr/local/lib/android/sdk/ndk/26.* \
+                   /usr/local/lib/android/sdk/ndk/25.*; do
+            [ -d "$p" ] && NDK_PATH="$p" && break
+          done
+          if [ -z "$NDK_PATH" ]; then
+            cd /tmp
+            curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+            unzip -q ndk.zip
+            NDK_PATH=/tmp/android-ndk-r26d
+          fi
+          echo "Using NDK at: $NDK_PATH"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          echo "$NDK_PATH" >> "$GITHUB_PATH"
+
+      - name: ndk-build (${{ matrix.engine.name }}, arm64-v8a)
+        run: |
+          cd jni
+          ndk-build \
+            NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT=./Android-ffi.mk \
+            NDK_APPLICATION_MK=./Application-ffi.mk \
+            YANEURAOU_EDITION=${{ matrix.engine.edition }} \
+            -j2
+
+      - name: List produced library
+        run: ls -la jni/libs/arm64-v8a/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libyaneuraou-${{ matrix.engine.name }}-android-arm64-v8a
+          path: jni/libs/arm64-v8a/libyaneuraou-${{ matrix.engine.name }}.so
+
+  release-android:
+    needs: build-android
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/android-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all .so artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: libyaneuraou-*-android-arm64-v8a
+          path: download/
+
+      - name: Stage release tree
+        run: |
+          mkdir -p stage/arm64-v8a
+          cp download/libyaneuraou-halfkp-android-arm64-v8a/libyaneuraou-halfkp.so stage/arm64-v8a/
+          cp download/libyaneuraou-kp256-android-arm64-v8a/libyaneuraou-kp256.so   stage/arm64-v8a/
+          cp download/libyaneuraou-mate-android-arm64-v8a/libyaneuraou-mate.so     stage/arm64-v8a/
+          ls -la stage/arm64-v8a/
+
+      - name: Create release archive
+        run: |
+          tar czf "yaneuraou-android-v${{ steps.version.outputs.version }}.tar.gz" \
+            -C stage arm64-v8a
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-android ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu shogi engine — Android shared libraries (`.so`, arm64-v8a).
+
+            Built with Android NDK r26d, API 24+, `c++_static` STL, `-fPIC`, exception/RTTI disabled.
+            Driven via the FFI C ABI: `yaneuraou_init` / `yaneuraou_set_recv` / `yaneuraou_send` / `yaneuraou_shutdown` (see `source/yaneuraou_ffi.h`).
+
+            ## Contents (arm64-v8a/)
+
+            | File | Engine | Eval | Eval size |
+            |---|---|---|---|
+            | `libyaneuraou-halfkp.so` | NNUE HalfKP256 | suisho5 nn.bin | ~62 MB |
+            | `libyaneuraou-kp256.so`  | NNUE KP256     | suishopetite nn.bin | ~873 KB |
+            | `libyaneuraou-mate.so`   | Mate Solver    | — (詰探索専用) | — |
+
+            ## Required: NNUE eval file
+
+            この `.so` には評価関数を内蔵していないので、別途 nn.bin を用意してアプリにバンドルし、`EvalDir` USI option で読み込ませる。
+
+            | Eval | Engine | URL |
+            |---|---|---|
+            | suisho5 nn.bin (HalfKP256, ~62 MB) | HalfKP256 | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | suishopetite nn.bin (KP256, ~873 KB) | KP256 | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
+
+            > 上記は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻して使う。
+
+            > KP256 と HalfKP256 の eval は互換性なし。Mate engine は eval 不要。
+
+            ## Optional: opening book
+
+            `BookDir` / `BookFile` USI option で読み込ませる。
+
+            | Book | 局面数 | Size | URL |
+            |---|---|---|---|
+            | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
+            | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
+            | 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
+
+            ## Usage
+
+            Drop the `.so` files into `android/app/src/main/jniLibs/arm64-v8a/` in your Flutter / native app.
+          files: |
+            yaneuraou-android-v${{ steps.version.outputs.version }}.tar.gz

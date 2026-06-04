@@ -92,17 +92,114 @@ if(!fs.existsSync("source/Makefile")) {
 const cwd = process.cwd();
 const cpus = os.cpus().length;
 
+// ── Patch management ──
+// patches/*.patch are applied to the working tree right before `make` runs
+// and reverted on exit (success or failure) so the repo stays clean for the
+// next invocation. Re-applying an already-applied patch is a no-op thanks to
+// the `git apply --reverse --check` probe.
+const patchesDir = fpath.join(cwd, "patches");
+const patchFiles = fs.existsSync(patchesDir)
+  ? fs.readdirSync(patchesDir).filter((f) => f.endsWith(".patch")).sort()
+  : [];
+
+function patchApplied(p) {
+  try {
+    execSync(`git apply --reverse --check "patches/${p}"`, { cwd, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function applyPatches() {
+  for (const p of patchFiles) {
+    if (patchApplied(p)) {
+      console.log(`[patch] ${p} already applied — skip`);
+      continue;
+    }
+    console.log(`[patch] applying ${p}`);
+    execSync(`git apply "patches/${p}"`, { cwd, stdio: "inherit" });
+  }
+}
+
+function revertPatches() {
+  for (const p of [...patchFiles].reverse()) {
+    if (!patchApplied(p)) continue;
+    try {
+      execSync(`git apply --reverse "patches/${p}"`, { cwd, stdio: "inherit" });
+      console.log(`[patch] reverted ${p}`);
+    } catch (e) {
+      console.warn(`[patch] failed to revert ${p}: ${e.message}`);
+    }
+  }
+}
+
+let patchesReverted = false;
+function revertOnce() {
+  if (patchesReverted) return;
+  patchesReverted = true;
+  revertPatches();
+}
+process.on("exit", revertOnce);
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+
+// Three build variants are produced from the same source per package, so
+// downstream runners can test each target:
+//   - web  : ENVIRONMENT=web,worker,        pthread=on  EXPORTED_RUNTIME_METHODS=['FS','ccall']
+//            → drives Playwright + Chromium in script/wasm_eval_browser.ts
+//   - node : ENVIRONMENT=node,              pthread=on  EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']
+//            → drives node:worker_threads in script/wasm_eval_node.ts
+//   - edge : ENVIRONMENT=web,               pthread=off EXPORTED_RUNTIME_METHODS=['FS','ccall']
+//            → single-thread build for V8 Isolate runtimes (Cloudflare
+//              Workers / Vercel Edge / Deno Deploy), where Worker and
+//              SharedArrayBuffer are not available.
+// callMain is only needed on the node variant because the node loader
+// uses noInitialRun:true and triggers main() explicitly (see
+// script/loaders/node/common.ts and docs/wasm_client_usage.md).
+const allVariants = [
+  {
+    name: "web",
+    em_environment: "web,worker",
+    em_exported_runtime_methods: "['FS','ccall']",
+    em_pthread: 1,
+  },
+  {
+    name: "node",
+    em_environment: "node",
+    em_exported_runtime_methods: "['FS','ccall','callMain']",
+    em_pthread: 1,
+  },
+  {
+    name: "edge",
+    em_environment: "web",
+    em_exported_runtime_methods: "['FS','ccall']",
+    em_pthread: 0,
+  },
+];
+// Optional filter: `VARIANT=edge node script/wasm_build.js k-p` builds only
+// the edge variant. Useful for iterating on a single target without redoing
+// the full sweep.
+const variantFilter = process.env.VARIANT
+  ? process.env.VARIANT.split(",").map((s) => s.trim())
+  : null;
+const variants = variantFilter
+  ? allVariants.filter((v) => variantFilter.includes(v.name))
+  : allVariants;
+if (variants.length === 0) {
+  console.error(
+    `[wasm_build] VARIANT filter '${process.env.VARIANT}' matched no variants. ` +
+      `Known: ${allVariants.map((v) => v.name).join(", ")}`,
+  );
+  process.exit(1);
+}
+
 (async () => {
+try {
+  applyPatches();
 for(const pkgobj of pkglist) {
-  const builddirusi = `build/${version}_${arch}/${pkgobj.name}/`;
-  const builddirlib = `build/${version}_${arch}/${pkgobj.name}/lib/`;
-  const usijs_copy_dirs = [
-  ];
-  const dts_copy_dirs = [
-  ];
-  const lib_copy_dirs = [
-  ];
-  // embedded_nnue
+  // embedded_nnue setup (shared between variants — only touches
+  // source/eval/nnue/embedded_nnue.cpp which is the same for both builds)
   switch(pkgobj.name) {
     case "halfkp":
       if (!fs.existsSync(".dl/suisho5_20211123.halfkp.nnue.cpp.gz")) {
@@ -117,6 +214,16 @@ for(const pkgobj of pkglist) {
       execSync("gzip -cd .dl/suishopetite_20211123.k_p.nnue.cpp.gz > source/eval/nnue/embedded_nnue.cpp");
       break;
   }
+
+for(const variant of variants) {
+  const builddirusi = `build/${version}_${arch}/${pkgobj.name}/${variant.name}/`;
+  const builddirlib = `build/${version}_${arch}/${pkgobj.name}/${variant.name}/lib/`;
+  const usijs_copy_dirs = [
+  ];
+  const dts_copy_dirs = [
+  ];
+  const lib_copy_dirs = [
+  ];
   // mkdir
   fs.mkdirSync(fpath.join(cwd, builddirlib), { recursive: true });
   for (const copy_dir of lib_copy_dirs) {
@@ -267,16 +374,25 @@ export = ${pkgobj.exportname};
     fs.copyFileSync(bpath_module_dts, fpath.join(cwd, copy_dir, `yaneuraou.module.d.ts`));
     fs.copyFileSync(bpath_dts, fpath.join(cwd, copy_dir, `yaneuraou.${pkgobj.name}.d.ts`));
   }
-  // make
-  await new Promise((resolve) => {
-    let child = exec(
-      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} ${pkgobj.extra} -s EXPORT_ES6=1 -s ENVIRONMENT=web -s MODULARIZE=1`,
-      { cwd: fpath.join(cwd, "source"), stdio: "inherit" },
-      (_error, _stdout, _stderr) => { resolve(); },
-    );
-    child.stdout.on('data', (data) => { console.log(String(data).trimEnd()); });
-    child.stderr.on('data', (data) => { console.error(String(data).trimEnd()); });
-  });
+  // make — parameterised per variant via EM_ENVIRONMENT /
+  // EM_EXPORTED_RUNTIME_METHODS (source/Makefile reads both as `?=`
+  // variables in the em++ branch). pkgobj.extra contains shell-quoted
+  // segments (`EXTRA_CPPFLAGS='-DENGINE_OPTIONS="…"'`) so we keep it as a
+  // single shell command string and let the shell parse the quoting.
+  // execSync with stdio:"inherit" forwards make's stdout/stderr to this
+  // process directly so `docker run` callers see the full build log.
+  console.log(`[wasm_build] starting ${variant.name} build for ${pkgobj.name} (${version}_${arch})`);
+  const cmd = `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} EM_ENVIRONMENT=${variant.em_environment} EM_EXPORTED_RUNTIME_METHODS="${variant.em_exported_runtime_methods}" EM_PTHREAD=${variant.em_pthread} ${pkgobj.extra} -s EXPORT_ES6=1 -s MODULARIZE=1`;
+  try {
+    execSync(cmd, {
+      cwd: fpath.join(cwd, "source"),
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.error(`[wasm_build] make failed for ${variant.name}: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`[wasm_build] finished ${variant.name} build for ${pkgobj.name}`);
   // compress, public copy
   for (const fext of ["js", "worker.js", "wasm"]) {
     const bfile = `yaneuraou.${pkgobj.name}.${fext}`;
@@ -288,6 +404,14 @@ export = ${pkgobj.exportname};
     const ws_br = fs.createWriteStream(bpath_br);
     const ws_gz = fs.createWriteStream(bpath_gz);
     if(!fs.existsSync(bpath)) {
+      // Only the classic-worker generation (3.1.43) emits a separate
+      // `.worker.js`. From 3.1.60 onwards the worker is inlined into
+      // the main ES module and no sibling file is produced, so skip
+      // compression silently instead of aborting the whole build.
+      if (fext === "worker.js") {
+        console.warn(`[wasm_build] no separate ${bfile} (inlined worker generation), skipping compress`);
+        continue;
+      }
       console.error(`file not found: ${bpath}`);
       process.exit(1);
     }
@@ -325,5 +449,10 @@ export = ${pkgobj.exportname};
       }))
       .pipe(ws_gz);
   }
+}  // variant loop
+}  // pkgobj loop
+} catch (err) {
+  console.error("[wasm_build] failed:", err);
+  process.exitCode = 1;
 }
 })();
