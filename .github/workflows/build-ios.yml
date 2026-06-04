@@ -1,0 +1,183 @@
+name: Build ios
+
+on:
+  push:
+    tags:
+      - "ios-v*"
+    branches:
+      - feature/native-ffi-release-combined
+  workflow_dispatch:
+
+jobs:
+  build-ios-slice:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        engine:
+          - { edition: YANEURAOU_ENGINE_NNUE,       name: halfkp }
+          - { edition: YANEURAOU_ENGINE_NNUE_KP256, name: kp256  }
+          - { edition: YANEURAOU_MATE_ENGINE,        name: mate   }
+        slice:
+          - sdk: iphoneos
+            target: arm64-apple-ios14.0
+            min_flag: -mios-version-min=14.0
+            name: ios-arm64
+          - sdk: iphonesimulator
+            target: arm64-apple-ios14.0-simulator
+            min_flag: -mios-simulator-version-min=14.0
+            name: iossim-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static library (${{ matrix.engine.name }}, ${{ matrix.slice.name }})
+        run: |
+          cd source
+          SDK_PATH=$(xcrun --sdk ${{ matrix.slice.sdk }} --show-sdk-path)
+          echo "Using SDK: $SDK_PATH"
+          make -j$(sysctl -n hw.ncpu) \
+            COMPILER=clang++ \
+            TARGET_CPU=APPLEIOS_ARM64 \
+            YANEURAOU_EDITION=${{ matrix.engine.edition }} \
+            EXTRA_CPPFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64 ${{ matrix.slice.min_flag }}" \
+            EXTRA_LDFLAGS="-target ${{ matrix.slice.target }} -isysroot $SDK_PATH -arch arm64" \
+            ffi-static
+          mv libyaneuraou.a libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
+          ls -lh libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
+          lipo -info libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}
+          path: source/libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
+
+  assemble-ios-xcframework:
+    needs: build-ios-slice
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [halfkp, kp256, mate]
+
+    steps:
+      - name: Download device slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-${{ matrix.engine }}-ios-arm64
+          path: ios-arm64/
+
+      - name: Download simulator slice
+        uses: actions/download-artifact@v4
+        with:
+          name: libyaneuraou-${{ matrix.engine }}-iossim-arm64
+          path: iossim-arm64/
+
+      - name: Create xcframework
+        run: |
+          xcodebuild -create-xcframework \
+            -library ios-arm64/libyaneuraou-${{ matrix.engine }}-ios-arm64.a \
+            -library iossim-arm64/libyaneuraou-${{ matrix.engine }}-iossim-arm64.a \
+            -output yaneuraou-${{ matrix.engine }}.xcframework
+          ls -la yaneuraou-${{ matrix.engine }}.xcframework/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yaneuraou-${{ matrix.engine }}-xcframework
+          path: yaneuraou-${{ matrix.engine }}.xcframework/**
+
+  release-ios:
+    needs: assemble-ios-xcframework
+    if: startsWith(github.ref, 'refs/tags/ios-v')
+    runs-on: macos-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/ios-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all .a slices
+        uses: actions/download-artifact@v4
+        with:
+          pattern: libyaneuraou-*-ios*-arm64
+          path: download-slices/
+
+      - name: Download all xcframeworks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: yaneuraou-*-xcframework
+          path: download-xcframeworks/
+
+      - name: Stage release tree
+        run: |
+          mkdir -p stage/ios-arm64 stage/iossim-arm64
+          for e in halfkp kp256 mate; do
+            cp "download-slices/libyaneuraou-${e}-ios-arm64/libyaneuraou-${e}-ios-arm64.a"       stage/ios-arm64/
+            cp "download-slices/libyaneuraou-${e}-iossim-arm64/libyaneuraou-${e}-iossim-arm64.a" stage/iossim-arm64/
+            cp -R "download-xcframeworks/yaneuraou-${e}-xcframework" "stage/yaneuraou-${e}.xcframework"
+          done
+          ls -la stage/
+
+      - name: Create release archive
+        run: |
+          tar czf "yaneuraou-ios-v${{ steps.version.outputs.version }}.tar.gz" -C stage .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-ios ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu shogi engine — iOS static libraries + xcframeworks (arm64 device + arm64 simulator).
+
+            Built with Xcode 16 on macos-latest (Apple Silicon), iOS 14.0+, libc++, `-fPIC`, exception/RTTI disabled.
+            Driven via the FFI C ABI: `yaneuraou_init` / `yaneuraou_set_recv` / `yaneuraou_send` / `yaneuraou_shutdown` (see `source/yaneuraou_ffi.h`).
+
+            ## Contents
+
+            | xcframework | Engine | Eval |
+            |---|---|---|
+            | `yaneuraou-halfkp.xcframework` | NNUE HalfKP256 | suisho5 nn.bin (~62 MB) |
+            | `yaneuraou-kp256.xcframework`  | NNUE KP256     | suishopetite nn.bin (~873 KB) |
+            | `yaneuraou-mate.xcframework`   | Mate Solver    | — (詰探索専用) |
+
+            Raw slices are also included under `ios-arm64/` and `iossim-arm64/` if you need to assemble the xcframework yourself.
+
+            ## Required: NNUE eval file
+
+            xcframework には評価関数を内蔵していないので、別途 nn.bin をアプリの bundle に入れて `EvalDir` USI option で読み込ませる。
+
+            | Eval | Engine | URL |
+            |---|---|---|
+            | suisho5 nn.bin (HalfKP256, ~62 MB) | HalfKP256 | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | suishopetite nn.bin (KP256, ~873 KB) | KP256 | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
+
+            > 上記は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻して使う。
+
+            > KP256 と HalfKP256 の eval は互換性なし。Mate engine は eval 不要。
+
+            ## Optional: opening book
+
+            `BookDir` / `BookFile` USI option で読み込ませる。
+
+            | Book | 局面数 | Size | URL |
+            |---|---|---|---|
+            | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
+            | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
+            | 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
+
+            ## Usage
+
+            Drag the appropriate `.xcframework` into your Xcode project (or Flutter `ios/` runner).
+          files: |
+            yaneuraou-ios-v${{ steps.version.outputs.version }}.tar.gz
