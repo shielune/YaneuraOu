@@ -1,0 +1,214 @@
+name: Build wasm
+
+on:
+  push:
+    tags:
+      - "wasm-v*"
+    branches:
+      - feature/native-ffi-release-combined
+  workflow_dispatch:
+    inputs:
+      emsdk_version:
+        description: "emscripten/emsdk Docker tag"
+        required: false
+        default: "5.0.5"
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - name: cfworkers
+            dir: yaneuraou-wasm-cfworkers
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+          - name: mate-cfworkers
+            dir: yaneuraou-wasm-mate-cfworkers
+            edition: YANEURAOU_MATE_ENGINE
+            export_name: YaneuraOu_MATE
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+          - name: pthread-kp256
+            dir: yaneuraou-wasm-pthread-kp256
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web,worker
+            pthread: 1
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+          - name: mate-pthread
+            dir: yaneuraou-wasm-mate-pthread
+            edition: YANEURAOU_MATE_ENGINE
+            export_name: YaneuraOu_MATE
+            environment: web,worker
+            pthread: 1
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+          - name: pthread-halfkp
+            dir: yaneuraou-wasm-pthread-halfkp
+            edition: YANEURAOU_ENGINE_NNUE
+            export_name: YaneuraOu_HalfKP
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker pull
+        run: |
+          sudo docker pull emscripten/emsdk:${{ inputs.emsdk_version || '5.0.5' }}
+
+      - name: build wasm (${{ matrix.package.name }})
+        run: |
+          EMSDK_VERSION="${{ inputs.emsdk_version || '5.0.5' }}"
+          DIST_DIR="${{ matrix.package.dir }}/dist"
+          mkdir -p "$DIST_DIR"
+
+          sudo docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src/source \
+            "emscripten/emsdk:${EMSDK_VERSION}" \
+            make -j$(nproc) clean tournament \
+              COMPILER=em++ \
+              TARGET_CPU=WASM \
+              YANEURAOU_EDITION=${{ matrix.package.edition }} \
+              TARGET="../${DIST_DIR}/yaneuraou.js" \
+              EM_EXPORT_NAME=${{ matrix.package.export_name }} \
+              EM_ENVIRONMENT=${{ matrix.package.environment }} \
+              "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall']" \
+              EM_PTHREAD=${{ matrix.package.pthread }} \
+              EM_INITIAL_MEMORY_SIZE=${{ matrix.package.initial_memory }} \
+              EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
+              EM_STACK_SIZE=2097152 \
+              EM_CLOSURE=0
+
+      - name: verify and compress
+        run: |
+          cd ${{ matrix.package.dir }}/dist
+          ls -lh yaneuraou.js yaneuraou.wasm
+          for f in yaneuraou.js yaneuraou.wasm; do
+            brotli -f --best "$f" -o "${f}.br" || true
+            gzip  -f --best -k "$f" || true
+          done
+          ls -lh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package.dir }}-dist
+          path: ${{ matrix.package.dir }}/dist/
+
+  release-wasm:
+    needs: build-wasm
+    if: startsWith(github.ref, 'refs/tags/wasm-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/wasm-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all WASM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: yaneuraou-wasm-*-dist
+          path: download/
+
+      - name: Stage each package + compile loader + create tar.gz
+        run: |
+          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp; do
+            mkdir -p "$d/dist"
+            cp -R "download/${d}-dist/." "$d/dist/"
+            (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
+            bun -e "
+              const pkg = require('./$d/package.json');
+              pkg.version = '${{ steps.version.outputs.version }}';
+              require('fs').writeFileSync('$d/package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
+            tar czf "${d}-v${{ steps.version.outputs.version }}.tar.gz" \
+              "$d/package.json" \
+              "$d/README.md" \
+              "$d/SPEC.md" \
+              "$d/dist/index.js" \
+              "$d/dist/index.d.ts" \
+              "$d/dist/yaneuraou.js" \
+              "$d/dist/yaneuraou.wasm" \
+              "$d/dist/yaneuraou.wasm.br"
+          done
+          ls -lh *.tar.gz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-wasm ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu shogi engine — WebAssembly builds.
+
+            Five npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
+
+            ## Packages
+
+            | Package | Engine | Threading | Initial / Max memory | Target |
+            |---|---|---|---|---|
+            | `@ultemica/yaneuraou-wasm-cfworkers` | NNUE KP256 | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-mate-cfworkers` | Mate (DfPn) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-pthread-kp256` | NNUE KP256 | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-mate-pthread` | Mate (DfPn) | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp` | NNUE HalfKP256 | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
+
+            > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP256 cfworkers variant does not exist (eval exceeds Workers memory budget).
+
+            ## Required: NNUE eval file (NNUE builds only)
+
+            WASM bundle には評価関数を内蔵していないので、別途 nn.bin を取得して `FS.writeFile` で MEMFS に書いて `EvalDir` USI option で読み込ませる。
+
+            | Eval | Engine | Size | URL |
+            |---|---|---|---|
+            | suisho5 nn.bin | HalfKP256 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
+
+            > 上記は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。
+
+            > KP256 と HalfKP256 の eval は互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。
+
+            ## Optional: opening book
+
+            `BookDir` / `BookFile` USI option で読み込ませる。
+
+            | Book | 局面数 | Size | URL |
+            |---|---|---|---|
+            | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
+            | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
+            | 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
+
+            > 700T-shock (32 MB) は cfworkers の 128 MB heap だと OOM。cfworkers で book を使う場合は 100T-shock まで。petabook は pthread variant でも heap 圧迫するので注意。
+          files: |
+            yaneuraou-wasm-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-kp256-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-mate-pthread-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-halfkp-v${{ steps.version.outputs.version }}.tar.gz

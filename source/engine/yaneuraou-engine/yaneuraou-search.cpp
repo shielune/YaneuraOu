@@ -73,7 +73,7 @@ void USI::extra_option(USI::OptionsMap & o)
 	book.init(o);
 
 	// 弱くするために調整する。20なら手加減なし。0が最弱。
-	//o["SkillLevel"] << Option(20, 0, 20);
+	o["SkillLevel"] << Option(20, 0, 20);
 
 	// 引き分けを受け入れるスコア
 	// 歩を100とする。例えば、この値を -100にすると引き分けの局面は評価値が -100とみなされる。
@@ -743,10 +743,7 @@ SKIP_SEARCH:;
 	{
 		if (!output_final_pv_done)
 		{
-			//Skill skill = Skill(Options["SkillLevel"], Options["USI_LimitStrength"] ? int(Options["USI_Elo"]) : 0);
-			// ↑これでエンジンオプション2つも増えるのやだな…。気が向いたらサポートすることにする。
-
-			Skill skill = Skill(/*(int)Options["SkillLevel"]*/ 20, 0);
+			Skill skill = Skill((int)Options["SkillLevel"], 0);
 
 			// 並列して探索させていたスレッドのうち、ベストのスレッドの結果を選出する。
 			if (    int(Options["MultiPV"]) == 1
@@ -1009,11 +1006,7 @@ void Thread::search()
 	size_t multiPV = Options["MultiPV"];
 
 	// SkillLevelの実装
-	//Skill skill(Options["SkillLevel"], Options["USI_LimitStrength"] ? int(Options["USI_Elo"]) : 0);
-	// ↑これでエンジンオプション2つも増えるのやだな…。気が向いたらサポートすることにする。
-	//Skill skill((int)Options["SkillLevel"], 0);
-
-	Skill skill(20, 0);
+	Skill skill((int)Options["SkillLevel"], 0);
 
 
 	// When playing with strength handicap enable MultiPV search that we will
