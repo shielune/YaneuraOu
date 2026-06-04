@@ -1,4 +1,10 @@
-(function () {
+// Leading semicolon: when concatenated with the emscripten-generated
+// preamble (em++ injects this file via --pre-js), the previous line ends
+// without a semicolon and ASI does not kick in before `(function(){…})()`,
+// so the IIFE gets parsed as a call on the prior expression. With
+// `EM_PTHREAD=1` that prior expression is `… == "em-pthread"`, which then
+// errors with `"em-pthread" is not a function` and breaks pthread spawn.
+;(function () {
   // Message listeners
 
   var quit = false;
@@ -23,7 +29,9 @@
 
   Module["terminate"] = function () {
     quit = true;
-    PThread.terminateAllThreads();
+    if (typeof PThread !== "undefined" && PThread.terminateAllThreads) {
+      PThread.terminateAllThreads();
+    }
   };
 
   // Command queue

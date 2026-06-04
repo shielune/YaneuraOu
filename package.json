@@ -1,0 +1,11 @@
+{
+  "name": "yaneuraou-wasm-eval",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "playwright": "^1.59.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
