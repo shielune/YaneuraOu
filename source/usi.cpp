@@ -5,6 +5,9 @@
 #include "thread.h"
 #include "misc.h"
 #include "testcmd/unit_test.h"
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+#include "eval/humanlike/humanlike_eval.h"
+#endif
 
 #if !defined(YANEURAOU_ENGINE_DEEP)
 #include "tt.h"
@@ -788,7 +791,16 @@ void usi_cmdexec(Position& pos, StateListPtr& states, string& cmd)
 		}
 
 		// 現在の局面について評価関数を呼び出して、その値を返す。
-		else if (token == "eval") cout << "eval = " << Eval::compute_eval(pos) << endl;
+		else if (token == "eval") {
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+			const auto hl_mode = Eval::HumanLike::parse_mode((std::string)Options["EvalMode"]);
+			if (hl_mode != Eval::HumanLike::Mode::Nnue) {
+				cout << "eval = " << Eval::HumanLike::evaluate(pos, hl_mode, false)
+				     << " (HumanLike mode=" << (std::string)Options["EvalMode"] << ")" << endl;
+			} else
+#endif
+				cout << "eval = " << Eval::compute_eval(pos) << endl;
+		}
 		else if (token == "evalstat") Eval::print_eval_stat(pos);
 
 		// この実行ファイルをコンパイルしたコンパイラの情報を出力する。
@@ -863,6 +875,12 @@ void usi_cmdexec(Position& pos, StateListPtr& states, string& cmd)
 #if defined (EVAL_LEARN)
 		else if (token == "gensfen") Learner::gen_sfen(pos, is);
 		else if (token == "learn") Learner::learn(pos, is);
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+		else if (token == "mobility_dump") Eval::HumanLike::mobility_dump_cmd(pos, is);
+		else if (token == "kpl_dump")      Eval::HumanLike::kpl_dump_cmd(pos, is);
+		else if (token == "halfkpl_dump")  Eval::HumanLike::halfkpl_dump_cmd(pos, is);
+		else if (token == "qs_consistency") Eval::HumanLike::qs_consistency_cmd(pos, is);
+#endif
 
 #if defined (GENSFEN2019)
 		// 開発中の教師局面生成コマンド
