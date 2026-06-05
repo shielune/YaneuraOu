@@ -30,6 +30,7 @@
 //#define YANEURAOU_ENGINE_KPPT            // やねうら王 通常探索部 KPPT評価関数
 //#define YANEURAOU_ENGINE_KPP_KKPT        // やねうら王 通常探索部 KPP_KKPT評価関数
 //#define YANEURAOU_ENGINE_MATERIAL        // やねうら王 通常探索部 駒得評価関数
+//#define YANEURAOU_ENGINE_KIKI            // やねうら王 通常探索部 Mobility (MB) 評価関数 (humanlike eval)
 //#define TANUKI_MATE_ENGINE               // tanuki- 詰め将棋solver  (2017/05/06～)
 //#define YANEURAOU_MATE_ENGINE            // やねうら王 詰将棋solver (2020/12/29～)
 //#define USER_ENGINE                      // ユーザーの思考エンジン
@@ -423,7 +424,7 @@ constexpr int MAX_PLY_NUM = 246;
 
 // --- 通常の思考エンジンとして実行ファイルを公開するとき用の設定集
 
-#if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL)
+#if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL) || defined(YANEURAOU_ENGINE_KIKI)
 
 	#define ENGINE_NAME "YaneuraOu"
 
@@ -490,6 +491,14 @@ constexpr int MAX_PLY_NUM = 246;
 		#endif
 	#endif
 
+	#if defined(YANEURAOU_ENGINE_KIKI)
+		// MB (Mobility, 164 params Ridge-fit) を embedded weights で動かす
+		// standalone eval。NNUE と違って外部 nn.bin を必要としない。
+		#define EVAL_MOBILITY
+		// 学習機能は持たない。
+		#undef EVAL_LEARN
+	#endif
+
 	#if defined(YANEURAOU_ENGINE_KPPT)
 		#define EVAL_KPPT
 	#endif
@@ -518,6 +527,16 @@ constexpr int MAX_PLY_NUM = 246;
 		// #define EVAL_NNUE_HALFKP256
 		// #define EVAL_NNUE_KP256
 		// #define EVAL_NNUE_HALFKPE9
+	#endif
+
+	// humanlike_eval ベースの USI option (FC/SK/RF/HL/GK/GM/NS/NMS と Blind 系) を
+	// 公開するエディションのまとめ。NNUE と MOBILITY (= humanlike_eval.cpp をリンク
+	// しているビルド) で有効化する。EvalMode と *WeightsFile は NNUE 専用なので
+	// このマクロでは制御しない。
+	// ※ EVAL_NNUE は上の #if defined(YANEURAOU_ENGINE_NNUE) ブロックで定義されるので、
+	//    このチェックはそのブロックの後に置くこと。
+	#if (defined(EVAL_NNUE) || defined(EVAL_MOBILITY)) && defined(USE_PIECE_VALUE)
+		#define USE_HUMANLIKE_OPTIONS
 	#endif
 
 #endif // defined(YANEURAOU_ENGINE_KPPT) || ...
@@ -856,6 +875,8 @@ constexpr bool pretty_jp = false;
 		// 適切な評価関数がないので単にEVAL_MATERIALを指定しているだけだから、EVAL_TYPE_NAMEとしては空欄でいいかと。
 		#define EVAL_TYPE_NAME ""
 	#endif
+#elif defined(EVAL_MOBILITY)
+	#define EVAL_TYPE_NAME "Mobility"
 #elif defined(EVAL_KPPT)
 	#define EVAL_TYPE_NAME "KPPT"
 #elif defined(EVAL_KPP_KKPT)
