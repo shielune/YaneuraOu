@@ -10,6 +10,9 @@
 #include "../../position.h"
 #include "../../memory.h"
 #include "../../usi.h"
+#if defined(USE_PIECE_VALUE)
+#include "../humanlike/humanlike_eval.h"
+#endif
 
 #if defined(USE_EVAL_HASH)
 #include "../evalhash.h"
@@ -315,6 +318,16 @@ namespace Eval {
 
     // 評価関数
     Value evaluate(const Position& pos) {
+#if defined(USE_PIECE_VALUE)
+        // HumanLike 評価関数モード: NNUE 以外なら eval hash / accumulator を bypass して
+        // ハンドクラフト評価関数を返す。
+        {
+            const auto mode = Eval::HumanLike::parse_mode((std::string)Options["EvalMode"]);
+            if (mode != Eval::HumanLike::Mode::Nnue)
+                return Eval::HumanLike::evaluate(pos, mode, false);
+        }
+#endif
+
         const auto& accumulator = pos.state()->accumulator;
         if (accumulator.computed_score) {
             return accumulator.score;
