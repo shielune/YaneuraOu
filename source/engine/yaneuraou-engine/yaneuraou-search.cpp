@@ -302,7 +302,7 @@ Depth reduction(bool i, Depth d, int mn, Value delta, Value rootDelta) {
 Value value_draw(size_t nodes) { return VALUE_DRAW - 1 + (nodes & 0x2); }
 #endif
 
-#if 0
+#if 1
 // Skill structure is used to implement strength limit.
 // If we have a UCI_Elo, we convert it to an appropriate skill level, anchored to the Stash engine.
 // This method is based on a fit of the Elo results for games played between the master at various
@@ -4475,7 +4475,7 @@ void update_quiet_histories(
 #endif
 }
 
-#if 0
+#if 1
 // When playing with strength handicap, choose the best move among a set of RootMoves
 // using a statistical rule dependent on 'level'. Idea by Heinz van Saanen.
 
