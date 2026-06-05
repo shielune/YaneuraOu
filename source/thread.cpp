@@ -315,6 +315,74 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	// cf. Fix incorrect StateInfo : https://github.com/official-stockfish/Stockfish/commit/232c50fed0b80a0f39322a925575f760648ae0a5
 
 	auto sfen = pos.sfen();
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+	// ForceCapture (FC / ForceCaptureProbValue): 1 go ごとに 1 回乱数を振り、全スレッド同じ fc_active を共有。
+	bool fc_active_this_go = false;
+	{
+		static AsyncPRNG fc_prng;
+		const int fc_value = (int)Options["ForceCaptureProbValue"];
+		fc_active_this_go = (fc_value > 0) && ((int)(fc_prng.rand<u64>() % 100) < fc_value);
+	}
+
+	// StableKing (SK / StableKingProbValue): 同様に 1 go ごとに乱数を振り、全スレッド共有。
+	bool sk_active_this_go = false;
+	{
+		static AsyncPRNG sk_prng;
+		const int sk_value = (int)Options["StableKingProbValue"];
+		sk_active_this_go = (sk_value > 0) && ((int)(sk_prng.rand<u64>() % 100) < sk_value);
+	}
+
+	// GreedyKing (GK / GreedyKingProbValue): 1 go ごとに 1 回乱数を振り、全スレッド同じ gk_active を共有。
+	bool gk_active_this_go = false;
+	{
+		static AsyncPRNG gk_prng;
+		const int gk_value = (int)Options["GreedyKingProbValue"];
+		gk_active_this_go = (gk_value > 0) && ((int)(gk_prng.rand<u64>() % 100) < gk_value);
+	}
+
+	// GreedyMove (GM / GreedyMoveProbValue): 同様に 1 go ごとに乱数を振り、全スレッド共有。
+	bool gm_active_this_go = false;
+	{
+		static AsyncPRNG gm_prng;
+		const int gm_value = (int)Options["GreedyMoveProbValue"];
+		gm_active_this_go = (gm_value > 0) && ((int)(gm_prng.rand<u64>() % 100) < gm_value);
+	}
+
+	// NoSacrifice (NS): 1 go ごとに gate。
+	bool ns_active_this_go = false;
+	{
+		static AsyncPRNG ns_prng;
+		const int ns_value = (int)Options["NoSacrificeProbValue"];
+		ns_active_this_go = (ns_value > 0) && ((int)(ns_prng.rand<u64>() % 100) < ns_value);
+	}
+
+	// NoMateSacrifice (NMS): 1 go ごとに gate。
+	bool nms_active_this_go = false;
+	{
+		static AsyncPRNG nms_prng;
+		const int nms_value = (int)Options["NoMateSacrificeProbValue"];
+		nms_active_this_go = (nms_value > 0) && ((int)(nms_prng.rand<u64>() % 100) < nms_value);
+	}
+
+	// Blind variants。
+	bool fc_blind_this_go  = false;
+	bool ns_blind_this_go  = false;
+	bool nms_blind_this_go = false;
+	bool gk_blind_this_go  = false;
+	{
+		static AsyncPRNG fc_blind_prng, ns_blind_prng, nms_blind_prng, gk_blind_prng;
+		const int fc_b  = (int)Options["FCBlindProbValue"];
+		const int ns_b  = (int)Options["NSBlindProbValue"];
+		const int nms_b = (int)Options["NMSBlindProbValue"];
+		const int gk_b  = (int)Options["GKBlindProbValue"];
+		fc_blind_this_go  = (fc_b  > 0) && ((int)(fc_blind_prng.rand<u64>()  % 100) < fc_b);
+		ns_blind_this_go  = (ns_b  > 0) && ((int)(ns_blind_prng.rand<u64>()  % 100) < ns_b);
+		nms_blind_this_go = (nms_b > 0) && ((int)(nms_blind_prng.rand<u64>() % 100) < nms_b);
+		gk_blind_this_go  = (gk_b  > 0) && ((int)(gk_blind_prng.rand<u64>()  % 100) < gk_b);
+	}
+#endif
+
 	for (Thread* th : *this)
 	{
 		// th->nodes = th->tbHits = th->nmpMinPly = th->bestMoveChanges = 0;
@@ -323,6 +391,35 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 		th->nodes = th->bestMoveChanges = /* th->tbHits = */ th->nmpMinPly = 0;
 
 		th->rootDepth = th->completedDepth = 0;
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+		// SK soft-hybrid: 思考開始時は king-locked、main thread が必要時に解除する。
+		th->sk_allow_king = false;
+
+		// RF soft-hybrid: 思考開始時は RF 有効、main thread が必要時に解除する。
+		th->rf_allow_violate = false;
+
+		// FC / SK: 上で 1 度振った結果を全スレッドにコピー。
+		th->fc_active = fc_active_this_go;
+		th->sk_active = sk_active_this_go;
+
+		// GK: 上で 1 度振った結果を全スレッドにコピー。
+		th->gk_active = gk_active_this_go;
+
+		// GM: 同様にコピー、snapshot をクリア。
+		th->gm_active = gm_active_this_go;
+		th->gm_depth1_top4.clear();
+
+		// NS / NMS: gate 値をコピー。
+		th->ns_active = ns_active_this_go;
+		th->nms_active = nms_active_this_go;
+
+		// Blind variants: 相手の手番にも同フィルタを発動させる per-search gate。
+		th->fc_blind_active  = fc_blind_this_go;
+		th->ns_blind_active  = ns_blind_this_go;
+		th->nms_blind_active = nms_blind_this_go;
+		th->gk_blind_active  = gk_blind_this_go;
+#endif
 
 		// 以上の初期化、探索スレッド側でやるべきだと思うが、しかしth->nodesなどはmain threadが探索ノード数の
 		// 出力のために積算するので、main threadが積算する時にはすでに他のスレッドのth->nodesがゼロ初期化されている状態でないと
