@@ -131,6 +131,39 @@ public:
 	// 探索中であるかを返す。
 	bool is_searching() const { return searching; }
 
+#if defined(USE_HUMANLIKE_OPTIONS)
+	// StableKing (SK) soft-hybrid 用フラグ。
+	bool sk_allow_king = false;
+
+	// RookFile (RF) soft-hybrid 用フラグ。
+	bool rf_allow_violate = false;
+
+	// ForceCapture (FC) per-search gate。
+	bool fc_active = false;
+
+	// StableKing (SK) per-search gate。
+	bool sk_active = false;
+
+	// GreedyKing (GK) per-search gate。
+	bool gk_active = false;
+
+	// GreedyMove (GM) per-search gate と depth=1 snapshot。
+	bool gm_active = false;
+	std::vector<std::pair<Move, Value>> gm_depth1_top4;
+
+	// NoSacrifice (NS) per-search gate。
+	bool ns_active = false;
+
+	// NoMateSacrifice (NMS) per-search gate。
+	bool nms_active = false;
+
+	// Blind variants。
+	bool fc_blind_active  = false;
+	bool ns_blind_active  = false;
+	bool nms_blind_active = false;
+	bool gk_blind_active  = false;
+#endif
+
 	// ------------------------------
 	//       探索に必要なもの
 	// ------------------------------

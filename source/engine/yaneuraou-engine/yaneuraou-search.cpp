@@ -29,6 +29,125 @@
 #include "../../usi.h"
 #include "../../learn/learn.h"
 #include "../../mate/mate.h"
+#if defined(USE_HUMANLIKE_OPTIONS)
+#include "../../eval/humanlike/humanlike_eval.h"
+
+// ----------------------------------------------------------------------------
+// RookFile (RF) personality: 飛車の筋を強制する。
+// game_ply < 24 のあいだ self-turn ノードで以下のルール:
+//   (A) 飛車 (ROOK | DRAGON) が初期筋 (先手 FILE_2 / 後手 FILE_8) にあるとき:
+//       → target_file への飛車振りのみ可。他の指し手は全 skip。
+//   (B) 飛車がすでに初期筋から動いている (振り済み or 取られた) とき:
+//       → 非飛車移動は OK、飛車移動は to_file == 現飛車筋 (縦) or target のみ可
+// rf_value: USI option 値 (1-9, 0 で disabled)、先手目線の筋。
+// 戻り値: true なら "この move は RF 違反" (skip すべき)。
+namespace {
+inline bool rf_violates(const Position& pos, Move move, Color root_color, int rf_value) {
+	if (rf_value < 1 || rf_value > 9) return false;
+
+	const File starting_file = (root_color == BLACK) ? FILE_2 : FILE_8;
+	const File target_file   = (root_color == BLACK) ? (File)(rf_value - 1)
+	                                                  : (File)(9 - rf_value);
+
+	Bitboard rooks = pos.pieces(root_color, ROOK) | pos.pieces(root_color, DRAGON);
+	if (!rooks) return false;
+
+	const Piece moved   = pos.moved_piece_before(move);
+	const bool is_rook  = (type_of(moved) == ROOK || type_of(moved) == DRAGON);
+	const File to_file  = file_of(move.to_sq());
+
+	const bool any_on_starting = (bool)(rooks & file_bb(starting_file));
+
+	if (any_on_starting) {
+		if (!is_rook) return true;
+		if (to_file != target_file) return true;
+		return false;
+	}
+	if (!is_rook) return false;
+	if (move.is_drop()) return (to_file != target_file);
+	const File from_file = file_of(move.from_sq());
+	if (to_file == from_file) return false;
+	if (to_file == target_file) return false;
+	return true;
+}
+
+// is_filtered_by_personality: 与えられた move が現在 active な personality フィルタの
+// いずれかで skip されるかを判定 (self-turn 限定)。
+inline bool is_filtered_by_personality(const Position& pos, Move move, Thread* thisThread) {
+	const bool self_turn = pos.side_to_move() == thisThread->rootPos.side_to_move();
+	if (!self_turn) return false;
+	const Color root_color = thisThread->rootPos.side_to_move();
+
+	// FC: free capture 存在 & move が free capture でない
+	if (thisThread->fc_active) {
+		bool has_free = false;
+		for (auto m : MoveList<LEGAL>(pos))
+			if (Eval::HumanLike::is_free_capture(pos, m)) { has_free = true; break; }
+		if (has_free && !Eval::HumanLike::is_free_capture(pos, move)) return true;
+	}
+
+	// SK: 玉以外の合法手が存在 & move が玉移動
+	if (thisThread->sk_active && !thisThread->sk_allow_king) {
+		bool has_non_king = false;
+		for (auto m : MoveList<LEGAL>(pos))
+			if (type_of(pos.moved_piece_before(m)) != KING) { has_non_king = true; break; }
+		if (has_non_king && type_of(pos.moved_piece_before(move)) == KING) return true;
+	}
+
+	// RF
+	const int rf_value = (int)Options["RookFile"];
+	if (rf_value >= 1 && rf_value <= 9 && pos.game_ply() < 24 && !thisThread->rf_allow_violate) {
+		bool has_compliant = false;
+		for (auto m : MoveList<LEGAL>(pos))
+			if (!rf_violates(pos, m, root_color, rf_value)) { has_compliant = true; break; }
+		if (has_compliant && rf_violates(pos, move, root_color, rf_value)) return true;
+	}
+
+	// HL: 持ち駒合計 1 & move が drop & 非 drop の合法手が存在
+	if ((bool)Options["HoardLast"] && move.is_drop()) {
+		Hand h = pos.hand_of(pos.side_to_move());
+		int total = 0;
+		for (PieceType pt = PAWN; pt < PIECE_HAND_NB; ++pt) total += hand_count(h, pt);
+		if (total == 1) {
+			bool has_non_drop = false;
+			for (auto m : MoveList<LEGAL>(pos))
+				if (!m.is_drop()) { has_non_drop = true; break; }
+			if (has_non_drop) return true;
+		}
+	}
+
+	// GK: 単王手 + 玉のみの利き + 同玉 legal & move が同玉でない
+	if (thisThread->gk_active) {
+		Bitboard ck = pos.checkers();
+		if (ck && ck.pop_count() == 1) {
+			Square csq = ck.pop_c();
+			Color us = pos.side_to_move();
+			Bitboard atk = pos.attackers_to(us, csq);
+			if (atk.pop_count() == 1 && (atk & pos.pieces(us, KING))) {
+				bool has_same_king = false;
+				for (auto m : MoveList<LEGAL>(pos))
+					if (type_of(pos.moved_piece_before(m)) == KING && m.to_sq() == csq) {
+						has_same_king = true; break;
+					}
+				if (has_same_king
+				    && !(type_of(pos.moved_piece_before(move)) == KING && move.to_sq() == csq))
+					return true;
+			}
+		}
+	}
+
+	// NS / NMS: 純粋ただ捨て (check 別)
+	if ((thisThread->ns_active || thisThread->nms_active)
+	    && !pos.capture(move) && !pos.see_ge(move, VALUE_ZERO)) {
+		const bool is_check = pos.gives_check(move);
+		if ((!is_check && thisThread->ns_active) || (is_check && thisThread->nms_active))
+			return true;
+	}
+
+	return false;
+}
+} // namespace
+#endif
 
 // -------------------
 // やねうら王独自追加
@@ -137,6 +256,42 @@ void USI::extra_option(USI::OptionsMap & o)
 #if defined(YANEURAOU_ENGINE_NNUE)
 	// NNUEのFV_SCALEの値
 	o["FV_SCALE"] << Option(16, 1, 128);
+#endif
+
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+	o["EvalMode"] << Option(Eval::HumanLike::mode_names, Eval::HumanLike::mode_names[0]);
+#endif
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+	o["ForceCaptureProbValue"] << Option(0, 0, 100);
+	o["StableKingProbValue"]   << Option(0, 0, 100);
+	o["RookFile"]              << Option(0, 0, 9);
+	o["PinRookLimitCp"]        << Option(500, 0, 3000);
+	o["HoardLast"]             << Option(false);
+	o["GreedyKingProbValue"]   << Option(0, 0, 100);
+	o["GreedyMoveProbValue"]   << Option(0, 0, 100);
+	o["NoSacrificeProbValue"]  << Option(0, 0, 100);
+	o["NoMateSacrificeProbValue"] << Option(0, 0, 100);
+
+	o["FCBlindProbValue"]  << Option(0, 0, 100);
+	o["NSBlindProbValue"]  << Option(0, 0, 100);
+	o["NMSBlindProbValue"] << Option(0, 0, 100);
+	o["GKBlindProbValue"]  << Option(0, 0, 100);
+#endif
+
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+	o["MobilityWeightsFile"] << Option("", [](const USI::Option& opt) {
+		const std::string p = (std::string)opt;
+		if (!p.empty()) Eval::HumanLike::load_mobility_weights(p);
+	});
+	o["KPLWeightsFile"] << Option("", [](const USI::Option& opt) {
+		const std::string p = (std::string)opt;
+		if (!p.empty()) Eval::HumanLike::load_kpl_weights(p);
+	});
+	o["HalfKPLWeightsFile"] << Option("", [](const USI::Option& opt) {
+		const std::string p = (std::string)opt;
+		if (!p.empty()) Eval::HumanLike::load_halfkpl_weights(p);
+	});
 #endif
 
 	// Stockfishには、Eloレーティングを指定して棋力調整するためのエンジンオプションがあるようだが…。
@@ -1018,6 +1173,12 @@ void Thread::search()
 	if (skill.enabled())
 		multiPV = std::max(multiPV, size_t(4));
 
+#if defined(USE_HUMANLIKE_OPTIONS)
+	// GM: gm_active のときは shallow-trap 検出のため MultiPV>=4 を強制。
+	if (this->gm_active)
+		multiPV = std::max(multiPV, (size_t)4);
+#endif
+
 	// この局面での指し手の数を上回ってはいけない
 	multiPV = std::min(multiPV, rootMoves.size());
 
@@ -1031,6 +1192,14 @@ void Thread::search()
 	int searchAgainCounter = 0;
 
 	lowPlyHistory.fill(0);
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+	// SK soft-hybrid: 「玉以外の全候補が詰み」と判明したら sk_allow_king を立てて
+	// 次イテレーション以降は玉移動を許可するワンショットフラグ。
+	bool sk_flipped_this_search = false;
+	// RF soft-hybrid: bestValue < -PinRookLimitCp が出たら rf_allow_violate を立てる。
+	bool rf_flipped_this_search = false;
+#endif
 
 	// Iterative deepening loop until requested to stop or the target depth is reached
 	// 要求があるか、または目標深度に達するまで反復深化ループを実行します
@@ -1274,6 +1443,15 @@ void Thread::search()
 		if (!Threads.stop)
 			completedDepth = rootDepth;
 
+#if defined(USE_HUMANLIKE_OPTIONS)
+		// GM: main thread の depth=1 完了時に top-4 を snapshot。
+		if (mainThread && this->gm_active && rootDepth == 1 && this->gm_depth1_top4.empty()) {
+			const size_t snap_n = std::min<size_t>(4, rootMoves.size());
+			for (size_t i = 0; i < snap_n; ++i)
+				this->gm_depth1_top4.emplace_back(rootMoves[i].pv[0], rootMoves[i].score);
+		}
+#endif
+
 		if (rootMoves[0].pv[0] != lastBestMove)
 		{
 			lastBestMove      = rootMoves[0].pv[0];
@@ -1417,6 +1595,37 @@ void Thread::search()
 		mainThread->iterValue[iterIdx] = bestValue;
 		iterIdx                        = (iterIdx + 1) & 3;
 
+#if defined(USE_HUMANLIKE_OPTIONS)
+		// SK soft-hybrid retry: 自分が詰まされる読みが出たら、sk_allow_king を立てて
+		// 次イテレーション以降は玉移動も探索候補に含める。一度だけ flip する。
+		if (   mainThread
+		    && !sk_flipped_this_search
+		    && mainThread->sk_active
+		    && bestValue <= -VALUE_MATE_IN_MAX_PLY
+		    && bestValue > -VALUE_INFINITE)
+		{
+			for (Thread* th : Threads)
+				th->sk_allow_king = true;
+			sk_flipped_this_search = true;
+		}
+
+		// RF soft-hybrid retry: bestValue < -PinRookLimitCp なら振り直しを許可する。
+		if (   mainThread
+		    && !rf_flipped_this_search
+		    && (int)Options["RookFile"] > 0
+		    && (int)Options["RookFile"] <= 9
+		    && bestValue > -VALUE_INFINITE)
+		{
+			const int limit_cp = (int)Options["PinRookLimitCp"];
+			const Value limit_val = (Value)(limit_cp * PawnValue / 100);
+			if (bestValue <= -limit_val) {
+				for (Thread* th : Threads)
+					th->rf_allow_violate = true;
+				rf_flipped_this_search = true;
+			}
+		}
+#endif
+
 	} // iterative deeping , 反復深化の1回分の終了
 
 	if (!mainThread)
@@ -1429,6 +1638,30 @@ void Thread::search()
 	if (skill.enabled())
 		std::swap(rootMoves[0], *std::find(rootMoves.begin(), rootMoves.end(),
 			skill.best ? skill.best : skill.pick_best(multiPV)));
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+	// GM swap: gm_active かつ depth=1 snapshot 有り、completedDepth >= 2 (= 比較可能) のとき、
+	// depth=1 top-4 にあって最終 top-4 から落ちた手の中で、depth=1 score 最良のものを bestmove に差し替える。
+	if (this->gm_active && !this->gm_depth1_top4.empty() && completedDepth >= 2) {
+		const size_t final_n = std::min<size_t>(4, rootMoves.size());
+		std::vector<Move> final_top;
+		for (size_t i = 0; i < final_n; ++i) final_top.push_back(rootMoves[i].pv[0]);
+		Move trap_move = Move::none();
+		Value trap_score = -VALUE_INFINITE;
+		for (auto& [m, s] : this->gm_depth1_top4) {
+			if (std::find(final_top.begin(), final_top.end(), m) == final_top.end() && s > trap_score) {
+				trap_move = m;
+				trap_score = s;
+			}
+		}
+		if (trap_move != Move::none()) {
+			auto it = std::find_if(rootMoves.begin(), rootMoves.end(),
+				[trap_move](const RootMove& rm) { return rm.pv[0] == trap_move; });
+			if (it != rootMoves.end())
+				std::swap(rootMoves[0], *it);
+		}
+	}
+#endif
 }
 
 // -----------------------
@@ -2458,6 +2691,11 @@ Value search(Position& pos, Stack* ss, Value alpha, Value beta, Depth depth, boo
 			if (!pos.legal(move))
 				continue;
 
+#if defined(USE_HUMANLIKE_OPTIONS)
+			if (is_filtered_by_personality(pos, move, thisThread))
+				continue;
+#endif
+
 			//ASSERT_LV3(pos.capture_stage(move));
 			// moveとして歩の成りも返ってくるが、これがcapture_stage()と一致するとは限らない。
 			// MovePickerはprob cutの時に、
@@ -2606,6 +2844,91 @@ moves_loop: // When in check, search starts here
 		if (rootNode && !std::count(thisThread->rootMoves.begin() + thisThread->pvIdx,
 									thisThread->rootMoves.end()                      , move))
 			continue;
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+		{
+			// 自分の手番ノードか?
+			const bool self_turn = pos.side_to_move() == thisThread->rootPos.side_to_move();
+
+			// ForceCapture (FC) フィルタ
+			const bool fc_active_node = (self_turn && thisThread->fc_active)
+			                            || (!self_turn && thisThread->fc_blind_active);
+			if (fc_active_node) {
+				bool fc_has_free = false;
+				for (auto fc_m : MoveList<LEGAL>(pos))
+					if (Eval::HumanLike::is_free_capture(pos, fc_m)) { fc_has_free = true; break; }
+				if (fc_has_free && !Eval::HumanLike::is_free_capture(pos, move))
+					continue;
+			}
+
+			// StableKing (SK) フィルタ
+			const bool sk_active_node = self_turn && thisThread->sk_active && !thisThread->sk_allow_king;
+			if (sk_active_node) {
+				bool sk_has_non_king = false;
+				for (auto sk_m : MoveList<LEGAL>(pos))
+					if (type_of(pos.moved_piece_before(sk_m)) != KING) { sk_has_non_king = true; break; }
+				if (sk_has_non_king && type_of(pos.moved_piece_before(move)) == KING)
+					continue;
+			}
+
+			// RookFile (RF) フィルタ
+			const int rf_value = (int)Options["RookFile"];
+			const bool rf_active_node = self_turn && rf_value > 0 && rf_value <= 9
+			                            && pos.game_ply() < 24 && !thisThread->rf_allow_violate;
+			if (rf_active_node) {
+				bool rf_has_compliant = false;
+				for (auto rf_m : MoveList<LEGAL>(pos))
+					if (!rf_violates(pos, rf_m, thisThread->rootPos.side_to_move(), rf_value)) { rf_has_compliant = true; break; }
+				if (rf_has_compliant && rf_violates(pos, move, thisThread->rootPos.side_to_move(), rf_value))
+					continue;
+			}
+
+			// HoardLast (HL) フィルタ
+			if ((bool)Options["HoardLast"] && self_turn && move.is_drop()) {
+				Hand h = pos.hand_of(pos.side_to_move());
+				int hand_total = 0;
+				for (PieceType pt = PAWN; pt < PIECE_HAND_NB; ++pt) hand_total += hand_count(h, pt);
+				if (hand_total == 1) {
+					bool has_non_drop = false;
+					for (auto hl_m : MoveList<LEGAL>(pos))
+						if (!hl_m.is_drop()) { has_non_drop = true; break; }
+					if (has_non_drop) continue;
+				}
+			}
+
+			// GK フィルタ
+			const bool gk_filter_node = (self_turn && thisThread->gk_active)
+			                            || (!self_turn && thisThread->gk_blind_active);
+			if (gk_filter_node) {
+				Bitboard ck = pos.checkers();
+				if (ck && ck.pop_count() == 1) {
+					Square csq = ck.pop_c();
+					Color us = pos.side_to_move();
+					Bitboard atk = pos.attackers_to(us, csq);
+					if (atk.pop_count() == 1 && (atk & pos.pieces(us, KING))) {
+						bool gk_force = false;
+						for (auto m : MoveList<LEGAL>(pos))
+							if (type_of(pos.moved_piece_before(m)) == KING && m.to_sq() == csq) { gk_force = true; break; }
+						if (gk_force && !(type_of(pos.moved_piece_before(move)) == KING && move.to_sq() == csq))
+							continue;
+					}
+				}
+			}
+
+			// NS / NMS フィルタ
+			const bool ns_filter_node  = (self_turn && thisThread->ns_active)
+			                             || (!self_turn && thisThread->ns_blind_active);
+			const bool nms_filter_node = (self_turn && thisThread->nms_active)
+			                             || (!self_turn && thisThread->nms_blind_active);
+			if ((ns_filter_node || nms_filter_node) && !pos.see_ge(move, VALUE_ZERO)) {
+				const bool is_check  = pos.gives_check(move);
+				const bool pawn_drop = move.is_drop() && (move.move_dropped_piece() == PAWN);
+				const bool cap_m     = pos.capture(move);
+				if (!is_check && ns_filter_node && pawn_drop) continue;
+				if ( is_check && nms_filter_node && !cap_m)   continue;
+			}
+		}
+#endif
 
 		// do_move()した指し手の数のインクリメント
 		ss->moveCount = ++moveCount;
@@ -4008,6 +4331,90 @@ Value qsearch(Position& pos, Stack* ss, Value alpha, Value beta, Depth depth)
 
 		if (!pos.legal(move))
 			continue;
+
+#if defined(USE_HUMANLIKE_OPTIONS)
+		{
+			const bool self_turn_qs = pos.side_to_move() == thisThread->rootPos.side_to_move();
+
+			// FC filter (qsearch 版)
+			const bool fc_active_qs = (self_turn_qs && thisThread->fc_active)
+			                          || (!self_turn_qs && thisThread->fc_blind_active);
+			if (fc_active_qs) {
+				bool fc_has_free_qs = false;
+				for (auto fc_m : MoveList<LEGAL>(pos))
+					if (Eval::HumanLike::is_free_capture(pos, fc_m)) { fc_has_free_qs = true; break; }
+				if (fc_has_free_qs && !Eval::HumanLike::is_free_capture(pos, move))
+					continue;
+			}
+
+			// SK filter (qsearch 版)
+			const bool sk_active_qs = self_turn_qs && thisThread->sk_active && !thisThread->sk_allow_king;
+			if (sk_active_qs) {
+				bool sk_has_non_king_qs = false;
+				for (auto sk_m : MoveList<LEGAL>(pos))
+					if (type_of(pos.moved_piece_before(sk_m)) != KING) { sk_has_non_king_qs = true; break; }
+				if (sk_has_non_king_qs && type_of(pos.moved_piece_before(move)) == KING)
+					continue;
+			}
+
+			// RF filter (qsearch 版)
+			const int rf_value_qs = (int)Options["RookFile"];
+			const bool rf_active_qs = self_turn_qs && rf_value_qs > 0 && rf_value_qs <= 9
+			                          && pos.game_ply() < 24 && !thisThread->rf_allow_violate;
+			if (rf_active_qs) {
+				bool rf_has_compliant_qs = false;
+				for (auto rf_m : MoveList<LEGAL>(pos))
+					if (!rf_violates(pos, rf_m, thisThread->rootPos.side_to_move(), rf_value_qs)) { rf_has_compliant_qs = true; break; }
+				if (rf_has_compliant_qs && rf_violates(pos, move, thisThread->rootPos.side_to_move(), rf_value_qs))
+					continue;
+			}
+
+			// HL filter (qsearch 版)
+			if ((bool)Options["HoardLast"] && self_turn_qs && move.is_drop()) {
+				Hand h = pos.hand_of(pos.side_to_move());
+				int hand_total_qs = 0;
+				for (PieceType pt = PAWN; pt < PIECE_HAND_NB; ++pt) hand_total_qs += hand_count(h, pt);
+				if (hand_total_qs == 1) {
+					bool has_non_drop_qs = false;
+					for (auto hl_m : MoveList<LEGAL>(pos))
+						if (!hl_m.is_drop()) { has_non_drop_qs = true; break; }
+					if (has_non_drop_qs) continue;
+				}
+			}
+
+			// GK filter (qsearch 版)
+			const bool gk_filter_node_qs = (self_turn_qs && thisThread->gk_active)
+			                               || (!self_turn_qs && thisThread->gk_blind_active);
+			if (gk_filter_node_qs) {
+				Bitboard ck = pos.checkers();
+				if (ck && ck.pop_count() == 1) {
+					Square csq = ck.pop_c();
+					Color us_qs = pos.side_to_move();
+					Bitboard atk = pos.attackers_to(us_qs, csq);
+					if (atk.pop_count() == 1 && (atk & pos.pieces(us_qs, KING))) {
+						bool gk_force_qs = false;
+						for (auto m : MoveList<LEGAL>(pos))
+							if (type_of(pos.moved_piece_before(m)) == KING && m.to_sq() == csq) { gk_force_qs = true; break; }
+						if (gk_force_qs && !(type_of(pos.moved_piece_before(move)) == KING && move.to_sq() == csq))
+							continue;
+					}
+				}
+			}
+
+			// NS / NMS filter (qsearch 版)
+			const bool ns_filter_node_qs  = (self_turn_qs && thisThread->ns_active)
+			                                || (!self_turn_qs && thisThread->ns_blind_active);
+			const bool nms_filter_node_qs = (self_turn_qs && thisThread->nms_active)
+			                                || (!self_turn_qs && thisThread->nms_blind_active);
+			if ((ns_filter_node_qs || nms_filter_node_qs) && !pos.see_ge(move, VALUE_ZERO)) {
+				const bool is_check_qs  = pos.gives_check(move);
+				const bool pawn_drop_qs = move.is_drop() && (move.move_dropped_piece() == PAWN);
+				const bool cap_m_qs     = pos.capture(move);
+				if (!is_check_qs && ns_filter_node_qs && pawn_drop_qs) continue;
+				if ( is_check_qs && nms_filter_node_qs && !cap_m_qs)   continue;
+			}
+		}
+#endif
 
 		//  局面を進める前の枝刈り
 
