@@ -40,6 +40,7 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPP_KKPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIAL
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_KIKI
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_DEEP_TENSOR_RT_UBUNTU
 #YANEURAOU_EDITION = TANUKI_MATE_ENGINE
 #YANEURAOU_EDITION = YANEURAOU_MATE_ENGINE
@@ -427,6 +428,18 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MATERIAL)
 	CPPFLAGS += -DMATERIAL_LEVEL=$(MATERIAL_LEVEL)
 endif
 
+ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
+	# Mobility (MB) edition: embedded weights, NNUE 不要
+	SOURCES  +=                                                                \
+		eval/humanlike/humanlike_eval.cpp                                      \
+		eval/humanlike/mobility_dump.cpp                                       \
+		eval/humanlike/kpl_dump.cpp                                            \
+		eval/humanlike/halfkpl_dump.cpp                                        \
+		eval/mobility/evaluate_mobility.cpp                                    \
+		eval/mobility/mobility_weights_embedded.cpp                            \
+		engine/yaneuraou-engine/yaneuraou-search.cpp
+endif
+
 ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 	ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP)
 	else
@@ -525,6 +538,10 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 		eval/nnue/features/half_relative_kp.cpp                         \
 		eval/nnue/features/half_kpe9.cpp                                \
 		eval/nnue/features/pe9.cpp                                      \
+		eval/humanlike/humanlike_eval.cpp                               \
+		eval/humanlike/mobility_dump.cpp                                \
+		eval/humanlike/kpl_dump.cpp                                     \
+		eval/humanlike/halfkpl_dump.cpp                                 \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
 
 	ifneq (,$(findstring em++,$(COMPILER)))
