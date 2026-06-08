@@ -252,6 +252,7 @@ GeneratedArtifacts/
 _Pvt_Extensions/
 ModelManifest.xml
 source/yaneuraou_ffi_test
+source/YaneuraOu-by-gcc
 
 # large mate problem data sets
 data/

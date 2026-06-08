@@ -1,4 +1,4 @@
-# @ultemica/yaneuraou-wasm-pthread-halfkp
+# @ultemica/yaneuraou-wasm-pthread-halfkp256
 
 YaneuraOu NNUE HalfKP256 将棋エンジンを multi-thread (pthread) で動かすための
 ブラウザ向け WASM パッケージ。
@@ -11,7 +11,7 @@ YaneuraOu NNUE HalfKP256 将棋エンジンを multi-thread (pthread) で動か�
 
 ## Sibling packages
 
-| | `yaneuraou-wasm-cfworkers` | `yaneuraou-wasm-pthread-halfkp` (this) |
+| | `yaneuraou-wasm-cfworkers` | `yaneuraou-wasm-pthread-halfkp256` (this) |
 |---|---|---|
 | Threads | 1 (固定) | 可変 (1-32) |
 | `SharedArrayBuffer` | not used | required |
@@ -35,9 +35,9 @@ Cross-Origin-Embedder-Policy: require-corp
 ## Usage (browser)
 
 ```ts
-import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-halfkp";
-import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-halfkp/engine";
-import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-halfkp/wasm?url";
+import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-halfkp256";
+import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-halfkp256/engine";
+import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-halfkp256/wasm?url";
 
 const wasmBinary = await fetch(wasmUrl).then((r) => r.arrayBuffer());
 const evalBin = await fetch("/eval/nn.bin").then((r) => r.arrayBuffer());
