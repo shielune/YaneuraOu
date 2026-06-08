@@ -535,7 +535,10 @@ constexpr int MAX_PLY_NUM = 246;
 	// このマクロでは制御しない。
 	// ※ EVAL_NNUE は上の #if defined(YANEURAOU_ENGINE_NNUE) ブロックで定義されるので、
 	//    このチェックはそのブロックの後に置くこと。
-	#if (defined(EVAL_NNUE) || defined(EVAL_MOBILITY)) && defined(USE_PIECE_VALUE)
+	// ※ `make USE_HUMANLIKE_OPTIONS=OFF` 等で DISABLE_HUMANLIKE_OPTIONS が渡されたら
+	//    自動有効化を打ち消す。WASM Release などの一般配布で USI option 数を
+	//    増やしたくないとき向け。
+	#if (defined(EVAL_NNUE) || defined(EVAL_MOBILITY)) && defined(USE_PIECE_VALUE) && !defined(DISABLE_HUMANLIKE_OPTIONS)
 		#define USE_HUMANLIKE_OPTIONS
 	#endif
 
