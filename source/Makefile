@@ -520,6 +520,13 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_VM_256X2_32_32
 
+		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64)
+			# AobaNNUE互換のhalfkp_768x2-16-64型。architecture headerは
+			# eval/nnue/architectures/halfkp_768x2-16-64.h にコミット済みなので
+			# 動的生成パスには落とさず、edition名のマクロをそのままdefineして
+			# nnue_architecture.h の #elif で拾わせる。
+			CPPFLAGS += -DYANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+
 		else
 			# 知らないNNUEのarchitectureなので、architecture headerを動的に生成する。
 			ARCH_HEADER_FILE = \"architectures/$(subst YANEURAOU_ENGINE_NNUE_,,$(YANEURAOU_EDITION)).h\"
