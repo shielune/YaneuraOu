@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@ultemica/yaneuraou-pthread-halfkp",
+      "name": "@ultemica/yaneuraou-pthread-halfkp256",
       "devDependencies": {
         "playwright": "^1.59.1",
         "typescript": "^5.0.0",

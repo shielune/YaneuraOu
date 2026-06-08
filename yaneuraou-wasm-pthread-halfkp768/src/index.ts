@@ -1,7 +1,8 @@
 /**
- * @ultemica/yaneuraou-wasm-pthread-halfkp
+ * @ultemica/yaneuraou-wasm-pthread-halfkp768
  *
- * YaneuraOu NNUE HalfKP256 shogi engine for browsers, built with `EM_PTHREAD=1`.
+ * YaneuraOu NNUE `HalfKP_768x2_16_64` (AobaNNUE compatible network)
+ * shogi engine for browsers, built with `EM_PTHREAD=1`.
  *
  * Sister package to `@ultemica/yaneuraou-wasm-cfworkers`. Same `createEngine`
  * surface, but the WASM module is multi-threaded — search can use multiple
@@ -19,9 +20,9 @@
  * ## Usage (browser, with COOP/COEP enabled)
  *
  * ```ts
- * import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-halfkp";
- * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-halfkp/engine";
- * import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-halfkp/wasm?url";
+ * import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-halfkp768";
+ * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-halfkp768/engine";
+ * import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-halfkp768/wasm?url";
  *
  * const wasmBinary = await fetch(wasmUrl).then((r) => r.arrayBuffer());
  * const evalBin = await fetch("/eval/nn.bin").then((r) => r.arrayBuffer());
@@ -134,7 +135,7 @@ export interface Engine {
 export async function createEngine(opts: CreateEngineOptions): Promise<Engine> {
   if (typeof SharedArrayBuffer === "undefined") {
     throw new Error(
-      "yaneuraou-wasm-pthread-halfkp requires SharedArrayBuffer. Serve the page " +
+      "yaneuraou-wasm-pthread-halfkp768 requires SharedArrayBuffer. Serve the page " +
         "with COOP=same-origin and COEP=require-corp headers.",
     );
   }

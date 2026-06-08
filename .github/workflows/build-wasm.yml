@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - "wasm-v*"
-    branches:
-      - feature/native-ffi-release-combined
   workflow_dispatch:
     inputs:
       emsdk_version:
@@ -53,10 +51,18 @@ jobs:
             pthread: 1
             initial_memory: 134217728
             maximum_memory: 1073741824
-          - name: pthread-halfkp
-            dir: yaneuraou-wasm-pthread-halfkp
+          - name: pthread-halfkp256
+            dir: yaneuraou-wasm-pthread-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
-            export_name: YaneuraOu_HalfKP
+            export_name: YaneuraOu_HalfKP256
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+          - name: pthread-halfkp768
+            dir: yaneuraou-wasm-pthread-halfkp768
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            export_name: YaneuraOu_HalfKP768
             environment: web,worker
             pthread: 1
             initial_memory: 268435456
@@ -139,7 +145,7 @@ jobs:
 
       - name: Stage each package + compile loader + create tar.gz
         run: |
-          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp; do
+          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768; do
             mkdir -p "$d/dist"
             cp -R "download/${d}-dist/." "$d/dist/"
             (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
@@ -168,7 +174,7 @@ jobs:
           body: |
             YaneuraOu shogi engine — WebAssembly builds.
 
-            Five npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
+            Six npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
 
             ## Packages
 
@@ -178,9 +184,10 @@ jobs:
             | `@ultemica/yaneuraou-wasm-mate-cfworkers` | Mate (DfPn) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
             | `@ultemica/yaneuraou-wasm-pthread-kp256` | NNUE KP256 | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
             | `@ultemica/yaneuraou-wasm-mate-pthread` | Mate (DfPn) | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp` | NNUE HalfKP256 | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
 
-            > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP256 cfworkers variant does not exist (eval exceeds Workers memory budget).
+            > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget).
 
             ## Required: NNUE eval file (NNUE builds only)
 
@@ -188,12 +195,13 @@ jobs:
 
             | Eval | Engine | Size | URL |
             |---|---|---|---|
-            | suisho5 nn.bin | HalfKP256 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | suisho5 nn.bin | HalfKP_256x2_32_32 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
+            | AobaNNUE nn.bin | HalfKP_768x2_16_64 | 数十 MB | https://github.com/yssaya/AobaNNUE/releases |
             | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
 
-            > 上記は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。
+            > suisho5 / suishopetite は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。AobaNNUE は素の `nn.bin` がそのまま配布されている。
 
-            > KP256 と HalfKP256 の eval は互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。
+            > KP256 / HalfKP_256x2_32_32 / HalfKP_768x2_16_64 の eval はそれぞれ互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。
 
             ## Optional: opening book
 
@@ -211,4 +219,5 @@ jobs:
             yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-kp256-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mate-pthread-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-halfkp-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-halfkp256-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
