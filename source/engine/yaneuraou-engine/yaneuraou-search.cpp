@@ -258,7 +258,7 @@ void USI::extra_option(USI::OptionsMap & o)
 	o["FV_SCALE"] << Option(16, 1, 128);
 #endif
 
-#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE) && defined(USE_HUMANLIKE_OPTIONS)
 	o["EvalMode"] << Option(Eval::HumanLike::mode_names, Eval::HumanLike::mode_names[0]);
 #endif
 
@@ -279,7 +279,7 @@ void USI::extra_option(USI::OptionsMap & o)
 	o["GreedyKingBlindProb"]      << Option(0, 0, 100);
 #endif
 
-#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
+#if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE) && defined(USE_HUMANLIKE_OPTIONS)
 	o["MobilityWeightsFile"] << Option("", [](const USI::Option& opt) {
 		const std::string p = (std::string)opt;
 		if (!p.empty()) Eval::HumanLike::load_mobility_weights(p);
