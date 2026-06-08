@@ -52,6 +52,15 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 YO_CLUSTER = OFF
 #YO_CLUSTER = ON
 
+# humanlike personality 系の USI option (ForceCaptureProb, StableKingProb, 各 BlindProb 等)
+# を有効にするか。ON にすると evaluate_nnue.cpp / yaneuraou-search.cpp の対応分岐 +
+# thread.cpp の抽選ロジックが組み込まれ、USI option が露出する。
+# 既定は OFF — 一般用途で目に触れるオプション数を減らしたいので、
+# 人間っぽさが欲しい場合のみ ON にしてビルドする。
+# (NNUE / KIKI / Mobility 系 edition でのみ意味がある。)
+USE_HUMANLIKE_OPTIONS = OFF
+#USE_HUMANLIKE_OPTIONS = ON
+
 
 # ターゲットCPU (target cpu)
 
@@ -594,6 +603,14 @@ ifeq ($(YO_CLUSTER),ON)
 		engine/yo-cluster/ClusterObserver.cpp     \
 		engine/yo-cluster/ClusterStrategy.cpp
 	CPPFLAGS += -DUSE_YO_CLUSTER
+endif
+
+
+# humanlike option を OFF にするときは config.h 側の USE_HUMANLIKE_OPTIONS
+# 自動設定を打ち消すフラグを渡す。ON のときは config.h の既存ロジックに任せて
+# 何もしない (NNUE / Mobility edition で勝手に有効になる)。
+ifeq ($(USE_HUMANLIKE_OPTIONS),OFF)
+	CPPFLAGS += -DDISABLE_HUMANLIKE_OPTIONS
 endif
 
 
