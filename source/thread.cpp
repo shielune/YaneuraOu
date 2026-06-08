@@ -317,35 +317,35 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	auto sfen = pos.sfen();
 
 #if defined(USE_HUMANLIKE_OPTIONS)
-	// ForceCapture (FC / ForceCaptureProbValue): 1 go ごとに 1 回乱数を振り、全スレッド同じ fc_active を共有。
+	// ForceCapture (FC / ForceCaptureProb): 1 go ごとに 1 回乱数を振り、全スレッド同じ fc_active を共有。
 	bool fc_active_this_go = false;
 	{
 		static AsyncPRNG fc_prng;
-		const int fc_value = (int)Options["ForceCaptureProbValue"];
+		const int fc_value = (int)Options["ForceCaptureProb"];
 		fc_active_this_go = (fc_value > 0) && ((int)(fc_prng.rand<u64>() % 100) < fc_value);
 	}
 
-	// StableKing (SK / StableKingProbValue): 同様に 1 go ごとに乱数を振り、全スレッド共有。
+	// StableKing (SK / StableKingProb): 同様に 1 go ごとに乱数を振り、全スレッド共有。
 	bool sk_active_this_go = false;
 	{
 		static AsyncPRNG sk_prng;
-		const int sk_value = (int)Options["StableKingProbValue"];
+		const int sk_value = (int)Options["StableKingProb"];
 		sk_active_this_go = (sk_value > 0) && ((int)(sk_prng.rand<u64>() % 100) < sk_value);
 	}
 
-	// GreedyKing (GK / GreedyKingProbValue): 1 go ごとに 1 回乱数を振り、全スレッド同じ gk_active を共有。
+	// GreedyKing (GK / GreedyKingProb): 1 go ごとに 1 回乱数を振り、全スレッド同じ gk_active を共有。
 	bool gk_active_this_go = false;
 	{
 		static AsyncPRNG gk_prng;
-		const int gk_value = (int)Options["GreedyKingProbValue"];
+		const int gk_value = (int)Options["GreedyKingProb"];
 		gk_active_this_go = (gk_value > 0) && ((int)(gk_prng.rand<u64>() % 100) < gk_value);
 	}
 
-	// GreedyMove (GM / GreedyMoveProbValue): 同様に 1 go ごとに乱数を振り、全スレッド共有。
+	// GreedyMove (GM / GreedyMoveProb): 同様に 1 go ごとに乱数を振り、全スレッド共有。
 	bool gm_active_this_go = false;
 	{
 		static AsyncPRNG gm_prng;
-		const int gm_value = (int)Options["GreedyMoveProbValue"];
+		const int gm_value = (int)Options["GreedyMoveProb"];
 		gm_active_this_go = (gm_value > 0) && ((int)(gm_prng.rand<u64>() % 100) < gm_value);
 	}
 
@@ -353,7 +353,7 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	bool ns_active_this_go = false;
 	{
 		static AsyncPRNG ns_prng;
-		const int ns_value = (int)Options["NoSacrificeProbValue"];
+		const int ns_value = (int)Options["NoSacrificeProb"];
 		ns_active_this_go = (ns_value > 0) && ((int)(ns_prng.rand<u64>() % 100) < ns_value);
 	}
 
@@ -361,7 +361,7 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	bool nms_active_this_go = false;
 	{
 		static AsyncPRNG nms_prng;
-		const int nms_value = (int)Options["NoMateSacrificeProbValue"];
+		const int nms_value = (int)Options["NoMateSacrificeProb"];
 		nms_active_this_go = (nms_value > 0) && ((int)(nms_prng.rand<u64>() % 100) < nms_value);
 	}
 
@@ -372,10 +372,10 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	bool gk_blind_this_go  = false;
 	{
 		static AsyncPRNG fc_blind_prng, ns_blind_prng, nms_blind_prng, gk_blind_prng;
-		const int fc_b  = (int)Options["FCBlindProbValue"];
-		const int ns_b  = (int)Options["NSBlindProbValue"];
-		const int nms_b = (int)Options["NMSBlindProbValue"];
-		const int gk_b  = (int)Options["GKBlindProbValue"];
+		const int fc_b  = (int)Options["ForceCaptureBlindProb"];
+		const int ns_b  = (int)Options["NoSacrificeBlindProb"];
+		const int nms_b = (int)Options["NoMateSacrificeBlindProb"];
+		const int gk_b  = (int)Options["GreedyKingBlindProb"];
 		fc_blind_this_go  = (fc_b  > 0) && ((int)(fc_blind_prng.rand<u64>()  % 100) < fc_b);
 		ns_blind_this_go  = (ns_b  > 0) && ((int)(ns_blind_prng.rand<u64>()  % 100) < ns_b);
 		nms_blind_this_go = (nms_b > 0) && ((int)(nms_blind_prng.rand<u64>() % 100) < nms_b);
