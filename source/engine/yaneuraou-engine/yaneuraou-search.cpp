@@ -263,20 +263,20 @@ void USI::extra_option(USI::OptionsMap & o)
 #endif
 
 #if defined(USE_HUMANLIKE_OPTIONS)
-	o["ForceCaptureProbValue"] << Option(0, 0, 100);
-	o["StableKingProbValue"]   << Option(0, 0, 100);
-	o["RookFile"]              << Option(0, 0, 9);
-	o["PinRookLimitCp"]        << Option(500, 0, 3000);
-	o["HoardLast"]             << Option(false);
-	o["GreedyKingProbValue"]   << Option(0, 0, 100);
-	o["GreedyMoveProbValue"]   << Option(0, 0, 100);
-	o["NoSacrificeProbValue"]  << Option(0, 0, 100);
-	o["NoMateSacrificeProbValue"] << Option(0, 0, 100);
+	o["ForceCaptureProb"]         << Option(0, 0, 100);
+	o["StableKingProb"]           << Option(0, 0, 100);
+	o["RookFile"]                 << Option(0, 0, 9);
+	o["PinRookLimitCp"]           << Option(500, 0, 3000);
+	o["HoardLast"]                << Option(false);
+	o["GreedyKingProb"]           << Option(0, 0, 100);
+	o["GreedyMoveProb"]           << Option(0, 0, 100);
+	o["NoSacrificeProb"]          << Option(0, 0, 100);
+	o["NoMateSacrificeProb"]      << Option(0, 0, 100);
 
-	o["FCBlindProbValue"]  << Option(0, 0, 100);
-	o["NSBlindProbValue"]  << Option(0, 0, 100);
-	o["NMSBlindProbValue"] << Option(0, 0, 100);
-	o["GKBlindProbValue"]  << Option(0, 0, 100);
+	o["ForceCaptureBlindProb"]    << Option(0, 0, 100);
+	o["NoSacrificeBlindProb"]     << Option(0, 0, 100);
+	o["NoMateSacrificeBlindProb"] << Option(0, 0, 100);
+	o["GreedyKingBlindProb"]      << Option(0, 0, 100);
 #endif
 
 #if defined(EVAL_NNUE) && defined(USE_PIECE_VALUE)
