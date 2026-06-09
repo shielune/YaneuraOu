@@ -1,7 +1,7 @@
 {
-  "name": "@ultemica/yaneuraou-wasm-cfworkers",
+  "name": "@ultemica/yaneuraou-wasm-kp256-cfworkers-hlsl",
   "version": "8.50.0",
-  "description": "YaneuraOu shogi engine for Cloudflare Workers (Wasm, no embedded eval)",
+  "description": "YaneuraOu shogi engine for Cloudflare Workers (Wasm, no embedded eval, with HumanLike SkillLevel personality options)",
   "license": "GPL-3.0",
   "type": "module",
   "main": "./dist/index.js",
