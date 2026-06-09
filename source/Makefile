@@ -434,6 +434,10 @@ endif
 
 ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MATERIAL)
 	SOURCES  +=                                                                \
+		eval/humanlike/humanlike_eval.cpp                                      \
+		eval/humanlike/mobility_dump.cpp                                       \
+		eval/humanlike/kpl_dump.cpp                                            \
+		eval/humanlike/halfkpl_dump.cpp                                        \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
 
 	CPPFLAGS += -DMATERIAL_LEVEL=$(MATERIAL_LEVEL)

@@ -88,6 +88,65 @@ jobs:
             # Mobility (KIKI) 評価関数。重みは mobility_weights_embedded.cpp に焼き込み済み。
             extra_make_args: ""
 
+          # HumanLike SkillLevel (hlsl) variants — humanlike personality USI options
+          # (ForceCaptureProb / StableKingProb / *BlindProb 等) を有効化したビルド。
+          # 各 OFF 版と同じ edition / memory / export name で、USE_HUMANLIKE_OPTIONS=ON
+          # を make に渡すだけの差分。
+          - name: cfworkers-hlsl
+            dir: yaneuraou-wasm-cfworkers-hlsl
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+          - name: pthread-kp256-hlsl
+            dir: yaneuraou-wasm-pthread-kp256-hlsl
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web,worker
+            pthread: 1
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+          - name: pthread-halfkp256-hlsl
+            dir: yaneuraou-wasm-pthread-halfkp256-hlsl
+            edition: YANEURAOU_ENGINE_NNUE
+            export_name: YaneuraOu_HalfKP256
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+          - name: pthread-halfkp768-hlsl
+            dir: yaneuraou-wasm-pthread-halfkp768-hlsl
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            export_name: YaneuraOu_HalfKP768
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+          - name: material-cfworkers-hlsl
+            dir: yaneuraou-wasm-material-cfworkers-hlsl
+            edition: YANEURAOU_ENGINE_MATERIAL
+            export_name: YaneuraOu_Material
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            extra_make_args: "MATERIAL_LEVEL=1 USE_HUMANLIKE_OPTIONS=ON"
+          - name: mobility-cfworkers-hlsl
+            dir: yaneuraou-wasm-mobility-cfworkers-hlsl
+            edition: YANEURAOU_ENGINE_KIKI
+            export_name: YaneuraOu_Mobility
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -166,7 +225,7 @@ jobs:
 
       - name: Stage each package + compile loader + create tar.gz
         run: |
-          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768 yaneuraou-wasm-material-cfworkers yaneuraou-wasm-mobility-cfworkers; do
+          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768 yaneuraou-wasm-material-cfworkers yaneuraou-wasm-mobility-cfworkers yaneuraou-wasm-cfworkers-hlsl yaneuraou-wasm-pthread-kp256-hlsl yaneuraou-wasm-pthread-halfkp256-hlsl yaneuraou-wasm-pthread-halfkp768-hlsl yaneuraou-wasm-material-cfworkers-hlsl yaneuraou-wasm-mobility-cfworkers-hlsl; do
             mkdir -p "$d/dist"
             cp -R "download/${d}-dist/." "$d/dist/"
             (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
@@ -195,9 +254,11 @@ jobs:
           body: |
             YaneuraOu shogi engine — WebAssembly builds.
 
-            Eight npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
+            Fourteen npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
 
             ## Packages
+
+            ### Default (humanlike OFF)
 
             | Package | Engine | Eval data | Threading | Initial / Max memory | Target |
             |---|---|---|---|---|---|
@@ -209,6 +270,21 @@ jobs:
             | `@ultemica/yaneuraou-wasm-mate-pthread` | Mate (DfPn) | none | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
             | `@ultemica/yaneuraou-wasm-pthread-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | external (~62 MB) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
             | `@ultemica/yaneuraou-wasm-pthread-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | external (数十 MB) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
+
+            ### HumanLike SkillLevel (hlsl) variants
+
+            Same six engine-bearing variants above (NNUE 4 + Material + Mobility) but built with `USE_HUMANLIKE_OPTIONS=ON`, exposing the humanlike personality USI options (`ForceCaptureProb`, `StableKingProb`, `*BlindProb`, etc.) for skill-level tuning / personality emulation.
+
+            | Package | Notes |
+            |---|---|
+            | `@ultemica/yaneuraou-wasm-cfworkers-hlsl` | KP256 cfworkers + humanlike |
+            | `@ultemica/yaneuraou-wasm-material-cfworkers-hlsl` | Material Lv1 cfworkers + humanlike |
+            | `@ultemica/yaneuraou-wasm-mobility-cfworkers-hlsl` | Mobility cfworkers + humanlike |
+            | `@ultemica/yaneuraou-wasm-pthread-kp256-hlsl` | KP256 pthread + humanlike |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp256-hlsl` | HalfKP256 pthread + humanlike |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp768-hlsl` | HalfKP768 pthread + humanlike |
+
+            > Mate engine variants are not provided in -hlsl form because humanlike options are search-time personality filters and have no effect on the DfPn mate solver.
 
             > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget). Material / Mobility variants ship an embedded evaluator and need no external weights.
 
@@ -246,3 +322,9 @@ jobs:
             yaneuraou-wasm-pthread-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-material-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mobility-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-kp256-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-halfkp256-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-pthread-halfkp768-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-material-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-mobility-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
