@@ -19,8 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - name: cfworkers
-            dir: yaneuraou-wasm-cfworkers
+          - name: kp256-cfworkers
+            dir: yaneuraou-wasm-kp256-cfworkers
             edition: YANEURAOU_ENGINE_NNUE_KP256
             export_name: YaneuraOu_K_P
             environment: web
@@ -92,8 +92,8 @@ jobs:
           # (ForceCaptureProb / StableKingProb / *BlindProb 等) を有効化したビルド。
           # 各 OFF 版と同じ edition / memory / export name で、USE_HUMANLIKE_OPTIONS=ON
           # を make に渡すだけの差分。
-          - name: cfworkers-hlsl
-            dir: yaneuraou-wasm-cfworkers-hlsl
+          - name: kp256-cfworkers-hlsl
+            dir: yaneuraou-wasm-kp256-cfworkers-hlsl
             edition: YANEURAOU_ENGINE_NNUE_KP256
             export_name: YaneuraOu_K_P
             environment: web
@@ -225,7 +225,7 @@ jobs:
 
       - name: Stage each package + compile loader + create tar.gz
         run: |
-          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768 yaneuraou-wasm-material-cfworkers yaneuraou-wasm-mobility-cfworkers yaneuraou-wasm-cfworkers-hlsl yaneuraou-wasm-pthread-kp256-hlsl yaneuraou-wasm-pthread-halfkp256-hlsl yaneuraou-wasm-pthread-halfkp768-hlsl yaneuraou-wasm-material-cfworkers-hlsl yaneuraou-wasm-mobility-cfworkers-hlsl; do
+          for d in yaneuraou-wasm-kp256-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768 yaneuraou-wasm-material-cfworkers yaneuraou-wasm-mobility-cfworkers yaneuraou-wasm-kp256-cfworkers-hlsl yaneuraou-wasm-pthread-kp256-hlsl yaneuraou-wasm-pthread-halfkp256-hlsl yaneuraou-wasm-pthread-halfkp768-hlsl yaneuraou-wasm-material-cfworkers-hlsl yaneuraou-wasm-mobility-cfworkers-hlsl; do
             mkdir -p "$d/dist"
             cp -R "download/${d}-dist/." "$d/dist/"
             (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
@@ -262,7 +262,7 @@ jobs:
 
             | Package | Engine | Eval data | Threading | Initial / Max memory | Target |
             |---|---|---|---|---|---|
-            | `@ultemica/yaneuraou-wasm-cfworkers` | NNUE KP256 (Suishopetite) | external (~873 KB) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-kp256-cfworkers` | NNUE KP256 (Suishopetite) | external (~873 KB) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
             | `@ultemica/yaneuraou-wasm-mate-cfworkers` | Mate (DfPn) | none | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
             | `@ultemica/yaneuraou-wasm-material-cfworkers` | Material Lv1 (handcrafted) | **embedded** | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
             | `@ultemica/yaneuraou-wasm-mobility-cfworkers` | Mobility / KIKI (164-dim learned linear) | **embedded** | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
@@ -277,7 +277,7 @@ jobs:
 
             | Package | Notes |
             |---|---|
-            | `@ultemica/yaneuraou-wasm-cfworkers-hlsl` | KP256 cfworkers + humanlike |
+            | `@ultemica/yaneuraou-wasm-kp256-cfworkers-hlsl` | KP256 cfworkers + humanlike |
             | `@ultemica/yaneuraou-wasm-material-cfworkers-hlsl` | Material Lv1 cfworkers + humanlike |
             | `@ultemica/yaneuraou-wasm-mobility-cfworkers-hlsl` | Mobility cfworkers + humanlike |
             | `@ultemica/yaneuraou-wasm-pthread-kp256-hlsl` | KP256 pthread + humanlike |
@@ -314,7 +314,7 @@ jobs:
 
             > 700T-shock (32 MB) は cfworkers の 128 MB heap だと OOM。cfworkers で book を使う場合は 100T-shock まで。petabook は pthread variant でも heap 圧迫するので注意。
           files: |
-            yaneuraou-wasm-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-kp256-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-kp256-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mate-pthread-v${{ steps.version.outputs.version }}.tar.gz
@@ -322,7 +322,7 @@ jobs:
             yaneuraou-wasm-pthread-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-material-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mobility-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-kp256-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-kp256-hlsl-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-halfkp256-hlsl-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-halfkp768-hlsl-v${{ steps.version.outputs.version }}.tar.gz
