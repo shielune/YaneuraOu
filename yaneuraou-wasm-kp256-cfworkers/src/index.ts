@@ -1,5 +1,5 @@
 /**
- * @ultemica/yaneuraou-wasm-cfworkers
+ * @ultemica/yaneuraou-wasm-kp256-cfworkers
  *
  * YaneuraOu shogi engine for Cloudflare Workers (Wasm).
  *
@@ -21,9 +21,9 @@
  * ## Usage (Cloudflare Workers)
  *
  * ```ts
- * import { createEngine } from "@ultemica/yaneuraou-wasm-cfworkers";
- * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-cfworkers/engine";
- * import wasmBinary from "@ultemica/yaneuraou-wasm-cfworkers/wasm";
+ * import { createEngine } from "@ultemica/yaneuraou-wasm-kp256-cfworkers";
+ * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-kp256-cfworkers/engine";
+ * import wasmBinary from "@ultemica/yaneuraou-wasm-kp256-cfworkers/wasm";
  *
  * const engine = await createEngine({
  *   factory: YaneuraOuFactory,
