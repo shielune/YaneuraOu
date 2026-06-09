@@ -538,7 +538,7 @@ constexpr int MAX_PLY_NUM = 246;
 	// ※ `make USE_HUMANLIKE_OPTIONS=OFF` 等で DISABLE_HUMANLIKE_OPTIONS が渡されたら
 	//    自動有効化を打ち消す。WASM Release などの一般配布で USI option 数を
 	//    増やしたくないとき向け。
-	#if (defined(EVAL_NNUE) || defined(EVAL_MOBILITY)) && defined(USE_PIECE_VALUE) && !defined(DISABLE_HUMANLIKE_OPTIONS)
+	#if (defined(EVAL_NNUE) || defined(EVAL_MOBILITY) || defined(EVAL_MATERIAL)) && defined(USE_PIECE_VALUE) && !defined(DISABLE_HUMANLIKE_OPTIONS)
 		#define USE_HUMANLIKE_OPTIONS
 	#endif
 
