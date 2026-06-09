@@ -67,6 +67,26 @@ jobs:
             pthread: 1
             initial_memory: 268435456
             maximum_memory: 2147483648
+          - name: material-cfworkers
+            dir: yaneuraou-wasm-material-cfworkers
+            edition: YANEURAOU_ENGINE_MATERIAL
+            export_name: YaneuraOu_Material
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            # 駒得のみ評価 (Lv1)。eval は同梱不要 (handcrafted)。
+            extra_make_args: "MATERIAL_LEVEL=1"
+          - name: mobility-cfworkers
+            dir: yaneuraou-wasm-mobility-cfworkers
+            edition: YANEURAOU_ENGINE_KIKI
+            export_name: YaneuraOu_Mobility
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            # Mobility (KIKI) 評価関数。重みは mobility_weights_embedded.cpp に焼き込み済み。
+            extra_make_args: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +117,8 @@ jobs:
               EM_INITIAL_MEMORY_SIZE=${{ matrix.package.initial_memory }} \
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
               EM_STACK_SIZE=2097152 \
-              EM_CLOSURE=0
+              EM_CLOSURE=0 \
+              ${{ matrix.package.extra_make_args }}
 
       - name: verify and compress
         run: |
@@ -145,7 +166,7 @@ jobs:
 
       - name: Stage each package + compile loader + create tar.gz
         run: |
-          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768; do
+          for d in yaneuraou-wasm-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768 yaneuraou-wasm-material-cfworkers yaneuraou-wasm-mobility-cfworkers; do
             mkdir -p "$d/dist"
             cp -R "download/${d}-dist/." "$d/dist/"
             (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
@@ -174,20 +195,22 @@ jobs:
           body: |
             YaneuraOu shogi engine — WebAssembly builds.
 
-            Six npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
+            Eight npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
 
             ## Packages
 
-            | Package | Engine | Threading | Initial / Max memory | Target |
-            |---|---|---|---|---|
-            | `@ultemica/yaneuraou-wasm-cfworkers` | NNUE KP256 | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
-            | `@ultemica/yaneuraou-wasm-mate-cfworkers` | Mate (DfPn) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
-            | `@ultemica/yaneuraou-wasm-pthread-kp256` | NNUE KP256 | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-mate-pthread` | Mate (DfPn) | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
+            | Package | Engine | Eval data | Threading | Initial / Max memory | Target |
+            |---|---|---|---|---|---|
+            | `@ultemica/yaneuraou-wasm-cfworkers` | NNUE KP256 (Suishopetite) | external (~873 KB) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-mate-cfworkers` | Mate (DfPn) | none | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-material-cfworkers` | Material Lv1 (handcrafted) | **embedded** | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-mobility-cfworkers` | Mobility / KIKI (164-dim learned linear) | **embedded** | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
+            | `@ultemica/yaneuraou-wasm-pthread-kp256` | NNUE KP256 (Suishopetite) | external (~873 KB) | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-mate-pthread` | Mate (DfPn) | none | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | external (~62 MB) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
+            | `@ultemica/yaneuraou-wasm-pthread-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | external (数十 MB) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
 
-            > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget).
+            > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget). Material / Mobility variants ship an embedded evaluator and need no external weights.
 
             ## Required: NNUE eval file (NNUE builds only)
 
@@ -221,3 +244,5 @@ jobs:
             yaneuraou-wasm-mate-pthread-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-halfkp256-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-pthread-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-material-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-mobility-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
