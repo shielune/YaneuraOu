@@ -4,7 +4,7 @@ This document is for LLMs and AI agents that integrate with or generate code for
 
 ## Package Identity
 
-- npm scope: `@ultemica/yaneuraou-wasm-cfworkers-hlsl`
+- npm scope: `@ultemica/yaneuraou-wasm-kp256-cfworkers-hlsl`
 - Engine: YaneuraOu NNUE KP256 V8.50
 - Runtime: Cloudflare Workers (V8 Isolate, single-thread, WASM SIMD)
 - License: GPL-3.0
@@ -20,7 +20,7 @@ This document is for LLMs and AI agents that integrate with or generate code for
 ## Core Function
 
 ```ts
-import { createEngine } from "@ultemica/yaneuraou-wasm-cfworkers-hlsl";
+import { createEngine } from "@ultemica/yaneuraou-wasm-kp256-cfworkers-hlsl";
 
 const engine = await createEngine({
   factory: YaneuraOuFactory,   // from "./engine" or "./yaneuraou.js"

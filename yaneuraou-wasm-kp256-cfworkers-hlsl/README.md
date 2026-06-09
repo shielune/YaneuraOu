@@ -1,8 +1,10 @@
-# @ultemica/yaneuraou-wasm-cfworkers
+# @ultemica/yaneuraou-wasm-kp256-cfworkers-hlsl
 
 Cloudflare Workers 上で動作するやねうら王 (YaneuraOu) 将棋エンジンの WASM パッケージ。
 
 NNUE 評価関数 (nn.bin) と定跡ファイルはバイナリに埋め込まず、実行時に外部から読み込む。
+
+> **このパッケージは HumanLike SkillLevel (hlsl) 有効版です。** USE_HUMANLIKE_OPTIONS=ON でビルドされており、`ForceCaptureProb` / `StableKingProb` / `*BlindProb` 等の humanlike personality USI option が利用可能。
 
 ## 仕様
 
