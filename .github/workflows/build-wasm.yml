@@ -27,6 +27,9 @@ jobs:
             pthread: 0
             initial_memory: 67108864
             maximum_memory: 134217728
+            category: cfworkers
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
           - name: mate-cfworkers
             dir: yaneuraou-wasm-mate-cfworkers
             edition: YANEURAOU_MATE_ENGINE
@@ -35,6 +38,9 @@ jobs:
             pthread: 0
             initial_memory: 67108864
             maximum_memory: 134217728
+            category: cfworkers
+            engine_label: "Mate (DfPn)"
+            eval_note: "none"
           - name: pthread-kp256
             dir: yaneuraou-wasm-pthread-kp256
             edition: YANEURAOU_ENGINE_NNUE_KP256
@@ -43,6 +49,9 @@ jobs:
             pthread: 1
             initial_memory: 134217728
             maximum_memory: 1073741824
+            category: pthread
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
           - name: mate-pthread
             dir: yaneuraou-wasm-mate-pthread
             edition: YANEURAOU_MATE_ENGINE
@@ -51,6 +60,9 @@ jobs:
             pthread: 1
             initial_memory: 134217728
             maximum_memory: 1073741824
+            category: pthread
+            engine_label: "Mate (DfPn)"
+            eval_note: "none"
           - name: pthread-halfkp256
             dir: yaneuraou-wasm-pthread-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
@@ -59,6 +71,9 @@ jobs:
             pthread: 1
             initial_memory: 268435456
             maximum_memory: 2147483648
+            category: pthread
+            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            eval_note: "external (~62 MB)"
           - name: pthread-halfkp768
             dir: yaneuraou-wasm-pthread-halfkp768
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
@@ -67,6 +82,9 @@ jobs:
             pthread: 1
             initial_memory: 268435456
             maximum_memory: 2147483648
+            category: pthread
+            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            eval_note: "external (数十 MB)"
           - name: material-cfworkers
             dir: yaneuraou-wasm-material-cfworkers
             edition: YANEURAOU_ENGINE_MATERIAL
@@ -77,6 +95,9 @@ jobs:
             maximum_memory: 134217728
             # 駒得のみ評価 (Lv1)。eval は同梱不要 (handcrafted)。
             extra_make_args: "MATERIAL_LEVEL=1"
+            category: cfworkers
+            engine_label: "Material Lv1 (handcrafted)"
+            eval_note: "**embedded**"
           - name: mobility-cfworkers
             dir: yaneuraou-wasm-mobility-cfworkers
             edition: YANEURAOU_ENGINE_KIKI
@@ -87,6 +108,9 @@ jobs:
             maximum_memory: 134217728
             # Mobility (KIKI) 評価関数。重みは mobility_weights_embedded.cpp に焼き込み済み。
             extra_make_args: ""
+            category: cfworkers
+            engine_label: "Mobility / KIKI (164-dim learned linear)"
+            eval_note: "**embedded**"
 
           # HumanLike SkillLevel (hlsl) variants — humanlike personality USI options
           # (ForceCaptureProb / StableKingProb / *BlindProb 等) を有効化したビルド。
@@ -101,6 +125,9 @@ jobs:
             initial_memory: 67108864
             maximum_memory: 134217728
             extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: cfworkers-hlsl
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
           - name: pthread-kp256-hlsl
             dir: yaneuraou-wasm-pthread-kp256-hlsl
             edition: YANEURAOU_ENGINE_NNUE_KP256
@@ -110,6 +137,9 @@ jobs:
             initial_memory: 134217728
             maximum_memory: 1073741824
             extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: pthread-hlsl
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
           - name: pthread-halfkp256-hlsl
             dir: yaneuraou-wasm-pthread-halfkp256-hlsl
             edition: YANEURAOU_ENGINE_NNUE
@@ -119,6 +149,9 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 2147483648
             extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: pthread-hlsl
+            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            eval_note: "external (~62 MB)"
           - name: pthread-halfkp768-hlsl
             dir: yaneuraou-wasm-pthread-halfkp768-hlsl
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
@@ -128,6 +161,9 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 2147483648
             extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: pthread-hlsl
+            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            eval_note: "external (数十 MB)"
           - name: material-cfworkers-hlsl
             dir: yaneuraou-wasm-material-cfworkers-hlsl
             edition: YANEURAOU_ENGINE_MATERIAL
@@ -137,6 +173,9 @@ jobs:
             initial_memory: 67108864
             maximum_memory: 134217728
             extra_make_args: "MATERIAL_LEVEL=1 USE_HUMANLIKE_OPTIONS=ON"
+            category: cfworkers-hlsl
+            engine_label: "Material Lv1 (handcrafted)"
+            eval_note: "**embedded**"
           - name: mobility-cfworkers-hlsl
             dir: yaneuraou-wasm-mobility-cfworkers-hlsl
             edition: YANEURAOU_ENGINE_KIKI
@@ -146,6 +185,9 @@ jobs:
             initial_memory: 67108864
             maximum_memory: 134217728
             extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: cfworkers-hlsl
+            engine_label: "Mobility / KIKI (164-dim learned linear)"
+            eval_note: "**embedded**"
 
           # Node.js variants — built with EM_ENVIRONMENT=node and
           # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
@@ -163,6 +205,9 @@ jobs:
             emsdk_version: "3.1.43"
             initial_memory: 134217728
             maximum_memory: 1073741824
+            category: node
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
           - name: node-mate
             dir: yaneuraou-wasm-node-mate
             edition: YANEURAOU_MATE_ENGINE
@@ -173,6 +218,9 @@ jobs:
             emsdk_version: "3.1.43"
             initial_memory: 134217728
             maximum_memory: 1073741824
+            category: node
+            engine_label: "Mate (DfPn)"
+            eval_note: "none"
           - name: node-halfkp256
             dir: yaneuraou-wasm-node-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
@@ -183,6 +231,9 @@ jobs:
             emsdk_version: "3.1.43"
             initial_memory: 268435456
             maximum_memory: 2147483648
+            category: node
+            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            eval_note: "external (~62 MB)"
           - name: node-halfkp768
             dir: yaneuraou-wasm-node-halfkp768
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
@@ -193,6 +244,9 @@ jobs:
             emsdk_version: "3.1.43"
             initial_memory: 268435456
             maximum_memory: 2147483648
+            category: node
+            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            eval_note: "external (数十 MB)"
           - name: node-material
             dir: yaneuraou-wasm-node-material
             edition: YANEURAOU_ENGINE_MATERIAL
@@ -204,6 +258,9 @@ jobs:
             initial_memory: 134217728
             maximum_memory: 1073741824
             extra_make_args: "MATERIAL_LEVEL=1"
+            category: node
+            engine_label: "Material Lv1 (handcrafted)"
+            eval_note: "**embedded**"
           - name: node-mobility
             dir: yaneuraou-wasm-node-mobility
             edition: YANEURAOU_ENGINE_KIKI
@@ -214,6 +271,9 @@ jobs:
             emsdk_version: "3.1.43"
             initial_memory: 134217728
             maximum_memory: 1073741824
+            category: node
+            engine_label: "Mobility / KIKI (164-dim learned linear)"
+            eval_note: "**embedded**"
 
     steps:
       - uses: actions/checkout@v4
@@ -305,36 +365,37 @@ jobs:
           pattern: yaneuraou-wasm-*-dist
           path: download/
 
-      - name: Stage each package + compile loader + create tar.gz
+      - name: Parse matrix as SoT
+        id: matrix
         run: |
-          for d in \
-            yaneuraou-wasm-kp256-cfworkers \
-            yaneuraou-wasm-mate-cfworkers \
-            yaneuraou-wasm-pthread-kp256 \
-            yaneuraou-wasm-mate-pthread \
-            yaneuraou-wasm-pthread-halfkp256 \
-            yaneuraou-wasm-pthread-halfkp768 \
-            yaneuraou-wasm-material-cfworkers \
-            yaneuraou-wasm-mobility-cfworkers \
-            yaneuraou-wasm-kp256-cfworkers-hlsl \
-            yaneuraou-wasm-pthread-kp256-hlsl \
-            yaneuraou-wasm-pthread-halfkp256-hlsl \
-            yaneuraou-wasm-pthread-halfkp768-hlsl \
-            yaneuraou-wasm-material-cfworkers-hlsl \
-            yaneuraou-wasm-mobility-cfworkers-hlsl \
-            yaneuraou-wasm-node-kp256 \
-            yaneuraou-wasm-node-mate \
-            yaneuraou-wasm-node-halfkp256 \
-            yaneuraou-wasm-node-halfkp768 \
-            yaneuraou-wasm-node-material \
-            yaneuraou-wasm-node-mobility \
-          ; do
+          # The build-wasm matrix is the single source of truth for what
+          # packages exist. Surface its dirs to the subsequent shell + the
+          # action-gh-release step so we don't repeat the list inline.
+          python3 - <<'PY'
+          import json, os, yaml
+          wf = yaml.safe_load(open('.github/workflows/build-wasm.yml'))
+          pkgs = wf['jobs']['build-wasm']['strategy']['matrix']['package']
+          dirs = [p['dir'] for p in pkgs]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('dirs<<EOF\n' + '\n'.join(dirs) + '\nEOF\n')
+          PY
+
+      - name: Stage each package + compile loader + create tar.gz
+        env:
+          PKG_DIRS: ${{ steps.matrix.outputs.dirs }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Drive directly from the matrix dirs piped through GITHUB_OUTPUT.
+          # Adding/removing a package now means editing the matrix only —
+          # this loop expands automatically.
+          while IFS= read -r d; do
+            [ -n "$d" ] || continue
             mkdir -p "$d/dist"
             cp -R "download/${d}-dist/." "$d/dist/"
             (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
             bun -e "
               const pkg = require('./$d/package.json');
-              pkg.version = '${{ steps.version.outputs.version }}';
+              pkg.version = '${VERSION}';
               require('fs').writeFileSync('$d/package.json', JSON.stringify(pkg, null, 2) + '\n');
             "
             # Node variants ship the 3.1.43 classic pthread worker script
@@ -348,7 +409,7 @@ jobs:
                 extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
                 ;;
             esac
-            tar czf "${d}-v${{ steps.version.outputs.version }}.tar.gz" \
+            tar czf "${d}-v${VERSION}.tar.gz" \
               "$d/package.json" \
               "$d/README.md" \
               "$d/SPEC.md" \
@@ -358,149 +419,30 @@ jobs:
               "$d/dist/yaneuraou.wasm" \
               "$d/dist/yaneuraou.wasm.br" \
               $extra
-          done
+          done <<EOF
+          $PKG_DIRS
+          EOF
           ls -lh *.tar.gz
+
+      - name: Generate release body from matrix
+        run: |
+          # Render the Markdown body from the matrix + static prose.
+          # Adding/removing a package updates the tables and the "Twenty"
+          # /"Six" literals automatically. See script for details.
+          python3 script/generate_release_body.py \
+            --workflow .github/workflows/build-wasm.yml \
+            --version "${{ steps.version.outputs.version }}" \
+            --output release_body.md
+          echo "--- release body preview ---"
+          head -20 release_body.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "yaneuraou-wasm ${{ steps.version.outputs.version }}"
-          body: |
-            YaneuraOu shogi engine — WebAssembly builds.
-
-            **What's new in this release**: 6 brand-new **Node.js-targeted** packages (`@ultemica/yaneuraou-wasm-node-*`) join the existing 14. Total: **20 npm-shaped packages**, each shipped as its own `tar.gz` asset on this page.
-
-            - `kp256` / `mate` / `halfkp256` / `halfkp768` / `material` / `mobility`, all multi-threaded via `node:worker_threads`.
-            - Built with **emscripten 3.1.43** — the only toolchain currently verified to drive a pthread-backed YaneuraOu cleanly under Node (newer emscriptens stall, see `docs/wasm_client_usage.md` for the matrix).
-            - Drop-in `createEngine()` loader: zero boilerplate on the consumer side. The package wraps the `node:worker_threads` plumbing, `Worker` polyfill, web-globals shim, and `noInitialRun` + `callMain` bootstrap internally.
-            - Verified locally on Node 26 with KP256 + suishopetite — depth 24 in ~3.4 s @ threads=1 (≈0.84 M nps), ~6.8 s @ threads=4 (≈3.32 M nps, ~4× linear scale).
-
-            ---
-
-            Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`). Node variants additionally ship `dist/yaneuraou.worker.js` (the emscripten 3.1.43 classic pthread worker) and `dist/worker_shim.{js,d.ts}` (the `worker_threads`-side glue the loader uses to bridge `.worker.js` into a fake web-worker scope).
-
-            ## Packages
-
-            ### Default (humanlike OFF)
-
-            | Package | Engine | Eval data | Threading | Initial / Max memory | Target |
-            |---|---|---|---|---|---|
-            | `@ultemica/yaneuraou-wasm-kp256-cfworkers` | NNUE KP256 (Suishopetite) | external (~873 KB) | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
-            | `@ultemica/yaneuraou-wasm-mate-cfworkers` | Mate (DfPn) | none | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
-            | `@ultemica/yaneuraou-wasm-material-cfworkers` | Material Lv1 (handcrafted) | **embedded** | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
-            | `@ultemica/yaneuraou-wasm-mobility-cfworkers` | Mobility / KIKI (164-dim learned linear) | **embedded** | single-thread | 64 MB / 128 MB | Cloudflare Workers, edge runtimes |
-            | `@ultemica/yaneuraou-wasm-pthread-kp256` | NNUE KP256 (Suishopetite) | external (~873 KB) | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-mate-pthread` | Mate (DfPn) | none | pthread | 128 MB / 1 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | external (~62 MB) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | external (数十 MB) | pthread | 256 MB / 2 GB | Browser (COOP/COEP required) |
-
-            ### HumanLike SkillLevel (hlsl) variants
-
-            Same six engine-bearing variants above (NNUE 4 + Material + Mobility) but built with `USE_HUMANLIKE_OPTIONS=ON`, exposing the humanlike personality USI options (`ForceCaptureProb`, `StableKingProb`, `*BlindProb`, etc.) for skill-level tuning / personality emulation.
-
-            | Package | Notes |
-            |---|---|
-            | `@ultemica/yaneuraou-wasm-kp256-cfworkers-hlsl` | KP256 cfworkers + humanlike |
-            | `@ultemica/yaneuraou-wasm-material-cfworkers-hlsl` | Material Lv1 cfworkers + humanlike |
-            | `@ultemica/yaneuraou-wasm-mobility-cfworkers-hlsl` | Mobility cfworkers + humanlike |
-            | `@ultemica/yaneuraou-wasm-pthread-kp256-hlsl` | KP256 pthread + humanlike |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp256-hlsl` | HalfKP256 pthread + humanlike |
-            | `@ultemica/yaneuraou-wasm-pthread-halfkp768-hlsl` | HalfKP768 pthread + humanlike |
-
-            > Mate engine variants are not provided in -hlsl form because humanlike options are search-time personality filters and have no effect on the DfPn mate solver.
-
-            > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget). Material / Mobility variants ship an embedded evaluator and need no external weights.
-
-            ### Node.js variants ✨ new in this release
-
-            Six packages built with `EM_ENVIRONMENT=node`, `EM_PTHREAD=1`, and `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']`. Pinned to **emscripten 3.1.43** — the only toolchain currently verified to drive a multi-threaded YaneuraOu correctly under Node (3.1.44–3.1.73 stall on ESM workers, 3.1.74+ stall on `INCOMING_MODULE_JS_API`; both unresolved). See `docs/wasm_client_usage.md` for the full compatibility matrix.
-
-            | Package | Engine | Eval data | Threading | Initial / Max memory |
-            |---|---|---|---|---|
-            | `@ultemica/yaneuraou-wasm-node-kp256` | NNUE KP256 (Suishopetite) | external (~873 KB) | pthread | 128 MB / 1 GB |
-            | `@ultemica/yaneuraou-wasm-node-mate` | Mate (DfPn) | none | pthread | 128 MB / 1 GB |
-            | `@ultemica/yaneuraou-wasm-node-material` | Material Lv1 (handcrafted) | **embedded** | pthread | 128 MB / 1 GB |
-            | `@ultemica/yaneuraou-wasm-node-mobility` | Mobility / KIKI (164-dim learned linear) | **embedded** | pthread | 128 MB / 1 GB |
-            | `@ultemica/yaneuraou-wasm-node-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | external (~62 MB) | pthread | 256 MB / 2 GB |
-            | `@ultemica/yaneuraou-wasm-node-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | external (数十 MB) | pthread | 256 MB / 2 GB |
-
-            **Quickstart (Node 18+):**
-
-            ```ts
-            import fs from "node:fs/promises";
-            import { createRequire } from "node:module";
-            import { createEngine } from "@ultemica/yaneuraou-wasm-node-kp256";
-            import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-kp256/engine";
-
-            const require = createRequire(import.meta.url);
-            const wasmPath   = require.resolve("@ultemica/yaneuraou-wasm-node-kp256/wasm");
-            const enginePath = require.resolve("@ultemica/yaneuraou-wasm-node-kp256/engine");
-            const wasmBinary = await fs.readFile(wasmPath);
-            const evalBin    = await fs.readFile("./eval/nn.bin"); // suishopetite for KP256
-
-            const engine = await createEngine({
-              factory: YaneuraOuFactory,
-              enginePath,
-              wasmBinary,
-              evalBin,
-              threads: 4,
-              usiHash: 64,
-            });
-
-            const result = await engine.eval({
-              sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
-              byoyomi: 2_000,
-            });
-            console.log(result.bestmove, result.score); // -> "7g7f", { kind: "cp", value: ... }
-            engine.dispose();
-            ```
-
-            > Requires **Node.js 18 or later**. Browsers cannot load these binaries (built with `EM_ENVIRONMENT=node`, not `web,worker`); use the `pthread-*` packages there. Cloudflare Workers / V8 Isolate environments can't host pthread builds at all; use the `*-cfworkers` packages there. Node variants are not shipped in `-hlsl` form in this release.
-
-            ## Required: NNUE eval file (NNUE builds only)
-
-            WASM bundle には評価関数を内蔵していないので、別途 nn.bin を取得して `FS.writeFile` で MEMFS に書いて `EvalDir` USI option で読み込ませる。
-
-            | Eval | Engine | Size | URL |
-            |---|---|---|---|
-            | suisho5 nn.bin | HalfKP_256x2_32_32 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
-            | AobaNNUE nn.bin | HalfKP_768x2_16_64 | 数十 MB | https://github.com/yssaya/AobaNNUE/releases |
-            | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
-
-            > suisho5 / suishopetite は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。AobaNNUE は素の `nn.bin` がそのまま配布されている。
-
-            > KP256 / HalfKP_256x2_32_32 / HalfKP_768x2_16_64 の eval はそれぞれ互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。
-
-            ## Optional: opening book
-
-            `BookDir` / `BookFile` USI option で読み込ませる。
-
-            | Book | 局面数 | Size | URL |
-            |---|---|---|---|
-            | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
-            | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
-            | 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
-
-            > 700T-shock (32 MB) は cfworkers の 128 MB heap だと OOM。cfworkers で book を使う場合は 100T-shock まで。petabook は pthread variant でも heap 圧迫するので注意。
+          body_path: release_body.md
+          # Glob across the matrix-generated tar.gz set — covers however
+          # many packages the matrix produces, no per-name listing needed.
           files: |
-            yaneuraou-wasm-kp256-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-mate-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-kp256-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-mate-pthread-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-halfkp256-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-material-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-mobility-cfworkers-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-kp256-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-kp256-hlsl-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-halfkp256-hlsl-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-pthread-halfkp768-hlsl-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-material-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-mobility-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-node-kp256-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-node-mate-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-node-halfkp256-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-node-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-node-material-v${{ steps.version.outputs.version }}.tar.gz
-            yaneuraou-wasm-node-mobility-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-*-v${{ steps.version.outputs.version }}.tar.gz
