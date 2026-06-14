@@ -369,7 +369,16 @@ jobs:
           body: |
             YaneuraOu shogi engine — WebAssembly builds.
 
-            Twenty npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`). Node variants additionally ship `dist/yaneuraou.worker.js` (emscripten 3.1.43 classic pthread worker).
+            **What's new in this release**: 6 brand-new **Node.js-targeted** packages (`@ultemica/yaneuraou-wasm-node-*`) join the existing 14. Total: **20 npm-shaped packages**, each shipped as its own `tar.gz` asset on this page.
+
+            - `kp256` / `mate` / `halfkp256` / `halfkp768` / `material` / `mobility`, all multi-threaded via `node:worker_threads`.
+            - Built with **emscripten 3.1.43** — the only toolchain currently verified to drive a pthread-backed YaneuraOu cleanly under Node (newer emscriptens stall, see `docs/wasm_client_usage.md` for the matrix).
+            - Drop-in `createEngine()` loader: zero boilerplate on the consumer side. The package wraps the `node:worker_threads` plumbing, `Worker` polyfill, web-globals shim, and `noInitialRun` + `callMain` bootstrap internally.
+            - Verified locally on Node 26 with KP256 + suishopetite — depth 24 in ~3.4 s @ threads=1 (≈0.84 M nps), ~6.8 s @ threads=4 (≈3.32 M nps, ~4× linear scale).
+
+            ---
+
+            Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`). Node variants additionally ship `dist/yaneuraou.worker.js` (the emscripten 3.1.43 classic pthread worker) and `dist/worker_shim.{js,d.ts}` (the `worker_threads`-side glue the loader uses to bridge `.worker.js` into a fake web-worker scope).
 
             ## Packages
 
@@ -403,9 +412,9 @@ jobs:
 
             > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget). Material / Mobility variants ship an embedded evaluator and need no external weights.
 
-            ### Node.js variants
+            ### Node.js variants ✨ new in this release
 
-            Six packages built with `EM_ENVIRONMENT=node` and `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']` so the emscripten runtime drives `node:worker_threads` directly (no Worker polyfill needed). Pinned to **emscripten 3.1.43** — the only toolchain currently confirmed to drive a multi-threaded YaneuraOu correctly under Node (3.1.44–3.1.73 stall on ESM workers, 3.1.74+ stall on `INCOMING_MODULE_JS_API`; both unresolved). See `docs/wasm_client_usage.md` for the compatibility matrix.
+            Six packages built with `EM_ENVIRONMENT=node`, `EM_PTHREAD=1`, and `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']`. Pinned to **emscripten 3.1.43** — the only toolchain currently verified to drive a multi-threaded YaneuraOu correctly under Node (3.1.44–3.1.73 stall on ESM workers, 3.1.74+ stall on `INCOMING_MODULE_JS_API`; both unresolved). See `docs/wasm_client_usage.md` for the full compatibility matrix.
 
             | Package | Engine | Eval data | Threading | Initial / Max memory |
             |---|---|---|---|---|
@@ -416,7 +425,38 @@ jobs:
             | `@ultemica/yaneuraou-wasm-node-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | external (~62 MB) | pthread | 256 MB / 2 GB |
             | `@ultemica/yaneuraou-wasm-node-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | external (数十 MB) | pthread | 256 MB / 2 GB |
 
-            > Requires Node.js 18 or later. Browsers cannot load these binaries (no `EM_ENVIRONMENT=web,worker`); use the pthread / cfworkers variants there. Node variants are NOT shipped in `-hlsl` form yet — open an issue if you need them.
+            **Quickstart (Node 18+):**
+
+            ```ts
+            import fs from "node:fs/promises";
+            import { createRequire } from "node:module";
+            import { createEngine } from "@ultemica/yaneuraou-wasm-node-kp256";
+            import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-kp256/engine";
+
+            const require = createRequire(import.meta.url);
+            const wasmPath   = require.resolve("@ultemica/yaneuraou-wasm-node-kp256/wasm");
+            const enginePath = require.resolve("@ultemica/yaneuraou-wasm-node-kp256/engine");
+            const wasmBinary = await fs.readFile(wasmPath);
+            const evalBin    = await fs.readFile("./eval/nn.bin"); // suishopetite for KP256
+
+            const engine = await createEngine({
+              factory: YaneuraOuFactory,
+              enginePath,
+              wasmBinary,
+              evalBin,
+              threads: 4,
+              usiHash: 64,
+            });
+
+            const result = await engine.eval({
+              sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+              byoyomi: 2_000,
+            });
+            console.log(result.bestmove, result.score); // -> "7g7f", { kind: "cp", value: ... }
+            engine.dispose();
+            ```
+
+            > Requires **Node.js 18 or later**. Browsers cannot load these binaries (built with `EM_ENVIRONMENT=node`, not `web,worker`); use the `pthread-*` packages there. Cloudflare Workers / V8 Isolate environments can't host pthread builds at all; use the `*-cfworkers` packages there. Node variants are not shipped in `-hlsl` form in this release.
 
             ## Required: NNUE eval file (NNUE builds only)
 
