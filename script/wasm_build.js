@@ -73,6 +73,15 @@ const pkgobjs = [
     evalfile: false,
   },
   {
+    name: "mobility",
+    // KIKI edition embeds the 164-dim learned linear weights via
+    // source/eval/kiki/mobility_weights_embedded.cpp — no external nn.bin.
+    edition: "YANEURAOU_ENGINE_KIKI",
+    exportname: "YaneuraOu_Mobility",
+    extra: "EM_INITIAL_MEMORY_SIZE=92274688",
+    evalfile: false,
+  },
+  {
     name: "yaneuraou-mate",
     edition: "YANEURAOU_MATE_ENGINE",
     exportname: "YaneuraOu_MATE",
