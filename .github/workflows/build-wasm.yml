@@ -147,16 +147,91 @@ jobs:
             maximum_memory: 134217728
             extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
 
+          # Node.js variants — built with EM_ENVIRONMENT=node and
+          # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
+          # drive USI manually after a noInitialRun bootstrap. Pinned to
+          # emscripten 3.1.43, the only toolchain currently confirmed to
+          # drive a multi-threaded YaneuraOu correctly under Node — see
+          # docs/wasm_client_usage.md for the compatibility matrix.
+          - name: node-kp256
+            dir: yaneuraou-wasm-node-kp256
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+          - name: node-mate
+            dir: yaneuraou-wasm-node-mate
+            edition: YANEURAOU_MATE_ENGINE
+            export_name: YaneuraOu_MATE
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+          - name: node-halfkp256
+            dir: yaneuraou-wasm-node-halfkp256
+            edition: YANEURAOU_ENGINE_NNUE
+            export_name: YaneuraOu_HalfKP256
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+          - name: node-halfkp768
+            dir: yaneuraou-wasm-node-halfkp768
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            export_name: YaneuraOu_HalfKP768
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+          - name: node-material
+            dir: yaneuraou-wasm-node-material
+            edition: YANEURAOU_ENGINE_MATERIAL
+            export_name: YaneuraOu_Material
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            extra_make_args: "MATERIAL_LEVEL=1"
+          - name: node-mobility
+            dir: yaneuraou-wasm-node-mobility
+            edition: YANEURAOU_ENGINE_KIKI
+            export_name: YaneuraOu_Mobility
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+
     steps:
       - uses: actions/checkout@v4
 
       - name: docker pull
         run: |
-          sudo docker pull emscripten/emsdk:${{ inputs.emsdk_version || '5.0.5' }}
+          # Per-matrix override > workflow_dispatch input > default.
+          # Node variants pin themselves to 3.1.43 via the matrix.
+          EMSDK_VERSION="${{ matrix.package.emsdk_version || inputs.emsdk_version || '5.0.5' }}"
+          sudo docker pull "emscripten/emsdk:${EMSDK_VERSION}"
 
       - name: build wasm (${{ matrix.package.name }})
         run: |
-          EMSDK_VERSION="${{ inputs.emsdk_version || '5.0.5' }}"
+          EMSDK_VERSION="${{ matrix.package.emsdk_version || inputs.emsdk_version || '5.0.5' }}"
+          # Node variants need 'callMain' in EXPORTED_RUNTIME_METHODS so the
+          # loader can trigger main() after a noInitialRun bootstrap. Browser
+          # and cfworkers variants keep the original ['FS','ccall'] default.
+          EXPORTED_RUNTIME_METHODS="${{ matrix.package.exported_runtime_methods || '[''FS'',''ccall'']' }}"
           DIST_DIR="${{ matrix.package.dir }}/dist"
           mkdir -p "$DIST_DIR"
 
@@ -171,7 +246,7 @@ jobs:
               TARGET="../${DIST_DIR}/yaneuraou.js" \
               EM_EXPORT_NAME=${{ matrix.package.export_name }} \
               EM_ENVIRONMENT=${{ matrix.package.environment }} \
-              "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall']" \
+              "EM_EXPORTED_RUNTIME_METHODS=${EXPORTED_RUNTIME_METHODS}" \
               EM_PTHREAD=${{ matrix.package.pthread }} \
               EM_INITIAL_MEMORY_SIZE=${{ matrix.package.initial_memory }} \
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
@@ -187,6 +262,13 @@ jobs:
             brotli -f --best "$f" -o "${f}.br" || true
             gzip  -f --best -k "$f" || true
           done
+          # emscripten 3.1.43 also emits a classic pthread worker script
+          # next to the engine js. Compress it the same way for symmetry
+          # so consumers can serve it gzip/brotli-encoded if they want.
+          if [ -f yaneuraou.worker.js ]; then
+            brotli -f --best yaneuraou.worker.js -o yaneuraou.worker.js.br || true
+            gzip  -f --best -k yaneuraou.worker.js || true
+          fi
           ls -lh
 
       - uses: actions/upload-artifact@v4
@@ -225,7 +307,28 @@ jobs:
 
       - name: Stage each package + compile loader + create tar.gz
         run: |
-          for d in yaneuraou-wasm-kp256-cfworkers yaneuraou-wasm-mate-cfworkers yaneuraou-wasm-pthread-kp256 yaneuraou-wasm-mate-pthread yaneuraou-wasm-pthread-halfkp256 yaneuraou-wasm-pthread-halfkp768 yaneuraou-wasm-material-cfworkers yaneuraou-wasm-mobility-cfworkers yaneuraou-wasm-kp256-cfworkers-hlsl yaneuraou-wasm-pthread-kp256-hlsl yaneuraou-wasm-pthread-halfkp256-hlsl yaneuraou-wasm-pthread-halfkp768-hlsl yaneuraou-wasm-material-cfworkers-hlsl yaneuraou-wasm-mobility-cfworkers-hlsl; do
+          for d in \
+            yaneuraou-wasm-kp256-cfworkers \
+            yaneuraou-wasm-mate-cfworkers \
+            yaneuraou-wasm-pthread-kp256 \
+            yaneuraou-wasm-mate-pthread \
+            yaneuraou-wasm-pthread-halfkp256 \
+            yaneuraou-wasm-pthread-halfkp768 \
+            yaneuraou-wasm-material-cfworkers \
+            yaneuraou-wasm-mobility-cfworkers \
+            yaneuraou-wasm-kp256-cfworkers-hlsl \
+            yaneuraou-wasm-pthread-kp256-hlsl \
+            yaneuraou-wasm-pthread-halfkp256-hlsl \
+            yaneuraou-wasm-pthread-halfkp768-hlsl \
+            yaneuraou-wasm-material-cfworkers-hlsl \
+            yaneuraou-wasm-mobility-cfworkers-hlsl \
+            yaneuraou-wasm-node-kp256 \
+            yaneuraou-wasm-node-mate \
+            yaneuraou-wasm-node-halfkp256 \
+            yaneuraou-wasm-node-halfkp768 \
+            yaneuraou-wasm-node-material \
+            yaneuraou-wasm-node-mobility \
+          ; do
             mkdir -p "$d/dist"
             cp -R "download/${d}-dist/." "$d/dist/"
             (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
@@ -234,6 +337,17 @@ jobs:
               pkg.version = '${{ steps.version.outputs.version }}';
               require('fs').writeFileSync('$d/package.json', JSON.stringify(pkg, null, 2) + '\n');
             "
+            # Node variants ship the 3.1.43 classic pthread worker script
+            # (emscripten loads it via locateFile at runtime) AND the
+            # worker_shim compiled from src/worker_shim.ts (the loader
+            # routes .worker.js through it to bridge node:worker_threads
+            # back to a faked web-worker scope).
+            extra=""
+            case "$d" in
+              yaneuraou-wasm-node-*)
+                extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
+                ;;
+            esac
             tar czf "${d}-v${{ steps.version.outputs.version }}.tar.gz" \
               "$d/package.json" \
               "$d/README.md" \
@@ -242,7 +356,8 @@ jobs:
               "$d/dist/index.d.ts" \
               "$d/dist/yaneuraou.js" \
               "$d/dist/yaneuraou.wasm" \
-              "$d/dist/yaneuraou.wasm.br"
+              "$d/dist/yaneuraou.wasm.br" \
+              $extra
           done
           ls -lh *.tar.gz
 
@@ -254,7 +369,7 @@ jobs:
           body: |
             YaneuraOu shogi engine — WebAssembly builds.
 
-            Fourteen npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`).
+            Twenty npm-shaped packages, each as its own tar.gz. Each archive contains the package's `package.json` (version bumped to this release), `README.md`, `SPEC.md`, the TypeScript loader (`dist/index.js`, `dist/index.d.ts`), and the engine bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`). Node variants additionally ship `dist/yaneuraou.worker.js` (emscripten 3.1.43 classic pthread worker).
 
             ## Packages
 
@@ -287,6 +402,21 @@ jobs:
             > Mate engine variants are not provided in -hlsl form because humanlike options are search-time personality filters and have no effect on the DfPn mate solver.
 
             > Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget). Material / Mobility variants ship an embedded evaluator and need no external weights.
+
+            ### Node.js variants
+
+            Six packages built with `EM_ENVIRONMENT=node` and `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']` so the emscripten runtime drives `node:worker_threads` directly (no Worker polyfill needed). Pinned to **emscripten 3.1.43** — the only toolchain currently confirmed to drive a multi-threaded YaneuraOu correctly under Node (3.1.44–3.1.73 stall on ESM workers, 3.1.74+ stall on `INCOMING_MODULE_JS_API`; both unresolved). See `docs/wasm_client_usage.md` for the compatibility matrix.
+
+            | Package | Engine | Eval data | Threading | Initial / Max memory |
+            |---|---|---|---|---|
+            | `@ultemica/yaneuraou-wasm-node-kp256` | NNUE KP256 (Suishopetite) | external (~873 KB) | pthread | 128 MB / 1 GB |
+            | `@ultemica/yaneuraou-wasm-node-mate` | Mate (DfPn) | none | pthread | 128 MB / 1 GB |
+            | `@ultemica/yaneuraou-wasm-node-material` | Material Lv1 (handcrafted) | **embedded** | pthread | 128 MB / 1 GB |
+            | `@ultemica/yaneuraou-wasm-node-mobility` | Mobility / KIKI (164-dim learned linear) | **embedded** | pthread | 128 MB / 1 GB |
+            | `@ultemica/yaneuraou-wasm-node-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | external (~62 MB) | pthread | 256 MB / 2 GB |
+            | `@ultemica/yaneuraou-wasm-node-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | external (数十 MB) | pthread | 256 MB / 2 GB |
+
+            > Requires Node.js 18 or later. Browsers cannot load these binaries (no `EM_ENVIRONMENT=web,worker`); use the pthread / cfworkers variants there. Node variants are NOT shipped in `-hlsl` form yet — open an issue if you need them.
 
             ## Required: NNUE eval file (NNUE builds only)
 
@@ -328,3 +458,9 @@ jobs:
             yaneuraou-wasm-pthread-halfkp768-hlsl-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-material-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-mobility-cfworkers-hlsl-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-node-kp256-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-node-mate-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-node-halfkp256-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-node-halfkp768-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-node-material-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-node-mobility-v${{ steps.version.outputs.version }}.tar.gz
