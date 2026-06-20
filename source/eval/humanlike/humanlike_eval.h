@@ -44,9 +44,31 @@ Value evaluate(const Position& pos, Mode mode, bool capture_force);
 bool is_free_capture(const Position& pos, Move m);
 
 // MB 用 feature 表現。
-constexpr int NUM_BOARD_FEATURES = 107;
-constexpr int NUM_HAND_FEATURES  = 57;
-constexpr int NUM_FEATURES       = NUM_BOARD_FEATURES + NUM_HAND_FEATURES;
+//
+// MOBILITY_VARIANT で特徴量の拡張軸を選択する (Makefile から -DMOBILITY_VARIANT=N で指定)。
+//   1 (default) : 駒種 × 方向 × 距離                          164 params
+//   2           : + 利き先の駒種 (21種: 空升+先手10+後手10)   164 × 21 = 3,444 params
+//   3           : + 攻撃駒の升 (81)                            164 × 81 = 13,284 params
+//   4           : + 両方 (2+3)                                 164 × 21 × 81 = 278,964 params
+constexpr int NUM_BASE_BOARD   = 107;
+constexpr int NUM_BASE_HAND    = 57;
+constexpr int NUM_BASE         = NUM_BASE_BOARD + NUM_BASE_HAND; // 164
+constexpr int NUM_TARGET_TYPES = 21; // NO_PIECE(空升) + 先手駒10種 + 後手駒10種
+constexpr int NUM_SQUARES      = 81;
+
+// 後方互換用エイリアス
+constexpr int NUM_BOARD_FEATURES = NUM_BASE_BOARD;
+constexpr int NUM_HAND_FEATURES  = NUM_BASE_HAND;
+
+#if MOBILITY_VARIANT == 2
+  constexpr int NUM_FEATURES = NUM_BASE * NUM_TARGET_TYPES;                  // 3,444
+#elif MOBILITY_VARIANT == 3
+  constexpr int NUM_FEATURES = NUM_BASE * NUM_SQUARES;                       // 13,284
+#elif MOBILITY_VARIANT == 4
+  constexpr int NUM_FEATURES = NUM_BASE * NUM_TARGET_TYPES * NUM_SQUARES;    // 278,964
+#else
+  constexpr int NUM_FEATURES = NUM_BASE;                                     // 164
+#endif
 
 // 現在位置の 164 次元 feature ベクトルを feat に書き込む (先手視点 +、後手視点 -)。
 void extract_features(const Position& pos, float* feat);
