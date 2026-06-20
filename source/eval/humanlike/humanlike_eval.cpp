@@ -206,6 +206,58 @@ bool drop_legal_rank(Color c, PieceType pt, Rank r) {
 	return true;
 }
 
+// Piece (0..31) を 0..20 の正規化駒種インデックスに変換する。
+//   0        : NO_PIECE (空升)
+//   1..10    : 先手駒 (B_PAWN=1 .. B_DRAGON=10)
+//   11..20   : 後手駒 (W_PAWN=11 .. W_DRAGON=20)
+// 先手・後手の Piece 値は PIECE_TYPE_NB (= 16) 刻みでオフセットされているため、
+// type_of() で駒種 (1..15) を取り出し、color で先後オフセットを足す。
+inline int normalize_piece(Piece pc) {
+	if (pc == NO_PIECE) return 0;
+	int pt = (int)type_of(pc); // 1..15 (PAWN..DRAGON, PRO_* を含む)
+	// PRO_* (9..15) を基本駒種 (1..8) にまとめる: PIECE_TYPE_NB/2 = 8 を上限として折り返す
+	if (pt > 8) pt -= 8; // PRO_PAWN(9)→1, ..., DRAGON(14)→6, KING(15)→7... ただし HORSE/DRAGON は別
+	// 実際の駒種は PAWN(1)〜DRAGON(14)、KING(15)。10種に収める。
+	// → type_of() の値を 1..10 の範囲に収める素直なマッピング:
+	//   PAWN=1,LANCE=2,KNIGHT=3,SILVER=4,BISHOP=5,ROOK=6,GOLD=7,KING=8,HORSE=9,DRAGON=10
+	//   PRO_PAWN〜PRO_SILVER は GOLD(7) に統一 (盤上特徴量と同じ規則)
+	static const int piece_map[16] = {
+		0,  // NO_PIECE_TYPE (使わない)
+		1,  // PAWN
+		2,  // LANCE
+		3,  // KNIGHT
+		4,  // SILVER
+		5,  // BISHOP
+		6,  // ROOK
+		7,  // GOLD
+		8,  // KING
+		9,  // HORSE
+		10, // DRAGON
+		7,  // PRO_PAWN  → GOLD 扱い
+		7,  // PRO_LANCE → GOLD 扱い
+		7,  // PRO_KNIGHT→ GOLD 扱い
+		7,  // PRO_SILVER→ GOLD 扱い
+		0,  // (unused slot 15)
+	};
+	int base = piece_map[(int)type_of(pc)]; // 1..10
+	return (color_of(pc) == BLACK) ? base : base + 10; // 先手1..10, 後手11..20
+}
+
+// MOBILITY_VARIANT 別の feat[] index 計算。base_idx は g_*_idx_table から得た 0..163 の値。
+// sq は攻撃駒の升 (持ち駒の場合は打ち込み升)。target_pc は利き先の駒。
+inline int feat_index(int base_idx, Square sq, Piece target_pc) {
+#if MOBILITY_VARIANT == 2
+	return base_idx * NUM_TARGET_TYPES + normalize_piece(target_pc);
+#elif MOBILITY_VARIANT == 3
+	return base_idx * NUM_SQUARES + (int)sq;
+#elif MOBILITY_VARIANT == 4
+	return (base_idx * NUM_TARGET_TYPES + normalize_piece(target_pc)) * NUM_SQUARES + (int)sq;
+#else
+	(void)sq; (void)target_pc;
+	return base_idx;
+#endif
+}
+
 } // anonymous namespace
 
 void extract_features(const Position& pos, float* feat) {
@@ -231,8 +283,9 @@ void extract_features(const Position& pos, float* feat) {
 			int df = (int)file_of(ts) - sf;
 			int dr = (int)rank_of(ts) - sr;
 			if (c == WHITE) dr = -dr;
-			int idx = g_board_idx_table[pt][std::abs(df) + OFFSET_BIAS][dr + OFFSET_BIAS];
-			if (idx >= 0) feat[idx] += sign;
+			int base_idx = g_board_idx_table[pt][std::abs(df) + OFFSET_BIAS][dr + OFFSET_BIAS];
+			if (base_idx >= 0)
+				feat[feat_index(base_idx, sq, pos.piece_on(ts))] += sign;
 		}
 	}
 
@@ -267,8 +320,9 @@ void extract_features(const Position& pos, float* feat) {
 					int df = (int)file_of(ts) - sf;
 					int dr = (int)rank_of(ts) - sr;
 					if (c == WHITE) dr = -dr;
-					int idx = g_hand_idx_table[pt][std::abs(df) + OFFSET_BIAS][dr + OFFSET_BIAS];
-					if (idx >= 0) feat[idx] += sign * (float)cnt;
+					int base_idx = g_hand_idx_table[pt][std::abs(df) + OFFSET_BIAS][dr + OFFSET_BIAS];
+					if (base_idx >= 0)
+						feat[feat_index(base_idx, sq, pos.piece_on(ts))] += sign * (float)cnt;
 				}
 			}
 		}
