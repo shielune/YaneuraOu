@@ -26,10 +26,7 @@ void load_eval() {
 	const std::string eval_dir = Options["EvalDir"];
 	const std::string path = eval_dir + "/weights.bin";
 	if (!HumanLike::load_mobility_weights(path)) {
-		sync_cout << "Error! : EVAL_MOBILITY: failed to load weights from "
-		          << path << "\n"
-		          << "Please place eval/mobility/weights.bin in EvalDir." << sync_endl;
-		// NNUE と同様に処理を止める
+		sync_cout << "Error! : failed to read " << path << sync_endl;
 		std::exit(1);
 	}
 }
