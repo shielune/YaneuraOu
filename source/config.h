@@ -427,9 +427,9 @@ constexpr int MAX_PLY_NUM = 246;
 #if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL) || defined(YANEURAOU_ENGINE_KIKI)
 
 	#if defined(YANEURAOU_ENGINE_KIKI)
-		#define ENGINE_NAME "YaneuraOu KIKI"
+		#define ENGINE_NAME "Mobility"
 	#elif defined(YANEURAOU_ENGINE_MATERIAL)
-		#define ENGINE_NAME "YaneuraOu Material"
+		#define ENGINE_NAME "Material"
 	#else
 		#define ENGINE_NAME "YaneuraOu"
 	#endif
