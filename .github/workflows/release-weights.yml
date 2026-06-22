@@ -1,0 +1,94 @@
+name: Release weights
+
+on:
+  push:
+    tags:
+      - "weights-v*"
+  workflow_dispatch:
+
+jobs:
+  release-weights:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/weights-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify weights files
+        run: |
+          python3 - <<'PY'
+          import struct, sys
+
+          for path, magic_expected in [
+              ("eval/mobility/weights.bin", b"MOBI"),
+              ("eval/material/weights.bin", b"MATW"),
+          ]:
+              with open(path, "rb") as f:
+                  data = f.read()
+              magic = data[:4]
+              if magic != magic_expected:
+                  print(f"ERROR: {path}: invalid magic {magic!r}", file=sys.stderr)
+                  sys.exit(1)
+              dim = struct.unpack("<I", data[4:8])[0]
+              expected = 4 + 4 + dim * 4
+              if len(data) != expected:
+                  print(f"ERROR: {path}: size mismatch {len(data)} != {expected}", file=sys.stderr)
+                  sys.exit(1)
+              print(f"OK: {path}: magic={magic}, dim={dim}, size={len(data)} bytes")
+          PY
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "weights ${{ steps.version.outputs.version }}"
+          body: |
+            Mobility (KIKI) / Material 評価関数の学習済み重みファイル。
+
+            ## ファイル
+
+            | ファイル | 形式 | 次元 | サイズ |
+            |---|---|---|---|
+            | `eval/mobility/weights.bin` | MOBI バイナリ | 114 | 464 bytes |
+            | `eval/material/weights.bin` | MATW バイナリ | 17  | 76 bytes  |
+
+            ## 使い方
+
+            - Mobility: USI オプション `MobilityWeightsFile` にパスを指定
+            - Material: USI オプション `MaterialWeightsFile` にパスを指定
+
+            ファイルが指定されていない場合はビルド時に埋め込まれた重みが使用されます。
+
+            ## フォーマット
+
+            **eval/mobility/weights.bin (MOBI)**
+            ```
+            [4 bytes]   magic: "MOBI"
+            [4 bytes]   uint32 LE: 次元数 (114)
+            [456 bytes] float32 LE × 114
+                [0, 107)   盤上駒 (駒種 × 方向 × 距離)
+                [107, 114) 持ち駒 (歩/香/桂/銀/金/角/飛 各1次元)
+            ```
+
+            **eval/material/weights.bin (MATW)**
+            ```
+            [4 bytes]  magic: "MATW"
+            [4 bytes]  uint32 LE: 次元数 (17)
+            [68 bytes] float32 LE × 17
+                [0..6]   盤上駒 (歩/香/桂/銀/金/角/飛)
+                [7]      金型成駒 (成歩/成香/成桂/成銀)
+                [8]      馬  [9] 龍
+                [10..16] 持ち駒 (歩/香/桂/銀/金/角/飛)
+            ```
+          files: |
+            eval/mobility/weights.bin
+            eval/material/weights.bin
