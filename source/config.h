@@ -426,7 +426,13 @@ constexpr int MAX_PLY_NUM = 246;
 
 #if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL) || defined(YANEURAOU_ENGINE_KIKI)
 
-	#define ENGINE_NAME "YaneuraOu"
+	#if defined(YANEURAOU_ENGINE_KIKI)
+		#define ENGINE_NAME "YaneuraOu KIKI"
+	#elif defined(YANEURAOU_ENGINE_MATERIAL)
+		#define ENGINE_NAME "YaneuraOu Material"
+	#else
+		#define ENGINE_NAME "YaneuraOu"
+	#endif
 
 	// 通常のやねうら王探索部(Stockfishっぽいやつ)を用いる。
 	#define YANEURAOU_ENGINE
