@@ -179,9 +179,7 @@ namespace Eval
 		const std::string eval_dir = Options["EvalDir"];
 		const std::string path = eval_dir + "/weights.bin";
 		if (!load_material_weights(path)) {
-			sync_cout << "Error! : EVAL_MATERIAL: failed to load weights from "
-			          << path << "\n"
-			          << "Please place eval/material/weights.bin in EvalDir." << sync_endl;
+			sync_cout << "Error! : failed to read " << path << sync_endl;
 			std::exit(1);
 		}
 	}
