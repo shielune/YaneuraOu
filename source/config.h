@@ -426,13 +426,7 @@ constexpr int MAX_PLY_NUM = 246;
 
 #if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL) || defined(YANEURAOU_ENGINE_KIKI)
 
-	#if defined(YANEURAOU_ENGINE_KIKI)
-		#define ENGINE_NAME "YaneuraOu Mobility"
-	#elif defined(YANEURAOU_ENGINE_MATERIAL)
-		#define ENGINE_NAME "YaneuraOu Material"
-	#else
-		#define ENGINE_NAME "YaneuraOu"
-	#endif
+	#define ENGINE_NAME "YaneuraOu"
 
 	// 通常のやねうら王探索部(Stockfishっぽいやつ)を用いる。
 	#define YANEURAOU_ENGINE
@@ -877,9 +871,9 @@ constexpr bool pretty_jp = false;
 
 // -- 評価関数の種類によりエンジン名に使用する文字列を変更する。
 #if defined(EVAL_MATERIAL)
-	#define EVAL_TYPE_NAME ""
+	#define EVAL_TYPE_NAME "Material"
 #elif defined(EVAL_MOBILITY)
-	#define EVAL_TYPE_NAME ""
+	#define EVAL_TYPE_NAME "Mobility"
 #elif defined(EVAL_KPPT)
 	#define EVAL_TYPE_NAME "KPPT"
 #elif defined(EVAL_KPP_KKPT)
