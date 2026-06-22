@@ -16,37 +16,38 @@ jobs:
       fail-fast: false
       matrix:
         engine:
-          - { edition: YANEURAOU_ENGINE_KIKI,    name: Mobility }
-          - { edition: YANEURAOU_ENGINE_MATERIAL, name: Material }
+          - { edition: YANEURAOU_ENGINE_KIKI,    name: YaneuraOu-Mobility-NoEval }
+          - { edition: YANEURAOU_ENGINE_MATERIAL, name: YaneuraOu-Material-NoEval }
         arch:
-          - { cpu: AVX2,      cc: g++,                   suffix: amd64   }
-          - { cpu: GRAVITON2, cc: aarch64-linux-gnu-g++, suffix: aarch64 }
+          - { cpu: AVX2,      cc: g++,                   dir: amd64 }
+          - { cpu: GRAVITON2, cc: aarch64-linux-gnu-g++, dir: arm64 }
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cross-compiler (aarch64 only)
-        if: matrix.arch.suffix == 'aarch64'
+      - name: Install cross-compiler (arm64 only)
+        if: matrix.arch.dir == 'arm64'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y g++-aarch64-linux-gnu
 
-      - name: Build ${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
+      - name: Build ${{ matrix.arch.dir }}/${{ matrix.engine.name }}
         run: |
+          mkdir -p build/${{ matrix.arch.dir }}
           make -C source -j$(nproc) normal \
             YANEURAOU_EDITION=${{ matrix.engine.edition }} \
             TARGET_CPU=${{ matrix.arch.cpu }} \
             COMPILER=${{ matrix.arch.cc }} \
             USE_HUMANLIKE_OPTIONS=OFF \
-            TARGET=../build/${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
+            TARGET=../build/${{ matrix.arch.dir }}/${{ matrix.engine.name }}
 
       - name: List produced binary
-        run: ls -lh build/${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
+        run: ls -lh build/${{ matrix.arch.dir }}/${{ matrix.engine.name }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
-          path: build/${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
+          name: ${{ matrix.arch.dir }}-${{ matrix.engine.name }}
+          path: build/${{ matrix.arch.dir }}/${{ matrix.engine.name }}
 
   release-linux:
     needs: build-linux
@@ -73,16 +74,14 @@ jobs:
 
       - name: Stage release tree
         run: |
-          mkdir -p stage
-          for name in Mobility Material; do
-            for suffix in amd64 aarch64; do
-              src="download/${name}-${suffix}/${name}-${suffix}"
-              dst="stage/${name}-${suffix}"
-              cp "$src" "$dst"
-              chmod +x "$dst"
+          for dir in amd64 arm64; do
+            mkdir -p stage/$dir
+            for name in YaneuraOu-Mobility-NoEval YaneuraOu-Material-NoEval; do
+              cp "download/${dir}-${name}/${name}" "stage/${dir}/${name}"
+              chmod +x "stage/${dir}/${name}"
             done
           done
-          ls -lh stage/
+          find stage -type f | sort
 
       - name: Create archives
         run: |
@@ -100,12 +99,12 @@ jobs:
 
             ## Contents
 
-            | ファイル | エンジン | アーキテクチャ |
+            | パス | エンジン | アーキテクチャ |
             |---|---|---|
-            | `Mobility-amd64`   | Mobility 評価 | x86_64 AVX2 |
-            | `Mobility-aarch64` | Mobility 評価 | ARM64 (Graviton2 相当) |
-            | `Material-amd64`   | Material 評価 | x86_64 AVX2 |
-            | `Material-aarch64` | Material 評価 | ARM64 (Graviton2 相当) |
+            | `amd64/YaneuraOu-Mobility-NoEval` | YaneuraOu Mobility | x86_64 AVX2 |
+            | `amd64/YaneuraOu-Material-NoEval` | YaneuraOu Material | x86_64 AVX2 |
+            | `arm64/YaneuraOu-Mobility-NoEval` | YaneuraOu Mobility | ARM64 (Graviton2 相当) |
+            | `arm64/YaneuraOu-Material-NoEval` | YaneuraOu Material | ARM64 (Graviton2 相当) |
 
             ## 外部重みファイルの使い方
 
