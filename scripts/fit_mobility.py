@@ -8,19 +8,25 @@ Usage:
         --y /data/feat.y.bin \
         --variant 1 \
         --alpha 1.0 \
-        --out /data/weights.txt
+        --out eval/mobility/weights.bin
 
 バリアントと次元数:
-    1 : 164          (駒種 × 方向 × 距離)
-    2 : 3,444        (+ 利き先の駒種 21種)
-    3 : 13,284       (+ 攻撃駒の升 81)
-    4 : 278,964      (+ 両方)
+    1 : 114          (駒種 × 方向 × 距離、盤上107 + 持ち駒7)
+    2 : 2,394        (+ 利き先の駒種 21種)
+    3 : 9,234        (+ 攻撃駒の升 81)
+    4 : 194,103      (+ 両方)
+
+出力フォーマット:
+    .bin  → MOBI バイナリ (magic + uint32 dim + float32[])
+    .txt  → テキスト (1行1値、コメント行 # あり)
 """
 import argparse
+import struct
 import numpy as np
 from sklearn.linear_model import Ridge
 
-VARIANT_DIMS = {1: 164, 2: 164 * 21, 3: 164 * 81, 4: 164 * 21 * 81}
+NUM_BASE = 114  # 盤上107 + 持ち駒7
+VARIANT_DIMS = {1: NUM_BASE, 2: NUM_BASE * 21, 3: NUM_BASE * 81, 4: NUM_BASE * 21 * 81}
 
 
 def main():
@@ -51,11 +57,18 @@ def main():
     print(f"train RMSE = {rmse:.2f} cp")
     print(f"weights: min={w.min():.3f}  max={w.max():.3f}  |mean|={np.abs(w).mean():.3f}")
 
-    with open(args.out, "w") as f:
-        f.write(f"# variant={args.variant}  alpha={args.alpha}  N={N}  D={D}  RMSE={rmse:.2f}\n")
-        for v in w:
-            f.write(f"{v:.6f}\n")
-    print(f"wrote {len(w)} weights → {args.out}")
+    if args.out.endswith(".bin"):
+        with open(args.out, "wb") as f:
+            f.write(b"MOBI")
+            f.write(struct.pack("<I", len(w)))
+            f.write(struct.pack(f"<{len(w)}f", *w.astype(np.float32)))
+        print(f"wrote {len(w)} weights (MOBI binary) → {args.out}")
+    else:
+        with open(args.out, "w") as f:
+            f.write(f"# variant={args.variant}  alpha={args.alpha}  N={N}  D={D}  RMSE={rmse:.2f}\n")
+            for v in w:
+                f.write(f"{v:.6f}\n")
+        print(f"wrote {len(w)} weights (text) → {args.out}")
 
 
 if __name__ == "__main__":
