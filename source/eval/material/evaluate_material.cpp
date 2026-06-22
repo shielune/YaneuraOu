@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include "../../usi_option.h"
 #define SIZE_OF_ARRAY(array) (sizeof(array)/sizeof(array[0]))
 
 // ---------------------------------------------------------------------------
@@ -174,8 +175,16 @@ namespace Eval {
 
 namespace Eval
 {
-	// 駒得のみの評価関数のとき。
-	void load_eval() {}
+	void load_eval() {
+		const std::string eval_dir = Options["EvalDir"];
+		const std::string path = eval_dir + "/weights.bin";
+		if (!load_material_weights(path)) {
+			sync_cout << "Error! : EVAL_MATERIAL: failed to load weights from "
+			          << path << "\n"
+			          << "Please place eval/material/weights.bin in EvalDir." << sync_endl;
+			std::exit(1);
+		}
+	}
 	void print_eval_stat(Position& pos) {}
 	void evaluate_with_no_return(const Position& pos) {}
 	Value evaluate(const Position& pos) { return compute_eval(pos); }
