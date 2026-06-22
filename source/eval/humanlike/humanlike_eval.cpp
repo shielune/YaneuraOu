@@ -53,14 +53,14 @@ int compute_material(const Position& pos) {
 }
 
 // ============================================================================
-// MB: 駒種×距離×方向 learned weight 評価 (164 params)
+// MB: 駒種×距離×方向 learned weight 評価 (114 params)
 // ============================================================================
 //
 // Feature index layout:
 //   [0, 107): 盤上駒の (pt, |df|, dr_canonical) → index
 //             dr_canonical は先手フレームに正規化 (後手は dr 反転)
-//   [107, 164): 持ち駒の (hand_pt, |df|, dr_canonical) → index
-//             持ち駒側は「全 legal drop 升 × その升からの利き」を全展開した合計
+//   [107, 114): 持ち駒の駒種×1次元 (打てる升からの総利きマス数×枚数)
+//             各駒種1次元に集計 (PAWN, LANCE, KNIGHT, SILVER, GOLD, BISHOP, ROOK)
 //
 // 駒種共有規則:
 //   - 金型 (PRO_PAWN/PRO_LANCE/PRO_KNIGHT/PRO_SILVER) は GOLD と同じ index に
@@ -73,7 +73,8 @@ constexpr int OFFSET_RANGE = 17;
 constexpr int OFFSET_BIAS  = 8;
 
 int g_board_idx_table[PIECE_TYPE_NB][OFFSET_RANGE][OFFSET_RANGE];
-int g_hand_idx_table [PIECE_HAND_NB][OFFSET_RANGE][OFFSET_RANGE];
+int g_hand_idx_table [PIECE_HAND_NB][OFFSET_RANGE][OFFSET_RANGE]; // 旧API互換のため残す (未使用)
+int g_hand_pt_index  [PIECE_HAND_NB]; // 持ち駒: 駒種ごとの feature index (7次元)
 
 std::atomic<bool> g_index_inited{false};
 std::mutex g_init_mutex;
@@ -163,29 +164,17 @@ void init_index_tables() {
 		std::abort();
 	}
 
-	auto add_hand = [&](PieceType pt, int df, int dr) {
-		df = std::abs(df);
-		int& slot = g_hand_idx_table[pt][df + OFFSET_BIAS][dr + OFFSET_BIAS];
-		if (slot < 0) slot = idx++;
-	};
-	add_hand(PAWN, 0, -1);
-	for (int d = 1; d <= 8; ++d) add_hand(LANCE, 0, -d);
-	add_hand(KNIGHT, 1, -2);
-	add_hand(SILVER, 0, -1); add_hand(SILVER, 1, -1); add_hand(SILVER, 1, 1);
-	add_hand(GOLD, 0, -1); add_hand(GOLD, 1, -1); add_hand(GOLD, 1, 0); add_hand(GOLD, 0, 1);
-	for (int d = 1; d <= 8; ++d) {
-		add_hand(BISHOP, d, -d);
-		add_hand(BISHOP, d,  d);
-	}
-	for (int d = 1; d <= 8; ++d) {
-		add_hand(ROOK, 0, -d);
-		add_hand(ROOK, 0,  d);
-		add_hand(ROOK, d,  0);
-	}
+	// 持ち駒: 駒種ごとに1次元 (打ち升の総利き数を集計)
+	// PIECE_HAND_NB の順 (PAWN=1 から ROOK まで) で7次元を割り当てる
+	for (int pt = 0; pt < PIECE_HAND_NB; ++pt)
+		g_hand_pt_index[pt] = -1;
+	for (PieceType pt = PAWN; pt < PIECE_HAND_NB; ++pt)
+		if (idx < NUM_BOARD_FEATURES + NUM_BASE_HAND)
+			g_hand_pt_index[pt] = idx++;
 
-	if (idx != NUM_FEATURES) {
+	if (idx != NUM_BASE) {
 		std::cerr << "humanlike_eval: total index count mismatch: " << idx
-		          << " vs " << NUM_FEATURES << std::endl;
+		          << " vs " << NUM_BASE << std::endl;
 		std::abort();
 	}
 
@@ -289,24 +278,24 @@ void extract_features(const Position& pos, float* feat) {
 		}
 	}
 
-	// 持ち駒: 全 legal drop 升 × そこからの利き
+	// 持ち駒: 打てる升ごとの総利きマス数 × 枚数 を駒種1次元に集計
 	for (Color c = BLACK; c < COLOR_NB; ++c) {
 		Hand h = pos.hand_of(c);
 		float sign = (c == BLACK) ? 1.0f : -1.0f;
 		for (PieceType pt = PAWN; pt < PIECE_HAND_NB; ++pt) {
 			int cnt = hand_count(h, pt);
 			if (cnt == 0) continue;
-			Piece pc = make_piece(c, pt);
+			int fi = g_hand_pt_index[pt];
+			if (fi < 0) continue;
 
+			// 二歩チェック用
 			bool pawn_files[9] = {false};
 			if (pt == PAWN) {
 				Bitboard pb = pos.pieces(c, PAWN);
-				while (pb) {
-					Square s = pb.pop();
-					pawn_files[(int)file_of(s)] = true;
-				}
+				while (pb) pawn_files[(int)file_of(pb.pop())] = true;
 			}
 
+			Piece pc = make_piece(c, pt);
 			for (Square sq = SQ_ZERO; sq < SQ_NB; ++sq) {
 				if (pos.piece_on(sq) != NO_PIECE) continue;
 				Rank r = rank_of(sq);
@@ -314,16 +303,7 @@ void extract_features(const Position& pos, float* feat) {
 				if (pt == PAWN && pawn_files[(int)file_of(sq)]) continue;
 
 				Bitboard atk = effects_from(pc, sq, occupied);
-				const int sf = (int)file_of(sq), sr = (int)rank_of(sq);
-				while (atk) {
-					Square ts = atk.pop();
-					int df = (int)file_of(ts) - sf;
-					int dr = (int)rank_of(ts) - sr;
-					if (c == WHITE) dr = -dr;
-					int base_idx = g_hand_idx_table[pt][std::abs(df) + OFFSET_BIAS][dr + OFFSET_BIAS];
-					if (base_idx >= 0)
-						feat[feat_index(base_idx, sq, pos.piece_on(ts))] += sign * (float)cnt;
-				}
+				feat[feat_index(fi, sq, NO_PIECE)] += sign * (float)cnt * (float)atk.count();
 			}
 		}
 	}
@@ -333,6 +313,43 @@ bool load_mobility_weights(const std::string& path) {
 	if (!g_index_inited.load(std::memory_order_acquire))
 		init_index_tables();
 
+	// バイナリ形式チェック: 先頭4バイトが "MOBI" かどうか
+	{
+		std::ifstream probe(path, std::ios::binary);
+		if (!probe) {
+			std::cerr << "humanlike_eval[MB]: failed to open " << path << std::endl;
+			return false;
+		}
+		char magic[4];
+		probe.read(magic, 4);
+		if (probe.gcount() == 4 &&
+		    magic[0]=='M' && magic[1]=='O' && magic[2]=='B' && magic[3]=='I')
+		{
+			// バイナリ読み込み
+			uint32_t dim = 0;
+			probe.read(reinterpret_cast<char*>(&dim), 4);
+			if (dim != (uint32_t)NUM_FEATURES) {
+				std::cerr << "humanlike_eval[MB]: binary dim mismatch: "
+				          << dim << " vs " << NUM_FEATURES << std::endl;
+				return false;
+			}
+			std::vector<float> tmp(NUM_FEATURES);
+			probe.read(reinterpret_cast<char*>(tmp.data()),
+			           (std::streamsize)(sizeof(float) * NUM_FEATURES));
+			if (!probe) {
+				std::cerr << "humanlike_eval[MB]: binary read failed" << std::endl;
+				return false;
+			}
+			for (size_t i = 0; i < NUM_FEATURES; ++i)
+				g_mobility_weights[i] = tmp[i];
+			g_mobility_weights_loaded.store(true, std::memory_order_release);
+			std::cerr << "humanlike_eval[MB]: loaded " << NUM_FEATURES
+			          << " weights (binary) from " << path << std::endl;
+			return true;
+		}
+	}
+
+	// テキスト形式読み込み
 	std::ifstream ifs(path);
 	if (!ifs) {
 		std::cerr << "humanlike_eval[MB]: failed to open " << path << std::endl;
