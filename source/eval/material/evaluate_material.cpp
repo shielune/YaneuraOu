@@ -19,6 +19,7 @@
 #include <cstring>
 #include <vector>
 #include "../../usi_option.h"
+#include "../../usi.h"
 #define SIZE_OF_ARRAY(array) (sizeof(array)/sizeof(array[0]))
 
 // ---------------------------------------------------------------------------
@@ -91,9 +92,11 @@ bool load_material_weights(const std::string& path) {
     // バイナリ形式チェック: magic "MATW"
     char magic[4];
     ifs.read(magic, 4);
-    if (ifs.gcount() == 4 &&
-        magic[0]=='M' && magic[1]=='A' && magic[2]=='T' && magic[3]=='W')
-    {
+    if (ifs.gcount() != 4) {
+        std::cerr << "material_eval[MAT]: file too short: " << path << std::endl;
+        return false;
+    }
+    if (magic[0]=='M' && magic[1]=='A' && magic[2]=='T' && magic[3]=='W') {
         uint32_t dim = 0;
         ifs.read(reinterpret_cast<char*>(&dim), 4);
         if (dim != (uint32_t)NUM_MAT_FEATURES) {
@@ -111,6 +114,12 @@ bool load_material_weights(const std::string& path) {
         std::cerr << "material_eval[MAT]: loaded " << NUM_MAT_FEATURES
                   << " weights (binary) from " << path << std::endl;
         return true;
+    }
+    // magic 不一致 → テキスト形式として読み直す（先頭4バイトが数値の場合）
+    if (magic[0] < '0' || magic[0] > '9') {
+        std::cerr << "material_eval[MAT]: invalid magic in " << path
+                  << " (expected MATW or text)" << std::endl;
+        return false;
     }
 
     // テキスト形式フォールバック (1行1値)
