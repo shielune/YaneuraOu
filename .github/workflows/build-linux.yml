@@ -16,8 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         engine:
-          - { edition: YANEURAOU_ENGINE_KIKI,    name: YaneuraOu-KIKI-NoEval     }
-          - { edition: YANEURAOU_ENGINE_MATERIAL, name: YaneuraOu-Material-NoEval }
+          - { edition: YANEURAOU_ENGINE_KIKI,    name: Mobility }
+          - { edition: YANEURAOU_ENGINE_MATERIAL, name: Material }
         arch:
           - { cpu: AVX2,      cc: g++,                   suffix: amd64   }
           - { cpu: GRAVITON2, cc: aarch64-linux-gnu-g++, suffix: aarch64 }
@@ -74,7 +74,7 @@ jobs:
       - name: Stage release tree
         run: |
           mkdir -p stage
-          for name in YaneuraOu-KIKI-NoEval YaneuraOu-Material-NoEval; do
+          for name in Mobility Material; do
             for suffix in amd64 aarch64; do
               src="download/${name}-${suffix}/${name}-${suffix}"
               dst="stage/${name}-${suffix}"
@@ -102,10 +102,10 @@ jobs:
 
             | ファイル | エンジン | アーキテクチャ |
             |---|---|---|
-            | `YaneuraOu-KIKI-NoEval-amd64`     | KIKI (Mobility 評価) | x86_64 AVX2 |
-            | `YaneuraOu-KIKI-NoEval-aarch64`   | KIKI (Mobility 評価) | ARM64 (Graviton2 相当) |
-            | `YaneuraOu-Material-NoEval-amd64` | Material 評価         | x86_64 AVX2 |
-            | `YaneuraOu-Material-NoEval-aarch64` | Material 評価       | ARM64 (Graviton2 相当) |
+            | `Mobility-amd64`   | Mobility 評価 | x86_64 AVX2 |
+            | `Mobility-aarch64` | Mobility 評価 | ARM64 (Graviton2 相当) |
+            | `Material-amd64`   | Material 評価 | x86_64 AVX2 |
+            | `Material-aarch64` | Material 評価 | ARM64 (Graviton2 相当) |
 
             ## 外部重みファイルの使い方
 
