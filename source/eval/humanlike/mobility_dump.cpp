@@ -2,7 +2,7 @@
 // MB (Mobility learned) 用の feature dump コマンド。
 //
 // 入力: binpack (raw PackedSfenValue ×N、40B/local)
-// 出力: <prefix>.X.bin  (float32 [N, 164] row-major), 利き feature
+// 出力: <prefix>.X.bin  (float32 [N, 114] row-major), 利き feature
 //       <prefix>.y.bin  (float32 [N]) 教師の評価値 (centipawns、BLACK POV 変換済)
 //       <prefix>.meta.txt
 //
