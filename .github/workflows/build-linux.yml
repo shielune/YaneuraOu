@@ -16,11 +16,11 @@ jobs:
       fail-fast: false
       matrix:
         engine:
-          - { edition: YANEURAOU_ENGINE_KIKI,     name: kiki     }
-          - { edition: YANEURAOU_ENGINE_MATERIAL,  name: material }
+          - { edition: YANEURAOU_ENGINE_KIKI,    name: YaneuraOu-KIKI-NoEval     }
+          - { edition: YANEURAOU_ENGINE_MATERIAL, name: YaneuraOu-Material-NoEval }
         arch:
-          - { cpu: AVX2,      triple: x86_64-linux-gnu,    cc: g++,                   suffix: amd64   }
-          - { cpu: GRAVITON2, triple: aarch64-linux-gnu,   cc: aarch64-linux-gnu-g++, suffix: aarch64 }
+          - { cpu: AVX2,      cc: g++,                   suffix: amd64   }
+          - { cpu: GRAVITON2, cc: aarch64-linux-gnu-g++, suffix: aarch64 }
 
     steps:
       - uses: actions/checkout@v4
@@ -37,15 +37,16 @@ jobs:
             YANEURAOU_EDITION=${{ matrix.engine.edition }} \
             TARGET_CPU=${{ matrix.arch.cpu }} \
             COMPILER=${{ matrix.arch.cc }} \
-            TARGET=../build/${{ matrix.engine.name }}_${{ matrix.arch.suffix }}
+            USE_HUMANLIKE_OPTIONS=OFF \
+            TARGET=../build/${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
 
       - name: List produced binary
-        run: ls -lh build/${{ matrix.engine.name }}_${{ matrix.arch.suffix }}
+        run: ls -lh build/${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
-          path: build/${{ matrix.engine.name }}_${{ matrix.arch.suffix }}
+          path: build/${{ matrix.engine.name }}-${{ matrix.arch.suffix }}
 
   release-linux:
     needs: build-linux
@@ -73,10 +74,10 @@ jobs:
       - name: Stage release tree
         run: |
           mkdir -p stage
-          for name in kiki material; do
+          for name in YaneuraOu-KIKI-NoEval YaneuraOu-Material-NoEval; do
             for suffix in amd64 aarch64; do
-              src="download/${name}-${suffix}/${name}_${suffix}"
-              dst="stage/${name}_${suffix}"
+              src="download/${name}-${suffix}/${name}-${suffix}"
+              dst="stage/${name}-${suffix}"
               cp "$src" "$dst"
               chmod +x "$dst"
             done
@@ -101,10 +102,10 @@ jobs:
 
             | ファイル | エンジン | アーキテクチャ |
             |---|---|---|
-            | `kiki_amd64`     | KIKI (Mobility 評価) | x86_64 AVX2 |
-            | `kiki_aarch64`   | KIKI (Mobility 評価) | ARM64 (Graviton2 相当) |
-            | `material_amd64` | Material 評価         | x86_64 AVX2 |
-            | `material_aarch64` | Material 評価       | ARM64 (Graviton2 相当) |
+            | `YaneuraOu-KIKI-NoEval-amd64`     | KIKI (Mobility 評価) | x86_64 AVX2 |
+            | `YaneuraOu-KIKI-NoEval-aarch64`   | KIKI (Mobility 評価) | ARM64 (Graviton2 相当) |
+            | `YaneuraOu-Material-NoEval-amd64` | Material 評価         | x86_64 AVX2 |
+            | `YaneuraOu-Material-NoEval-aarch64` | Material 評価       | ARM64 (Graviton2 相当) |
 
             ## 外部重みファイルの使い方
 
