@@ -303,7 +303,7 @@ void extract_features(const Position& pos, float* feat) {
 				if (pt == PAWN && pawn_files[(int)file_of(sq)]) continue;
 
 				Bitboard atk = effects_from(pc, sq, occupied);
-				feat[feat_index(fi, sq, NO_PIECE)] += sign * (float)cnt * (float)atk.count();
+				feat[feat_index(fi, sq, NO_PIECE)] += sign * (float)cnt * (float)atk.pop_count();
 			}
 		}
 	}
