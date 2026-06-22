@@ -322,9 +322,11 @@ bool load_mobility_weights(const std::string& path) {
 		}
 		char magic[4];
 		probe.read(magic, 4);
-		if (probe.gcount() == 4 &&
-		    magic[0]=='M' && magic[1]=='O' && magic[2]=='B' && magic[3]=='I')
-		{
+		if (probe.gcount() != 4) {
+			std::cerr << "humanlike_eval[MB]: file too short: " << path << std::endl;
+			return false;
+		}
+		if (magic[0]=='M' && magic[1]=='O' && magic[2]=='B' && magic[3]=='I') {
 			// バイナリ読み込み
 			uint32_t dim = 0;
 			probe.read(reinterpret_cast<char*>(&dim), 4);
@@ -346,6 +348,12 @@ bool load_mobility_weights(const std::string& path) {
 			std::cerr << "humanlike_eval[MB]: loaded " << NUM_FEATURES
 			          << " weights (binary) from " << path << std::endl;
 			return true;
+		}
+		// magic 不一致 → テキスト形式として読み直す（先頭4バイトが数値の場合）
+		if (magic[0] < '0' || magic[0] > '9') {
+			std::cerr << "humanlike_eval[MB]: invalid magic in " << path
+			          << " (expected MOBI or text)" << std::endl;
+			return false;
 		}
 	}
 
