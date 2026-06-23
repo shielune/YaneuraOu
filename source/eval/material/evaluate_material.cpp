@@ -80,6 +80,96 @@ float g_mat_weights[NUM_MAT_FEATURES] = {0};
 std::atomic<bool> g_mat_weights_loaded{false};
 std::mutex g_mat_load_mutex;
 
+// 学習済み重みを Eval::PieceValue[] / CapturePieceValue[] / ProDiffPieceValue[] に
+// 反映させる。これにより探索の futility / SEE / movepick 等の枝刈り基準も
+// 学習済み駒価値に揃う (V0Full と同じ挙動)。
+//
+// PieceValue[PIECE_NB]:
+//   B_PAWN(1)..B_DRAGON(14)   = + 学習済み盤上駒価値
+//   W_PAWN(17)..W_DRAGON(30)  = - 同上
+//   KING, NO_PIECE は 0 のまま
+//
+// CapturePieceValue[PIECE_NB] (両色とも正値):
+//   取られたときの相手にとっての価値増加 = 学習済み盤上 + 持駒価値
+//   PRO_* は 「成った価値 + 元駒の持駒価値」
+//
+// ProDiffPieceValue[PIECE_NB]:
+//   成った時の差分 = w[+pt] - w[pt]
+//   PAWN/PRO_PAWN どちらの index に対しても "と金 - 歩" を返す
+void apply_weights_to_piece_value() {
+    using namespace Eval;
+    // 駒種 → 学習済み盤上 weight
+    auto wb = [](PieceType pt) -> float {
+        switch (pt) {
+            case PAWN:       return g_mat_weights[0];
+            case LANCE:      return g_mat_weights[1];
+            case KNIGHT:     return g_mat_weights[2];
+            case SILVER:     return g_mat_weights[3];
+            case GOLD:       return g_mat_weights[4];
+            case BISHOP:     return g_mat_weights[5];
+            case ROOK:       return g_mat_weights[6];
+            case PRO_PAWN:   return g_mat_weights[7];
+            case PRO_LANCE:  return g_mat_weights[7];
+            case PRO_KNIGHT: return g_mat_weights[7];
+            case PRO_SILVER: return g_mat_weights[7];
+            case HORSE:      return g_mat_weights[8];
+            case DRAGON:     return g_mat_weights[9];
+            default:         return 0.0f;
+        }
+    };
+    // 駒種 → 学習済み持駒 weight (PRO_* は元駒の持駒価値を使う)
+    auto wh = [](PieceType pt) -> float {
+        switch (pt) {
+            case PAWN: case PRO_PAWN:     return g_mat_weights[10];
+            case LANCE: case PRO_LANCE:   return g_mat_weights[11];
+            case KNIGHT: case PRO_KNIGHT: return g_mat_weights[12];
+            case SILVER: case PRO_SILVER: return g_mat_weights[13];
+            case GOLD:                    return g_mat_weights[14];
+            case BISHOP: case HORSE:      return g_mat_weights[15];
+            case ROOK: case DRAGON:       return g_mat_weights[16];
+            default:                      return 0.0f;
+        }
+    };
+
+    static const PieceType piece_types[] = {
+        PAWN, LANCE, KNIGHT, SILVER, BISHOP, ROOK, GOLD,
+        // KING はスキップ (idx 8 は配列上 KING)
+        PRO_PAWN, PRO_LANCE, PRO_KNIGHT, PRO_SILVER, HORSE, DRAGON,
+    };
+
+    // PieceValue / CapturePieceValue / ProDiffPieceValue を書き換え
+    for (PieceType pt : piece_types) {
+        int b = (int)pt;            // BLACK 側 Piece index (B_PAWN=1 など)
+        int w = b + PIECE_WHITE;    // WHITE 側 (B_*+16)
+
+        int pv  = (int)wb(pt);
+        PieceValue[b] =  pv;
+        PieceValue[w] = -pv;
+
+        // CapturePieceValue = 盤上 + 持駒 (PRO_* は成った価値 + 元駒持駒)
+        int cv = (int)wb(pt) + (int)wh(pt);
+        CapturePieceValue[b] = cv;
+        CapturePieceValue[w] = cv;
+
+        // ProDiffPieceValue: 成った価値 - 成る前盤上価値
+        // PAWN/PRO_PAWN どちらの index にも "と金 - 歩" を入れる慣習
+        int diff = 0;
+        switch (pt) {
+            case PAWN:   case PRO_PAWN:   diff = (int)wb(PRO_PAWN)   - (int)wb(PAWN);   break;
+            case LANCE:  case PRO_LANCE:  diff = (int)wb(PRO_LANCE)  - (int)wb(LANCE);  break;
+            case KNIGHT: case PRO_KNIGHT: diff = (int)wb(PRO_KNIGHT) - (int)wb(KNIGHT); break;
+            case SILVER: case PRO_SILVER: diff = (int)wb(PRO_SILVER) - (int)wb(SILVER); break;
+            case BISHOP: case HORSE:      diff = (int)wb(HORSE)      - (int)wb(BISHOP); break;
+            case ROOK:   case DRAGON:     diff = (int)wb(DRAGON)     - (int)wb(ROOK);   break;
+            default: diff = 0;
+        }
+        ProDiffPieceValue[b] = diff;
+        ProDiffPieceValue[w] = diff;
+    }
+
+    std::cerr << "material_eval[MAT]: applied weights to PieceValue / CapturePieceValue / ProDiffPieceValue" << std::endl;
+}
+
 bool load_material_weights(const std::string& path) {
     std::lock_guard<std::mutex> lk(g_mat_load_mutex);
 
@@ -110,6 +200,7 @@ bool load_material_weights(const std::string& path) {
             std::cerr << "material_eval[MAT]: binary read failed" << std::endl;
             return false;
         }
+        apply_weights_to_piece_value();
         g_mat_weights_loaded.store(true, std::memory_order_release);
         std::cerr << "material_eval[MAT]: loaded " << NUM_MAT_FEATURES
                   << " weights (binary) from " << path << std::endl;
@@ -134,6 +225,7 @@ bool load_material_weights(const std::string& path) {
         return false;
     }
     for (int i = 0; i < NUM_MAT_FEATURES; ++i) g_mat_weights[i] = tmp[i];
+    apply_weights_to_piece_value();
     g_mat_weights_loaded.store(true, std::memory_order_release);
     std::cerr << "material_eval[MAT]: loaded " << NUM_MAT_FEATURES
               << " weights (text) from " << path << std::endl;
