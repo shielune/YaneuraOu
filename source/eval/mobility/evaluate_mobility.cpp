@@ -17,6 +17,7 @@
 
 #include <string>
 #include "../../usi_option.h"
+#include "../../usi.h"
 
 namespace Eval {
 
