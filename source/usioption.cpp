@@ -276,6 +276,9 @@ std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 			if (it.second.idx == idx)
 			{
 				const Option& o = it.second;
+				if (!o.visible_in_usi)
+					break;
+
 				// 📝 先頭で改行しているので、必ず1行目が空行になる。
 				os << "\noption name " << it.first << " type " << o.type;
 
