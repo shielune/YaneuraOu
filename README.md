@@ -7,6 +7,21 @@
 [![Make CI (for macOS)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-macos.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-macos.yml)
 [![Make CI (for WebAssembly)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-wasm.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-wasm.yml)
 
+# このフォークについて
+
+yaneurao/YaneuraOu のフォーク。WASM パッケージの配布と、いくつかの独自
+エンジンオプションを追加している。フォーク独自の文書は以下:
+
+| 文書 | 内容 |
+|---|---|
+| [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike) |
+| [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) | WASM パッケージの利用ガイド |
+| [`docs/wasm_release_workflow.md`](docs/wasm_release_workflow.md) | WASM パッケージのリリース手順 |
+| [`docs/wasm_upgrade_changelog.md`](docs/wasm_upgrade_changelog.md) | emscripten / upstream 追従作業の記録 |
+| [`docs/nagisa_v3_diff_survey.md`](docs/nagisa_v3_diff_survey.md) | keinoda/YaneuraOu (NAGISA_V3) との差分調査 |
+
+以下は upstream の README。
+
 # About this project
 
 YaneuraOu is the World's Strongest Shogi engine(AI player) , WCSC29 1st winner , educational and USI compliant engine.
