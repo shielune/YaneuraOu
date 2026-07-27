@@ -1,0 +1,453 @@
+name: Build wasm
+
+on:
+  push:
+    tags:
+      - "wasm-v*"
+  workflow_dispatch:
+    inputs:
+      emsdk_version:
+        description: "emscripten/emsdk Docker tag"
+        required: false
+        default: "5.0.5"
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - name: kp256-cfworkers
+            dir: yaneuraou-wasm-kp256-cfworkers
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            category: cfworkers
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
+          - name: mate-cfworkers
+            dir: yaneuraou-wasm-mate-cfworkers
+            edition: YANEURAOU_MATE_ENGINE
+            export_name: YaneuraOu_MATE
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            category: cfworkers
+            engine_label: "Mate (DfPn)"
+            eval_note: "none"
+          - name: pthread-kp256
+            dir: yaneuraou-wasm-pthread-kp256
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web,worker
+            pthread: 1
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            category: pthread
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
+          - name: mate-pthread
+            dir: yaneuraou-wasm-mate-pthread
+            edition: YANEURAOU_MATE_ENGINE
+            export_name: YaneuraOu_MATE
+            environment: web,worker
+            pthread: 1
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            category: pthread
+            engine_label: "Mate (DfPn)"
+            eval_note: "none"
+          - name: pthread-halfkp256
+            dir: yaneuraou-wasm-pthread-halfkp256
+            edition: YANEURAOU_ENGINE_NNUE
+            export_name: YaneuraOu_HalfKP256
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            category: pthread
+            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            eval_note: "external (~62 MB)"
+          - name: pthread-halfkp768
+            dir: yaneuraou-wasm-pthread-halfkp768
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            export_name: YaneuraOu_HalfKP768
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            category: pthread
+            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            eval_note: "external (数十 MB)"
+          - name: material-cfworkers
+            dir: yaneuraou-wasm-material-cfworkers
+            edition: YANEURAOU_ENGINE_MATERIAL
+            export_name: YaneuraOu_Material
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            # 駒得のみ評価 (Lv1)。eval は同梱不要 (handcrafted)。
+            extra_make_args: "MATERIAL_LEVEL=1"
+            category: cfworkers
+            engine_label: "Material Lv1 (handcrafted)"
+            eval_note: "**embedded**"
+          - name: mobility-cfworkers
+            dir: yaneuraou-wasm-mobility-cfworkers
+            edition: YANEURAOU_ENGINE_KIKI
+            export_name: YaneuraOu_Mobility
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            # Mobility (KIKI) 評価関数。重みは mobility_weights_embedded.cpp に焼き込み済み。
+            extra_make_args: ""
+            category: cfworkers
+            engine_label: "Mobility / KIKI (164-dim learned linear)"
+            eval_note: "**embedded**"
+
+          # HumanLike SkillLevel (hlsl) variants — humanlike personality USI options
+          # (ForceCaptureProb / StableKingProb / *BlindProb 等) を有効化したビルド。
+          # 各 OFF 版と同じ edition / memory / export name で、USE_HUMANLIKE_OPTIONS=ON
+          # を make に渡すだけの差分。
+          - name: kp256-cfworkers-hlsl
+            dir: yaneuraou-wasm-kp256-cfworkers-hlsl
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: cfworkers-hlsl
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
+          - name: pthread-kp256-hlsl
+            dir: yaneuraou-wasm-pthread-kp256-hlsl
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: web,worker
+            pthread: 1
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: pthread-hlsl
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
+          - name: pthread-halfkp256-hlsl
+            dir: yaneuraou-wasm-pthread-halfkp256-hlsl
+            edition: YANEURAOU_ENGINE_NNUE
+            export_name: YaneuraOu_HalfKP256
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: pthread-hlsl
+            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            eval_note: "external (~62 MB)"
+          - name: pthread-halfkp768-hlsl
+            dir: yaneuraou-wasm-pthread-halfkp768-hlsl
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            export_name: YaneuraOu_HalfKP768
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: pthread-hlsl
+            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            eval_note: "external (数十 MB)"
+          - name: material-cfworkers-hlsl
+            dir: yaneuraou-wasm-material-cfworkers-hlsl
+            edition: YANEURAOU_ENGINE_MATERIAL
+            export_name: YaneuraOu_Material
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            extra_make_args: "MATERIAL_LEVEL=1 USE_HUMANLIKE_OPTIONS=ON"
+            category: cfworkers-hlsl
+            engine_label: "Material Lv1 (handcrafted)"
+            eval_note: "**embedded**"
+          - name: mobility-cfworkers-hlsl
+            dir: yaneuraou-wasm-mobility-cfworkers-hlsl
+            edition: YANEURAOU_ENGINE_KIKI
+            export_name: YaneuraOu_Mobility
+            environment: web
+            pthread: 0
+            initial_memory: 67108864
+            maximum_memory: 134217728
+            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
+            category: cfworkers-hlsl
+            engine_label: "Mobility / KIKI (164-dim learned linear)"
+            eval_note: "**embedded**"
+
+          # Node.js variants — built with EM_ENVIRONMENT=node and
+          # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
+          # drive USI manually after a noInitialRun bootstrap. Pinned to
+          # emscripten 3.1.43, the only toolchain currently confirmed to
+          # drive a multi-threaded YaneuraOu correctly under Node — see
+          # docs/wasm_client_usage.md for the compatibility matrix.
+          - name: node-kp256
+            dir: yaneuraou-wasm-node-kp256
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+            export_name: YaneuraOu_K_P
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            category: node
+            engine_label: "NNUE KP256 (Suishopetite)"
+            eval_note: "external (~873 KB)"
+          - name: node-mate
+            dir: yaneuraou-wasm-node-mate
+            edition: YANEURAOU_MATE_ENGINE
+            export_name: YaneuraOu_MATE
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            category: node
+            engine_label: "Mate (DfPn)"
+            eval_note: "none"
+          - name: node-halfkp256
+            dir: yaneuraou-wasm-node-halfkp256
+            edition: YANEURAOU_ENGINE_NNUE
+            export_name: YaneuraOu_HalfKP256
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            category: node
+            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            eval_note: "external (~62 MB)"
+          - name: node-halfkp768
+            dir: yaneuraou-wasm-node-halfkp768
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            export_name: YaneuraOu_HalfKP768
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            category: node
+            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            eval_note: "external (数十 MB)"
+          - name: node-material
+            dir: yaneuraou-wasm-node-material
+            edition: YANEURAOU_ENGINE_MATERIAL
+            export_name: YaneuraOu_Material
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            extra_make_args: "MATERIAL_LEVEL=1"
+            category: node
+            engine_label: "Material Lv1 (handcrafted)"
+            eval_note: "**embedded**"
+          - name: node-mobility
+            dir: yaneuraou-wasm-node-mobility
+            edition: YANEURAOU_ENGINE_KIKI
+            export_name: YaneuraOu_Mobility
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 134217728
+            maximum_memory: 1073741824
+            category: node
+            engine_label: "Mobility / KIKI (164-dim learned linear)"
+            eval_note: "**embedded**"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker pull
+        run: |
+          # Per-matrix override > workflow_dispatch input > default.
+          # Node variants pin themselves to 3.1.43 via the matrix.
+          EMSDK_VERSION="${{ matrix.package.emsdk_version || inputs.emsdk_version || '5.0.5' }}"
+          sudo docker pull "emscripten/emsdk:${EMSDK_VERSION}"
+
+      - name: build wasm (${{ matrix.package.name }})
+        run: |
+          EMSDK_VERSION="${{ matrix.package.emsdk_version || inputs.emsdk_version || '5.0.5' }}"
+          # Node variants need 'callMain' in EXPORTED_RUNTIME_METHODS so the
+          # loader can trigger main() after a noInitialRun bootstrap. Browser
+          # and cfworkers variants keep the original ['FS','ccall'] default.
+          EXPORTED_RUNTIME_METHODS="${{ matrix.package.exported_runtime_methods || '[''FS'',''ccall'']' }}"
+          # Packages live under packages/ — matrix `dir` stays the bare
+          # package name (it doubles as the npm/tar/artifact name).
+          DIST_DIR="packages/${{ matrix.package.dir }}/dist"
+          mkdir -p "$DIST_DIR"
+
+          sudo docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src/source \
+            "emscripten/emsdk:${EMSDK_VERSION}" \
+            make -j$(nproc) clean tournament \
+              COMPILER=em++ \
+              TARGET_CPU=WASM \
+              YANEURAOU_EDITION=${{ matrix.package.edition }} \
+              TARGET="../${DIST_DIR}/yaneuraou.js" \
+              EM_EXPORT_NAME=${{ matrix.package.export_name }} \
+              EM_ENVIRONMENT=${{ matrix.package.environment }} \
+              "EM_EXPORTED_RUNTIME_METHODS=${EXPORTED_RUNTIME_METHODS}" \
+              EM_PTHREAD=${{ matrix.package.pthread }} \
+              EM_INITIAL_MEMORY_SIZE=${{ matrix.package.initial_memory }} \
+              EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
+              EM_STACK_SIZE=2097152 \
+              EM_CLOSURE=0 \
+              ${{ matrix.package.extra_make_args }}
+
+      - name: verify and compress
+        run: |
+          cd packages/${{ matrix.package.dir }}/dist
+          ls -lh yaneuraou.js yaneuraou.wasm
+          for f in yaneuraou.js yaneuraou.wasm; do
+            brotli -f --best "$f" -o "${f}.br" || true
+            gzip  -f --best -k "$f" || true
+          done
+          # emscripten 3.1.43 also emits a classic pthread worker script
+          # next to the engine js. Compress it the same way for symmetry
+          # so consumers can serve it gzip/brotli-encoded if they want.
+          if [ -f yaneuraou.worker.js ]; then
+            brotli -f --best yaneuraou.worker.js -o yaneuraou.worker.js.br || true
+            gzip  -f --best -k yaneuraou.worker.js || true
+          fi
+          ls -lh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package.dir }}-dist
+          path: packages/${{ matrix.package.dir }}/dist/
+
+  release-wasm:
+    needs: build-wasm
+    if: startsWith(github.ref, 'refs/tags/wasm-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/wasm-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all WASM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: yaneuraou-wasm-*-dist
+          path: download/
+
+      - name: Parse matrix as SoT
+        id: matrix
+        run: |
+          # The build-wasm matrix is the single source of truth for what
+          # packages exist. Surface its dirs to the subsequent shell + the
+          # action-gh-release step so we don't repeat the list inline.
+          python3 - <<'PY'
+          import json, os, yaml
+          wf = yaml.safe_load(open('.github/workflows/build-wasm.yml'))
+          pkgs = wf['jobs']['build-wasm']['strategy']['matrix']['package']
+          dirs = [p['dir'] for p in pkgs]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('dirs<<EOF\n' + '\n'.join(dirs) + '\nEOF\n')
+          PY
+
+      - name: Stage each package + compile loader + create tar.gz
+        env:
+          PKG_DIRS: ${{ steps.matrix.outputs.dirs }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Drive directly from the matrix dirs piped through GITHUB_OUTPUT.
+          # Adding/removing a package now means editing the matrix only —
+          # this loop expands automatically. `d` is the bare package name;
+          # the working tree keeps packages under packages/, but tarballs are
+          # rooted at the package name so consumer paths don't change.
+          while IFS= read -r d; do
+            [ -n "$d" ] || continue
+            p="packages/$d"
+            mkdir -p "$p/dist"
+            cp -R "download/${d}-dist/." "$p/dist/"
+            (cd "$p" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
+            bun -e "
+              const pkg = require('./$p/package.json');
+              pkg.version = '${VERSION}';
+              require('fs').writeFileSync('$p/package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
+            # Node variants ship the 3.1.43 classic pthread worker script
+            # (emscripten loads it via locateFile at runtime) AND the
+            # worker_shim compiled from src/worker_shim.ts (the loader
+            # routes .worker.js through it to bridge node:worker_threads
+            # back to a faked web-worker scope).
+            extra=""
+            case "$d" in
+              yaneuraou-wasm-node-*)
+                extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
+                ;;
+            esac
+            tar czf "${d}-v${VERSION}.tar.gz" -C packages \
+              "$d/package.json" \
+              "$d/README.md" \
+              "$d/SPEC.md" \
+              "$d/dist/index.js" \
+              "$d/dist/index.d.ts" \
+              "$d/dist/yaneuraou.js" \
+              "$d/dist/yaneuraou.wasm" \
+              "$d/dist/yaneuraou.wasm.br" \
+              $extra
+          done <<EOF
+          $PKG_DIRS
+          EOF
+          ls -lh *.tar.gz
+
+      - name: Generate release body from matrix
+        run: |
+          # Render the Markdown body from the matrix + static prose.
+          # Adding/removing a package updates the tables and the "Twenty"
+          # /"Six" literals automatically. See script for details.
+          python3 script/generate_release_body.py \
+            --workflow .github/workflows/build-wasm.yml \
+            --version "${{ steps.version.outputs.version }}" \
+            --output release_body.md
+          echo "--- release body preview ---"
+          head -20 release_body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-wasm ${{ steps.version.outputs.version }}"
+          body_path: release_body.md
+          # Glob across the matrix-generated tar.gz set — covers however
+          # many packages the matrix produces, no per-name listing needed.
+          files: |
+            yaneuraou-wasm-*-v${{ steps.version.outputs.version }}.tar.gz
