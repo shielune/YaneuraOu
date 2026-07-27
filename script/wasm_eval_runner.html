@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>yaneuraou wasm eval runner</title>
+</head>
+<body>
+<pre id="log">loading…</pre>
+<script type="module">
+const log = document.getElementById("log");
+const push = (s) => { log.textContent += "\n" + s; };
+
+window.__result = null;
+window.__error = null;
+
+async function main() {
+  const params = new URLSearchParams(location.search);
+  const engineJs = params.get("engine");         // e.g. "/engine/yaneuraou.k-p.js"
+  const sfen = params.get("sfen");
+  const thinkMs = Number(params.get("think") || "30000");
+  const threads = Number(params.get("threads") || "1");
+  const hash = Number(params.get("hash") || "64");
+  const version = params.get("version");         // passed in by wasm_eval_browser.ts
+
+  if (!version) throw new Error("missing ?version= in runner URL");
+  if (!engineJs) throw new Error("missing ?engine= in runner URL");
+  if (!crossOriginIsolated) {
+    throw new Error("not crossOriginIsolated — SharedArrayBuffer unavailable");
+  }
+
+  // Dynamic-import the shared modules from the static server. The server
+  // transpiles .ts files on the fly so the browser sees ES modules.
+  const { buildContext, pickLoader } = await import("/loaders/detect.ts");
+  const { browserLoaders } = await import("/loaders/browser/index.ts");
+  const { runUsiEval } = await import("/script/wasm_eval_common.ts");
+
+  const ctx = buildContext("browser", engineJs, version);
+  const loader = pickLoader(browserLoaders, ctx.emscriptenVersion);
+  push("loader: " + loader.name);
+
+  const engine = await loader.load(ctx);
+  push("engine loaded (version=" + version + ", crossOriginIsolated=" + self.crossOriginIsolated + ")");
+
+  const result = await runUsiEval(engine, { sfen, thinkMs, threads, hash });
+
+  try { await engine.dispose(); } catch (e) { push("dispose error: " + e); }
+  return result;
+}
+
+main().then((r) => {
+  window.__result = r;
+  push("DONE " + JSON.stringify(r));
+}).catch((e) => {
+  window.__error = String(e?.stack ?? e);
+  push("ERROR " + window.__error);
+});
+</script>
+</body>
+</html>
