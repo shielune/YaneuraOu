@@ -1,0 +1,120 @@
+name: Build linux
+
+on:
+  push:
+    tags:
+      - "linux-v*"
+    branches:
+      - feature/native-ffi-release-combined
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        engine:
+          - { edition: YANEURAOU_ENGINE_KIKI,    name: YaneuraOu-Mobility-NoEval }
+          - { edition: YANEURAOU_ENGINE_MATERIAL, name: YaneuraOu-Material-NoEval }
+        arch:
+          - { cpu: AVX2,      cc: g++,                   dir: amd64 }
+          - { cpu: GRAVITON2, cc: aarch64-linux-gnu-g++, dir: arm64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compiler (arm64 only)
+        if: matrix.arch.dir == 'arm64'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y g++-aarch64-linux-gnu
+
+      - name: Build ${{ matrix.arch.dir }}/${{ matrix.engine.name }}
+        run: |
+          mkdir -p build/${{ matrix.arch.dir }}
+          make -C source -j$(nproc) normal \
+            YANEURAOU_EDITION=${{ matrix.engine.edition }} \
+            TARGET_CPU=${{ matrix.arch.cpu }} \
+            COMPILER=${{ matrix.arch.cc }} \
+            USE_HUMANLIKE_OPTIONS=OFF \
+            TARGET=../build/${{ matrix.arch.dir }}/${{ matrix.engine.name }}
+
+      - name: List produced binary
+        run: ls -lh build/${{ matrix.arch.dir }}/${{ matrix.engine.name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch.dir }}-${{ matrix.engine.name }}
+          path: build/${{ matrix.arch.dir }}/${{ matrix.engine.name }}
+
+  release-linux:
+    needs: build-linux
+    if: startsWith(github.ref, 'refs/tags/linux-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/linux-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: download/
+
+      - name: Stage release tree
+        run: |
+          for dir in amd64 arm64; do
+            mkdir -p stage/$dir
+            for name in YaneuraOu-Mobility-NoEval YaneuraOu-Material-NoEval; do
+              cp "download/${dir}-${name}/${name}" "stage/${dir}/${name}"
+              chmod +x "stage/${dir}/${name}"
+            done
+          done
+          find stage -type f | sort
+
+      - name: Create archives
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          tar czf "yaneuraou-linux-v${VERSION}.tar.gz" -C stage .
+          ls -lh *.tar.gz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "yaneuraou-linux ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu shogi engine — Linux native binaries.
+
+            ## Contents
+
+            | パス | エンジン | アーキテクチャ |
+            |---|---|---|
+            | `amd64/YaneuraOu-Mobility-NoEval` | YaneuraOu Mobility | x86_64 AVX2 |
+            | `amd64/YaneuraOu-Material-NoEval` | YaneuraOu Material | x86_64 AVX2 |
+            | `arm64/YaneuraOu-Mobility-NoEval` | YaneuraOu Mobility | ARM64 (Graviton2 相当) |
+            | `arm64/YaneuraOu-Material-NoEval` | YaneuraOu Material | ARM64 (Graviton2 相当) |
+
+            ## 外部重みファイルの使い方
+
+            USI オプションでパスを指定してください。省略時はビルド時埋め込みの重みを使用します。
+
+            ```
+            setoption name MobilityWeightsFile value /path/to/eval/mobility/weights.bin
+            setoption name MaterialWeightsFile value /path/to/eval/material/weights.bin
+            ```
+
+            重みファイルは [`weights-v*` リリース](../../releases?q=weights-v) からダウンロードできます。
+          files: |
+            yaneuraou-linux-v${{ steps.version.outputs.version }}.tar.gz

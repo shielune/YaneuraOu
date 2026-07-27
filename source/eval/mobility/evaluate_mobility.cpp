@@ -9,47 +9,39 @@
 #include "../../evaluate.h"
 #include "../humanlike/humanlike_eval.h"
 
-// MB 評価関数 (Mobility, 164 params Ridge-fit) を embedded weights で動かす
-// 純粋 standalone eval。NNUE と異なり外部 nn.bin を要求しない。
+// MB 評価関数 (Mobility, Ridge-fit 線形モデル)。
 //
-// 重みは scripts/humanlike_eval/embed_mobility_weights.py で
-// mobility_weights_embedded.cpp に焼き込まれる。
+// 起動時に EvalDir/weights.bin (MOBI 形式) を load_mobility_weights() で読み込む。
+// ファイルが存在しない場合はエラーを出力して終了する。
+// MobilityWeightsFile USI オプションで上書きも可能。
 
-namespace Eval { namespace Mobility {
-
-extern const float kEmbeddedMobilityWeights[164];
-extern const int   kEmbeddedMobilityWeightsSize;
-
-} } // namespace Eval::Mobility
+#include <string>
+#include "../../usi_option.h"
+#include "../../usi.h"
 
 namespace Eval {
 
 void init() {}
 
 void load_eval() {
-	// 重みはコンパイル時に焼き込み済み。読み込み処理は不要。
-	std::cerr << "info string EVAL_MOBILITY: using embedded mobility weights ("
-	          << Mobility::kEmbeddedMobilityWeightsSize << " params)" << std::endl;
+	const std::string eval_dir = Options["EvalDir"];
+	const std::string path = eval_dir + "/weights.bin";
+	if (!HumanLike::load_mobility_weights(path)) {
+		sync_cout << "Error! : failed to read " << path << sync_endl;
+		std::exit(1);
+	}
 }
 
 void print_eval_stat(Position& /*pos*/) {
-	std::cout << "--- EVAL STAT: EVAL_MOBILITY (no breakdown available)" << std::endl;
+	std::cout << "--- EVAL STAT: EVAL_MOBILITY"
+	          << " params=" << HumanLike::NUM_FEATURES << std::endl;
 }
 
-void evaluate_with_no_return(const Position& /*pos*/) {
-	// 差分計算は持たない。何もしない。
-}
+void evaluate_with_no_return(const Position& /*pos*/) {}
 
 Value compute_eval(const Position& pos) {
-	float feat[HumanLike::NUM_FEATURES];
-	HumanLike::extract_features(pos, feat);
-	double sum = 0.0;
-	for (int i = 0; i < HumanLike::NUM_FEATURES; ++i)
-		sum += (double)Mobility::kEmbeddedMobilityWeights[i] * (double)feat[i];
-	if (sum >  3000.0) sum =  3000.0;
-	if (sum < -3000.0) sum = -3000.0;
-	int score = (int)sum;
-	return Value(pos.side_to_move() == BLACK ? score : -score);
+	const Value v = HumanLike::evaluate(pos, HumanLike::Mode::Mobility, false);
+	return v;
 }
 
 Value evaluate(const Position& pos) {

@@ -46,6 +46,11 @@ namespace Eval {
 	// (ただし、EvalDir(評価関数フォルダ)が変更になったあと、isreadyが再度送られてきたら読みなおす。)
 	void load_eval();
 
+#if defined(EVAL_MATERIAL)
+	// MaterialWeightsFile USI option から呼ばれる。17 個の float を読み込む。
+	bool load_material_weights_from_file(const std::string& path);
+#endif
+
 	// 評価関数本体
 	Value evaluate(const Position& pos);
 

@@ -293,6 +293,12 @@ void USI::extra_option(USI::OptionsMap & o)
 		if (!p.empty()) Eval::HumanLike::load_halfkpl_weights(p);
 	});
 #endif
+#if defined(EVAL_MATERIAL) && defined(USE_HUMANLIKE_OPTIONS)
+	o["MaterialWeightsFile"] << Option("", [](const USI::Option& opt) {
+		const std::string p = (std::string)opt;
+		if (!p.empty()) Eval::load_material_weights_from_file(p);
+	});
+#endif
 
 	// Stockfishには、Eloレーティングを指定して棋力調整するためのエンジンオプションがあるようだが…。
 	// o["UCI_Elo"]               << Option(1320, 1320, 3190);

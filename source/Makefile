@@ -444,15 +444,21 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MATERIAL)
 endif
 
 ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
-	# Mobility (MB) edition: embedded weights, NNUE 不要
+	# Mobility (MB) edition
+	# MOBILITY_VARIANT: 1=embedded(default) 2=+利き先駒種 3=+攻撃駒位置 4=2+3
+	MOBILITY_VARIANT ?= 1
+	CPPFLAGS += -DMOBILITY_VARIANT=$(MOBILITY_VARIANT)
 	SOURCES  +=                                                                \
 		eval/humanlike/humanlike_eval.cpp                                      \
 		eval/humanlike/mobility_dump.cpp                                       \
 		eval/humanlike/kpl_dump.cpp                                            \
 		eval/humanlike/halfkpl_dump.cpp                                        \
 		eval/mobility/evaluate_mobility.cpp                                    \
-		eval/mobility/mobility_weights_embedded.cpp                            \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
+	# バリアント1のみ embedded 重みをリンクする
+	ifeq ($(MOBILITY_VARIANT),1)
+		SOURCES += eval/mobility/mobility_weights_embedded.cpp
+	endif
 endif
 
 ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))

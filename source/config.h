@@ -871,13 +871,7 @@ constexpr bool pretty_jp = false;
 
 // -- 評価関数の種類によりエンジン名に使用する文字列を変更する。
 #if defined(EVAL_MATERIAL)
-	#if defined(MATERIAL_LEVEL)
-		// MATERIAL_LEVELの番号を"Level"として出力してやる。
-		#define EVAL_TYPE_NAME "MaterialLv" << MATERIAL_LEVEL
-	#else
-		// 適切な評価関数がないので単にEVAL_MATERIALを指定しているだけだから、EVAL_TYPE_NAMEとしては空欄でいいかと。
-		#define EVAL_TYPE_NAME ""
-	#endif
+	#define EVAL_TYPE_NAME "Material"
 #elif defined(EVAL_MOBILITY)
 	#define EVAL_TYPE_NAME "Mobility"
 #elif defined(EVAL_KPPT)

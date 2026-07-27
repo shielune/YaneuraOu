@@ -27,7 +27,7 @@ namespace HumanLike {
 enum class Mode {
 	Nnue,
 	Material,   // USI 文字列: "MT"
-	Mobility,   // USI 文字列: "MB" — 学習済 164-dim 線形評価
+	Mobility,   // USI 文字列: "MB" — 学習済 114-dim 線形評価
 	KPL,        // USI 文字列: "KPL" — 1,710-dim 線形評価
 	HalfKPL,    // USI 文字列: "HalfKPL" — 125,388-dim 線形評価 (Friend-Enemy)
 };
@@ -44,14 +44,36 @@ Value evaluate(const Position& pos, Mode mode, bool capture_force);
 bool is_free_capture(const Position& pos, Move m);
 
 // MB 用 feature 表現。
-constexpr int NUM_BOARD_FEATURES = 107;
-constexpr int NUM_HAND_FEATURES  = 57;
-constexpr int NUM_FEATURES       = NUM_BOARD_FEATURES + NUM_HAND_FEATURES;
+//
+// MOBILITY_VARIANT で特徴量の拡張軸を選択する (Makefile から -DMOBILITY_VARIANT=N で指定)。
+//   1 (default) : 駒種 × 方向 × 距離 (盤上107) + 駒種×1 (持ち駒7)   114 params
+//   2           : + 利き先の駒種 (21種: 空升+先手10+後手10)            114 × 21 = 2,394 params
+//   3           : + 攻撃駒の升 (81)                                     114 × 81 = 9,234 params
+//   4           : + 両方 (2+3)                                           114 × 21 × 81 = 194,103 params
+constexpr int NUM_BASE_BOARD   = 107;
+constexpr int NUM_BASE_HAND    = 7;
+constexpr int NUM_BASE         = NUM_BASE_BOARD + NUM_BASE_HAND; // 114
+constexpr int NUM_TARGET_TYPES = 21; // NO_PIECE(空升) + 先手駒10種 + 後手駒10種
+constexpr int NUM_SQUARES      = 81;
 
-// 現在位置の 164 次元 feature ベクトルを feat に書き込む (先手視点 +、後手視点 -)。
+// 後方互換用エイリアス
+constexpr int NUM_BOARD_FEATURES = NUM_BASE_BOARD;
+constexpr int NUM_HAND_FEATURES  = NUM_BASE_HAND;
+
+#if MOBILITY_VARIANT == 2
+  constexpr int NUM_FEATURES = NUM_BASE * NUM_TARGET_TYPES;                  // 2,394
+#elif MOBILITY_VARIANT == 3
+  constexpr int NUM_FEATURES = NUM_BASE * NUM_SQUARES;                       // 9,234
+#elif MOBILITY_VARIANT == 4
+  constexpr int NUM_FEATURES = NUM_BASE * NUM_TARGET_TYPES * NUM_SQUARES;    // 194,103
+#else
+  constexpr int NUM_FEATURES = NUM_BASE;                                     // 114
+#endif
+
+// 現在位置の 114 次元 feature ベクトルを feat に書き込む (先手視点 +、後手視点 -)。
 void extract_features(const Position& pos, float* feat);
 
-// MobilityWeightsFile USI option から呼ばれる。164 個の float を読み込む。
+// MobilityWeightsFile USI option から呼ばれる。114 個の float を読み込む。
 bool load_mobility_weights(const std::string& path);
 
 // USI コマンド: binpack から Mobility feature を抽出して X.bin / y.bin を出力する。
