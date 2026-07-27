@@ -17,11 +17,11 @@ matrix / for ループ / files 列 / release body の表 / 数値 literal の **
 ### ステップ 1: パッケージディレクトリを作る
 
 既存の sibling パッケージをまるごとコピーして名前を変える。パッケージは
-すべて `outputs/` 配下に置く。例えば `outputs/yaneuraou-wasm-node-kp256`
-を雛形にして `outputs/yaneuraou-wasm-node-foo` を作るなら:
+すべて `packages/` 配下に置く。例えば `packages/yaneuraou-wasm-node-kp256`
+を雛形にして `packages/yaneuraou-wasm-node-foo` を作るなら:
 
 ```sh
-cp -R outputs/yaneuraou-wasm-node-kp256 outputs/yaneuraou-wasm-node-foo
+cp -R packages/yaneuraou-wasm-node-kp256 packages/yaneuraou-wasm-node-foo
 # package.json の name / description を foo 用に書き換え
 # README.md / SPEC.md も同様
 # src/index.ts と src/worker_shim.ts は基本そのまま (パッケージ名コメントだけ修正)
@@ -38,7 +38,7 @@ cp -R outputs/yaneuraou-wasm-node-kp256 outputs/yaneuraou-wasm-node-foo
 | フィールド | 意味 | 例 |
 |---|---|---|
 | `name` | matrix エントリ識別子 (artifact 名にも使われる) | `node-foo` |
-| `dir` | パッケージディレクトリ名 (`outputs/` 配下、プレフィックスは付けない) | `yaneuraou-wasm-node-foo` |
+| `dir` | パッケージディレクトリ名 (`packages/` 配下、プレフィックスは付けない) | `yaneuraou-wasm-node-foo` |
 | `edition` | `YANEURAOU_EDITION=` に渡す | `YANEURAOU_ENGINE_NNUE_KP256` |
 | `export_name` | `EM_EXPORT_NAME=` | `YaneuraOu_K_P` |
 | `environment` | `EM_ENVIRONMENT=` | `web` / `web,worker` / `node` |
@@ -64,7 +64,7 @@ cp -R outputs/yaneuraou-wasm-node-kp256 outputs/yaneuraou-wasm-node-foo
 ### ステップ 3: タグを push
 
 ```sh
-git add outputs/yaneuraou-wasm-node-foo .github/workflows/build-wasm.yml
+git add packages/yaneuraou-wasm-node-foo .github/workflows/build-wasm.yml
 git commit -m "feat(wasm): add yaneuraou-wasm-node-foo"
 git push origin develop
 git tag wasm-v8.50.1

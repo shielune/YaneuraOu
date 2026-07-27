@@ -292,9 +292,9 @@ jobs:
           # loader can trigger main() after a noInitialRun bootstrap. Browser
           # and cfworkers variants keep the original ['FS','ccall'] default.
           EXPORTED_RUNTIME_METHODS="${{ matrix.package.exported_runtime_methods || '[''FS'',''ccall'']' }}"
-          # Packages live under outputs/ — matrix `dir` stays the bare
+          # Packages live under packages/ — matrix `dir` stays the bare
           # package name (it doubles as the npm/tar/artifact name).
-          DIST_DIR="outputs/${{ matrix.package.dir }}/dist"
+          DIST_DIR="packages/${{ matrix.package.dir }}/dist"
           mkdir -p "$DIST_DIR"
 
           sudo docker run --rm \
@@ -318,7 +318,7 @@ jobs:
 
       - name: verify and compress
         run: |
-          cd outputs/${{ matrix.package.dir }}/dist
+          cd packages/${{ matrix.package.dir }}/dist
           ls -lh yaneuraou.js yaneuraou.wasm
           for f in yaneuraou.js yaneuraou.wasm; do
             brotli -f --best "$f" -o "${f}.br" || true
@@ -336,7 +336,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.package.dir }}-dist
-          path: outputs/${{ matrix.package.dir }}/dist/
+          path: packages/${{ matrix.package.dir }}/dist/
 
   release-wasm:
     needs: build-wasm
@@ -390,11 +390,11 @@ jobs:
           # Drive directly from the matrix dirs piped through GITHUB_OUTPUT.
           # Adding/removing a package now means editing the matrix only —
           # this loop expands automatically. `d` is the bare package name;
-          # the working tree keeps packages under outputs/, but tarballs are
+          # the working tree keeps packages under packages/, but tarballs are
           # rooted at the package name so consumer paths don't change.
           while IFS= read -r d; do
             [ -n "$d" ] || continue
-            p="outputs/$d"
+            p="packages/$d"
             mkdir -p "$p/dist"
             cp -R "download/${d}-dist/." "$p/dist/"
             (cd "$p" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
@@ -414,7 +414,7 @@ jobs:
                 extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
                 ;;
             esac
-            tar czf "${d}-v${VERSION}.tar.gz" -C outputs \
+            tar czf "${d}-v${VERSION}.tar.gz" -C packages \
               "$d/package.json" \
               "$d/README.md" \
               "$d/SPEC.md" \
