@@ -154,6 +154,8 @@ void YaneuraOuEngine::add_options() {
     // 投了スコア
     options.add("ResignValue", Option(99999, 0, 99999));
 
+    options.add("FullTimeMode", Option(false));
+
 	// 📌 SearchOptionsが用いるオプションの追加
 
 	manager.search_options.add_options(options);
@@ -1533,6 +1535,8 @@ bool Search::YaneuraOuWorker::iterative_deepening() {
     // 💡 あまり同じ深さでつっかえている時は、aspiration windowの幅を大きくしてやるなどして回避する必要がある。
     int searchAgainCounter = 0;
 
+    const bool fullTimeMode = bool(options["FullTimeMode"]);
+
     // 反復深化内で、現在のiterationの最終PVをGUIへ出力済みか。
     bool uciPvSent = false;
 
@@ -1986,8 +1990,10 @@ bool Search::YaneuraOuWorker::iterative_deepening() {
             double bestMoveInstability = 1.04 + 1.8956 * totBestMoveChanges / threads.size();
 			double highBestMoveEffort  = completedDepth >= 10 && nodesEffort >= 92425 ? 0.666 : 1.0;
 
-            double totalTime = mainThread->tm.optimum() * fallingEval * reduction
-                             * bestMoveInstability * highBestMoveEffort;
+            const double optimum = double(mainThread->tm.optimum());
+            const double adaptiveTime =
+              optimum * fallingEval * reduction * bestMoveInstability * highBestMoveEffort;
+            double totalTime = fullTimeMode ? std::max(optimum, adaptiveTime) : adaptiveTime;
 
             // Cap used time in case of a single legal move for a better viewer experience
             // 視聴者体験を向上させるため、合法手が1つだけの場合に使用時間を上限で制限する
