@@ -505,11 +505,9 @@ namespace {
 		if (!stream) return Tools::ResultCode::FileReadError;
 		if (version_out)
 			*version_out = version;
-        if (version != kVersion) {
+        if (version != kVersion)
 			sync_cout << "info string NNUE header version mismatch: expected " << kVersion
-				<< " got " << version << sync_endl;
-			return Tools::ResultCode::FileMismatch;
-		}
+				<< " got " << version << " (continuing anyway)" << sync_endl;
         architecture->resize(size);
         stream.read(&(*architecture)[0], size);
 		return !stream.fail() ? Tools::ResultCode::Ok : Tools::ResultCode::FileReadError;
