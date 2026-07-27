@@ -19,9 +19,7 @@ YaneuraOu_backup*.lnk
 ~*
 .*/
 !.github/
-!.claude/
 !.devcontainer/
-.claude/settings.local.json
 *.nnue
 *.nnue.*
 *.result.txt
@@ -256,3 +254,9 @@ source/YaneuraOu-by-gcc
 
 # large mate problem data sets
 data/
+
+# build artifacts — packages under outputs/ build into <pkg>/dist/,
+# and engine binaries must never be committed again
+dist/
+*.wasm
+*.exe
