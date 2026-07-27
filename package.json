@@ -1,17 +1,11 @@
 {
-	"name": "yaneuraou-wasm-eval",
-	"private": true,
-	"scripts": {
-		"postinstall": "playwright install chromium",
-		"playwright:install": "playwright install chromium",
-		"bench": "node script/bench_nodes.mjs",
-		"bench:browser": "node script/bench_browser.mjs"
-	},
-	"devDependencies": {
-		"@types/bun": "latest",
-		"playwright": "^1.59.1"
-	},
-	"peerDependencies": {
-		"typescript": "^5"
-	}
+  "name": "yaneuraou-wasm-eval",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "playwright": "^1.59.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
 }

@@ -3,12 +3,12 @@ name: Make CI (DeepLearning for Ubuntu Linux)
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches:
-  #     - "**"
-  # pull_request:
-  #   branches:
-  #     - "**"
+#  push:
+#    branches:
+#      - "**"
+#  pull_request:
+#    branches:
+#      - "**"
 
 jobs:
   build-ubuntu:

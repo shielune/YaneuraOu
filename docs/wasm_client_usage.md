@@ -18,7 +18,7 @@
 | 3.1.74+ | ✅ `postMessage` 方式 | ⚠ 未解決 | `INCOMING_MODULE_JS_API` 明示が必要 |
 
 「未解決」の Node 側は 2026-04-14 現在の調査状況。原因仮説は
-emscripten 3.1.60+ の Node での未解決問題 (下記 5 節) を
+`docs/wasm_eval_results.md` の「Node 側 3.1.60+ 共通の未解決問題」節を
 参照。
 
 > **TL;DR — Node でただ動かしたいだけなら**
@@ -302,7 +302,7 @@ LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,\
 ```
 
 これが無いと、ブラウザで `engine.postMessage('go ...')` を呼んでも `info`
-/ `bestmove` が **一切返ってこない**(下記 5 節の
+/ `bestmove` が **一切返ってこない**(`docs/wasm_eval_results.md` の
 「症状 B」)。
 
 ### 3.1.74+ で `ccall` ベースの呼び出しも可能
@@ -341,7 +341,7 @@ await sendCommand('go btime 0 wtime 0 byoyomi 5000')
 ```
 
 pthread-worker 側の stdout が main thread に届かないケース
-(下記 5 節の症状 B)に対処するため、以下のパッチを
+(`docs/wasm_eval_results.md` の症状 B)に対処するため、以下のパッチを
 併用する必要がある:
 
 ```ts
@@ -644,7 +644,7 @@ module worker かは loader 側の責任。アプリは USI コマンドのシ�
 自動生成する。Makefile 側の差分は `EM_ENVIRONMENT` /
 `EM_EXPORTED_RUNTIME_METHODS` / `EM_PTHREAD` の 3 変数のみ。
 
-「推奨」「必須」のセルは検証の進捗と連動して
+「推奨」「必須」のセルは `docs/wasm_eval_results.md` の進捗と連動して
 更新する。
 
 ---
@@ -670,6 +670,7 @@ Cloudflare Workers / Vercel Edge Functions / Deno Deploy 等、
 | `go movetime N` | 推奨。ほぼ N ms で打ち切る |
 | `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | 動く |
 | `USI_Hash` / `EvalHash` | 動くが並列 init が無いので `isready` 応答が他変種比でやや遅め |
+| `FullTimeMode` | **効かない**。`go movetime` では時間制御の動的係数計算自体が走らないため。`usi` の応答には出てくるので注意 (`docs/fork_engine_options.md`) |
 
 ### 9.2 パッケージ別対応状況
 
