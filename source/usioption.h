@@ -71,6 +71,11 @@ class Option {
 
     // -- やねうら王独自
 
+    Option& hidden() {
+        visible_in_usi = false;
+        return *this;
+    }
+
     // 固定化フラグ。
     // これを true にすると、operator = で変更できなくなる。
     bool fixed = false;
@@ -93,6 +98,8 @@ class Option {
 			 UCIは、"var"は1度しか出てこないので、このため、Stockfishとはコードが異なるので注意。
 	*/
     std::string defaultValue, currentValue, type;
+
+    bool visible_in_usi = true;
 
     // このオプション設定がint型であるときに、最小値と最大値。
     // 📒 Stockfishではintだが、やねうら王ではint64_tに変更。
