@@ -292,7 +292,9 @@ jobs:
           # loader can trigger main() after a noInitialRun bootstrap. Browser
           # and cfworkers variants keep the original ['FS','ccall'] default.
           EXPORTED_RUNTIME_METHODS="${{ matrix.package.exported_runtime_methods || '[''FS'',''ccall'']' }}"
-          DIST_DIR="${{ matrix.package.dir }}/dist"
+          # Packages live under outputs/ — matrix `dir` stays the bare
+          # package name (it doubles as the npm/tar/artifact name).
+          DIST_DIR="outputs/${{ matrix.package.dir }}/dist"
           mkdir -p "$DIST_DIR"
 
           sudo docker run --rm \
@@ -316,7 +318,7 @@ jobs:
 
       - name: verify and compress
         run: |
-          cd ${{ matrix.package.dir }}/dist
+          cd outputs/${{ matrix.package.dir }}/dist
           ls -lh yaneuraou.js yaneuraou.wasm
           for f in yaneuraou.js yaneuraou.wasm; do
             brotli -f --best "$f" -o "${f}.br" || true
@@ -334,7 +336,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.package.dir }}-dist
-          path: ${{ matrix.package.dir }}/dist/
+          path: outputs/${{ matrix.package.dir }}/dist/
 
   release-wasm:
     needs: build-wasm
@@ -387,16 +389,19 @@ jobs:
         run: |
           # Drive directly from the matrix dirs piped through GITHUB_OUTPUT.
           # Adding/removing a package now means editing the matrix only —
-          # this loop expands automatically.
+          # this loop expands automatically. `d` is the bare package name;
+          # the working tree keeps packages under outputs/, but tarballs are
+          # rooted at the package name so consumer paths don't change.
           while IFS= read -r d; do
             [ -n "$d" ] || continue
-            mkdir -p "$d/dist"
-            cp -R "download/${d}-dist/." "$d/dist/"
-            (cd "$d" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
+            p="outputs/$d"
+            mkdir -p "$p/dist"
+            cp -R "download/${d}-dist/." "$p/dist/"
+            (cd "$p" && bun install --frozen-lockfile --ignore-scripts && bun tsc)
             bun -e "
-              const pkg = require('./$d/package.json');
+              const pkg = require('./$p/package.json');
               pkg.version = '${VERSION}';
-              require('fs').writeFileSync('$d/package.json', JSON.stringify(pkg, null, 2) + '\n');
+              require('fs').writeFileSync('$p/package.json', JSON.stringify(pkg, null, 2) + '\n');
             "
             # Node variants ship the 3.1.43 classic pthread worker script
             # (emscripten loads it via locateFile at runtime) AND the
@@ -409,7 +414,7 @@ jobs:
                 extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
                 ;;
             esac
-            tar czf "${d}-v${VERSION}.tar.gz" \
+            tar czf "${d}-v${VERSION}.tar.gz" -C outputs \
               "$d/package.json" \
               "$d/README.md" \
               "$d/SPEC.md" \
