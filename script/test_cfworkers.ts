@@ -26,19 +26,19 @@ import { extname, join, resolve } from "node:path";
 import { chromium } from "playwright";
 
 const ROOT = resolve(join(import.meta.dir, ".."));
-const DIST = join(ROOT, "outputs", "yaneuraou-wasm-kp256-cfworkers", "dist");
+const DIST = join(ROOT, "packages", "yaneuraou-wasm-kp256-cfworkers", "dist");
 const EVAL_FILE = join(ROOT, ".dl", "nn.bin");
 const BOOK_FILE = join(ROOT, ".dl", "user_book1.db");
 
 if (!existsSync(join(DIST, "yaneuraou.js"))) {
 	console.error(
-		"outputs/yaneuraou-wasm-kp256-cfworkers/dist/yaneuraou.js not found. Build first.",
+		"packages/yaneuraou-wasm-kp256-cfworkers/dist/yaneuraou.js not found. Build first.",
 	);
 	process.exit(2);
 }
 if (!existsSync(join(DIST, "index.js"))) {
 	console.error(
-		"outputs/yaneuraou-wasm-kp256-cfworkers/dist/index.js not found. Run tsc first.",
+		"packages/yaneuraou-wasm-kp256-cfworkers/dist/index.js not found. Run tsc first.",
 	);
 	process.exit(2);
 }
