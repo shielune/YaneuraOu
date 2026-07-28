@@ -150,7 +150,10 @@ public:
     }
 
     static constexpr IndexType get_weight_index(IndexType i) {
-#if defined(USE_SSSE3) || USE_NEON >= 8
+#if defined(USE_WASM_SIMD)
+        // 他の3つの affine 層と同じ理由で、WASM では dense を強制する。
+        return i;
+#elif defined(USE_SSSE3) || USE_NEON >= 8
         return kOutputDimensions % 4 == 0 ? get_weight_index_scrambled(i) : i;
 #else
         return i;

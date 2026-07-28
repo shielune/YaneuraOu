@@ -267,3 +267,8 @@ dist/
 *.wasm
 *.exe
 *.tsbuildinfo
+
+# nnue_arch_gen.py がビルド時に生成する architecture ヘッダ。
+# 生成物なのでコミットしない (エディション名から毎回作られる)。
+source/eval/nnue/architectures/SFNN_*.h
+source/eval/nnue/architectures/*_768x2_16_64.h
