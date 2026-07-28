@@ -19,7 +19,8 @@ yaneurao/YaneuraOu のフォーク。WASM パッケージの配布と、いく�
 | [`docs/wasm_release_workflow.md`](docs/wasm_release_workflow.md) | WASM パッケージのリリース手順 |
 | [`docs/wasm_upgrade_changelog.md`](docs/wasm_upgrade_changelog.md) | emscripten / upstream 追従作業の記録 |
 | [`docs/nagisa_v3_diff_survey.md`](docs/nagisa_v3_diff_survey.md) | keinoda/YaneuraOu (NAGISA_V3) との差分調査 |
-| [`docs/wasm_v96x_benchmark.md`](docs/wasm_v96x_benchmark.md) | V9.6x WASM ビルドの性能測定と、native との探索差異の調査 |
+| [`docs/wasm_native_divergence.md`](docs/wasm_native_divergence.md) | native と WASM で探索結果が分かれる件の調査記録 |
+| [`reports/`](reports/) | 作業報告と性能測定の記録 (日付ごと) |
 
 以下は upstream の README。
 
