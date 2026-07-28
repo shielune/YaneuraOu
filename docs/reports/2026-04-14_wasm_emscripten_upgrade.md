@@ -183,7 +183,7 @@ assertion test ではなく、`bun __tests__/<name>.ts` で逐次 stderr に
 
 | 変更したファイル | 内容 |
 |---|---|
-| `docs/wasm_eval_results.md` | TL;DR を「全バージョン dual-runner 動作確認レポート」に書き換え、最終 smoke マトリクスと、残っている Node 3 バージョン stall / 5.0.5 minifier バグの詳細、参考ファイルへのリンクを整理 |
+| `wasm_eval_results.md` (※現在リポジトリに無い) | TL;DR を「全バージョン dual-runner 動作確認レポート」に書き換え、最終 smoke マトリクスと、残っている Node 3 バージョン stall / 5.0.5 minifier バグの詳細、参考ファイルへのリンクを整理 |
 
 ## このセッションのマトリクスは記録しない
 
@@ -212,9 +212,10 @@ assertion test ではなく、`bun __tests__/<name>.ts` で逐次 stderr に
 
 ## 関連ドキュメント
 
-- `docs/wasm_eval_results.md` — 全バージョンの検証結果と症状の詳細
+- `wasm_eval_results.md` — 全バージョンの検証結果と症状の詳細
+  (※ 後に `.claude/skills/wasm-leader/` へ統合され、履歴整理でリポジトリからは削除された)
 - `docs/wasm_client_usage.md` — 実装時の呼び出し方サンプル
-- `docs/wasm_eval_testing_plan.md` — 作業当初の計画と背景
+- `wasm_eval_testing_plan.md` — 作業当初の計画と背景 (※同上)
 - `__tests__/README.md` — 再現テストの目録
 
 ## このセッションで生まれたコミット
