@@ -173,7 +173,10 @@ class AffineTransformSparseInput {
     }
 
     static constexpr IndexType GetWeightIndex(IndexType i) {
-#if defined(USE_SSSE3) || USE_NEON >= 8
+#if defined(USE_WASM_SIMD)
+        // affine_transform.h の同名関数と同じ理由で、WASM では dense を強制する。
+        return i;
+#elif defined(USE_SSSE3) || USE_NEON >= 8
         return kOutputDimensions % 4 == 0 ? GetWeightIndexScrambled(i) : i;
 #else
         return i;
