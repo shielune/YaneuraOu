@@ -255,6 +255,12 @@ source/YaneuraOu-by-gcc
 # large mate problem data sets
 data/
 
+# 評価関数・進行度モデルの実物 (数百MB)。検証用にローカルに置くだけで、
+# リポジトリには絶対に入れない。
+assets/
+nn.bin
+progress.bin
+
 # build artifacts — packages under packages/ build into <pkg>/dist/,
 # and engine binaries must never be committed again
 dist/
