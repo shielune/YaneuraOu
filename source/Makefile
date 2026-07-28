@@ -240,11 +240,21 @@ else
 		# (edge variant 向け, V8 Isolate 系ランタイムでは Worker / SharedArrayBuffer
 		# が使えないため) かを切り替える。
 		EM_PTHREAD ?= 1
+		# wasm64 (Memory64) でビルドするか。
+		# 1 にするとポインタが64bitになり、4GBのヒープ上限を超えられる。
+		# ⚠ 実行側の要件が上がる: Node 24+ / Chrome 133+ など Memory64 対応ランタイムが要る。
+		#   Cloudflare Workers など未対応の環境向けには 0 のままにすること。
+		# 💡 バイナリは1割ほど大きくなり、速度はおおむね同等。
+		EM_MEMORY64 ?= 0
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
 		ifeq ($(EM_PTHREAD),1)
 			CPPFLAGS += -pthread
+		endif
+		ifeq ($(EM_MEMORY64),1)
+			CPPFLAGS += -sMEMORY64=1
+			LDFLAGS  += -sMEMORY64=1
 		endif
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js

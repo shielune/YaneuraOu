@@ -7,6 +7,7 @@
  *
  * 探索を決定的にするため、全変種で以下を固定する:
  *   Threads=1 / USI_Hash 固定 / usinewgame で置換表クリア / 定跡オフ
+ * ⚠ --threads を 2 以上にすると探索は非決定的になる。速度の比較にのみ使うこと。
  * これらが揃っていれば、評価関数の実装が同じ変種同士は
  * bestmove どころか探索ノード数まで一致する。逆に一致しなければ
  * どこかの評価経路が壊れている。
@@ -19,6 +20,7 @@
  *   --sfen <sfen>     "position" に渡す文字列 (既定: 下の DEFAULT_SFEN)
  *   --nodes <n>       読ませるノード数 (既定: 1000000)
  *   --hash <mb>       USI_Hash (既定: 16 — edge 変種の 128MB ヒープに収まる値)
+ *   --threads <n>     Threads (既定: 1。2以上は探索が非決定的になるので速度計測専用)
  *   --eval <path>     nn.bin の場所。NNUE 系エディションでは必須
  *   --repeat <n>      各変種を n 回走らせて中央値を採る (既定: 1)
  *   --native <path>   ネイティブ実行ファイル。name=path 形式でラベルを付けられる
@@ -40,6 +42,7 @@ function parseArgs(argv) {
 		sfen: DEFAULT_SFEN,
 		nodes: 1_000_000,
 		hash: 16,
+		threads: 1,
 		repeat: 1,
 		eval: null,
 		json: null,
@@ -52,6 +55,7 @@ function parseArgs(argv) {
 		else if (a === "--nodes") o.nodes = Number(next());
 		else if (a === "--go") o.go = next();
 		else if (a === "--hash") o.hash = Number(next());
+		else if (a === "--threads") o.threads = Number(next());
 		else if (a === "--repeat") o.repeat = Number(next());
 		else if (a === "--eval") o.eval = resolve(next());
 		else if (a === "--json") o.json = next();
@@ -79,7 +83,7 @@ function commands(opt) {
 	return [
 		"usi",
 		`setoption name USI_Hash value ${opt.hash}`,
-		"setoption name Threads value 1",
+		`setoption name Threads value ${opt.threads}`,
 		"setoption name USI_OwnBook value false",
 		// ⚠ PvInterval を 0 にしないと、既定の 300ms 間引きのせいで
 		//   「最後に出力された info 行」が速い変種と遅い変種で別の反復のものになり、
@@ -104,6 +108,7 @@ function parseInfo(lines) {
 	const score = info.match(/score (cp|mate) (-?\d+)/);
 	return {
 		depth: num("depth"),
+		hashfull: num("hashfull"),
 		seldepth: num("seldepth"),
 		nodes: num("nodes"),
 		nps: num("nps"),
@@ -222,7 +227,7 @@ for (const t of opt.targets) {
 		`${t.label.padEnd(18)} ${String(r.nodes).padStart(9)} nodes  ` +
 			`${String(median(runs.map((x) => x.timeMs))).padStart(7)} ms  ` +
 			`${String(median(runs.map((x) => x.nps))).padStart(9)} nps  ` +
-			`depth ${String(r.depth).padStart(2)}  ${String(r.score).padStart(9)}  ${r.bestmove}`,
+			`depth ${String(r.depth).padStart(2)}  hf ${String(r.hashfull).padStart(4)}  ${String(r.score).padStart(9)}  ${r.bestmove}`,
 	);
 }
 
