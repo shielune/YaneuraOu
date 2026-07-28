@@ -130,6 +130,7 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
     hand_buckets = 1
     king_buckets = 1
     progress_buckets = 1
+    progress_entering_king = 0
     hand_name = ""
     king_name = ""
     progress_name = ""
@@ -162,17 +163,23 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
             king_buckets = king_map[token]
         elif token.startswith("PROGRESS"):
             raw = token[len("PROGRESS"):]
+            # 📝 末尾の "EK" は相入玉専用バケットを1つ足す指定。
+            #     NAGISA_V3 の評価関数がこの形 (progress8ek = 進行度8 + 相入玉1 = 9)。
+            entering_king = raw.endswith("EK")
+            if entering_king:
+                raw = raw[:-len("EK")]
             if not raw.isdigit() or int(raw) not in progress_values:
-                print(f"Error! : progress bucket must be progress2/3/4/8/16/32 , got {token}.")
+                print(f"Error! : progress bucket must be progress2/3/4/8/16/32 (optionally with 'ek' suffix) , got {token}.")
                 raise SystemExit(1)
             if progress_buckets != 1:
                 print(f"Error! : duplicate SFNN progress bucket in {layer_stack_spec}.")
                 raise SystemExit(1)
             progress_name = token
-            progress_buckets = int(raw)
+            progress_buckets = int(raw) + (1 if entering_king else 0)
+            progress_entering_king = 1 if entering_king else 0
         else:
             print(f"Error! : unknown SFNN layer stack token {token} in {layer_stack_spec}.")
-            print("Error! : SFNN layer stack tokens are hand64/256/1024, k3k3/k9k9/k21k21/k29k29, and progress2/3/4/8/16/32.")
+            print("Error! : SFNN layer stack tokens are hand64/256/1024, k3k3/k9k9/k21k21/k29k29, and progress2/3/4/8/16/32 (optionally progressNek).")
             raise SystemExit(1)
 
     canonical = "_".join([name for name in [hand_name, king_name, progress_name] if name])
@@ -180,7 +187,8 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
         canonical = "NONE"
 
     layer_count = hand_buckets * king_buckets * progress_buckets
-    return canonical, str(layer_count), str(hand_buckets), str(king_buckets), str(progress_buckets)
+    return (canonical, str(layer_count), str(hand_buckets), str(king_buckets),
+            str(progress_buckets), str(progress_entering_king))
 
 if arches[0].startswith("SFNN"):
     SFNN = True
@@ -211,7 +219,8 @@ if arches[0].startswith("SFNN"):
         layer_stack_start = 7
     layer_stack_spec = "_".join(arches[layer_stack_start:]) if len(arches) > layer_stack_start else ""
     (layer_stack_name, layer_stack_count, layer_stack_hand_buckets,
-        layer_stack_king_buckets, layer_stack_progress_buckets) = parse_sfnn_layer_stack_spec(layer_stack_spec)
+        layer_stack_king_buckets, layer_stack_progress_buckets,
+        layer_stack_progress_entering_king) = parse_sfnn_layer_stack_spec(layer_stack_spec)
 
     arches = [arches[1], arches[2], arches[3], arches[4], layer_stack_count]
 
@@ -443,6 +452,15 @@ if SFNN:
         #define NNUE_SFNN_HAND_BUCKETS {layer_stack_hand_buckets}
         #define NNUE_SFNN_KING_BUCKETS {layer_stack_king_buckets}
         #define NNUE_SFNN_PROGRESS_BUCKETS {layer_stack_progress_buckets}
+
+        // 1なら、進行度バケットの最後の1つを相入玉局面専用にする。
+        // 💡 NAGISA_V3 の評価関数 (progress8ek) がこの形。
+        #define NNUE_SFNN_PROGRESS_ENTERING_KING {layer_stack_progress_entering_king}
+
+        // 1なら、進行度係数を nn.bin ではなく外部ファイルから読む。
+        // 💡 progress8ek 系は係数を progress.bin として別配布しているのでこちら。
+        //    このとき nn.bin には進行度セクションが無いので、hashにも含めない。
+        #define NNUE_SFNN_PROGRESS_EXTERNAL {layer_stack_progress_entering_king}
 
         // Number of groups for the first affine layer of SFNN.
         // common+shard fc_0でのみ2以上になる。
