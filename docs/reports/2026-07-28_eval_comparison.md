@@ -11,8 +11,8 @@
 |---|---|
 | 局面 | `l1g1k2nl/1r4g2/2nsppsp1/p1pp2p1p/1p4PP1/P1P2P2P/1PSPPS3/2GK1G1R1/LN5NL w Bb 32` |
 | 探索 | `go depth 16` |
-| ビルド | native / clang-14 / `TARGET_CPU=OTHER` (スカラー) |
-| 固定 | `USI_Hash 1024` / `usinewgame` / 定跡オフ / `PvInterval 0` |
+| ビルド | native (clang-14 / `TARGET_CPU=OTHER` スカラー) と WASM (em++ 6.0.4 / node / pthread) |
+| 固定 | `Threads=1` / `USI_Hash 256` / `usinewgame` / 定跡オフ / `PvInterval 0` |
 | `FV_SCALE` | **エンジン既定の 16 のまま** |
 
 後手番 (`w`) の局面なので、**プラスが後手優勢**。
@@ -25,26 +25,42 @@
 評価関数 (NAGISA_V3 は 28 など) では、実運用の数値はこの表と変わる。
 今回は評価関数ごとの推奨値を持っていないため、全て既定値で揃えた。
 
-## 結果 (Threads=1 / 決定的)
+## 結果 (Threads=1 / `USI_Hash 256` / 決定的)
 
-| 評価関数 | アーキテクチャ | サイズ | score | nodes | bestmove |
+`score` は後手番の局面なので**プラスが後手優勢**。
+
+| 評価関数 | アーキテクチャ | サイズ | native | WASM | bestmove |
 |---|---|---|---|---|---|
-| `k_p_256/uonuma` | KP256 | 0.9 MB | **cp 56** | 294,224 | `3d3e ponder 2i3g` |
-| `k_p_256/suisho` (水匠 petite) | KP256 | 0.9 MB | **cp 52** | 309,313 | `3d3e ponder 2i3g` |
-| `halfkp_768/aoba` (AobaNNUE) | HalfKP 768x2-16-64 | 183.7 MB | **cp 28** | 582,688 | `3d3e ponder 2i3g` |
-| `halfkp_256/suisho5` (水匠5) | HalfKP 256x2-32-32 | 61.2 MB | **cp 8** | 368,195 | `3d3e ponder 2i3g` |
-| `halfkp_256/hao` | HalfKP 256x2-32-32 | 61.2 MB | **cp -43** | 214,377 | `3d3e ponder 2i3g` |
-| `halfka_hm2_1024/nagisa` (NAGISA_V3) | SFNN HalfKA_hm2 1024x2-15-64 k3k3 (LayerStack 9) | 74.8 MB | **cp -76** | 282,494 | `3d3e ponder 2i3g` |
+| `k_p_256/uonuma` | KP256 | 0.9 MB | **cp 56** | **cp 54** | `3d3e ponder 2i3g` |
+| `k_p_256/suisho` (水匠 petite) | KP256 | 0.9 MB | **cp 52** | **cp 51** | `3d3e ponder 2i3g` |
+| `halfkp_768/aoba` (AobaNNUE) | HalfKP 768x2-16-64 | 183.7 MB | **cp 28** | **cp 28** | `3d3e ponder 2i3g` |
+| `halfkp_256/suisho5` (水匠5) | HalfKP 256x2-32-32 | 61.2 MB | **cp 8** | **cp 94** | `3d3e ponder 2i3g` |
+| `halfkp_256/hao` | HalfKP 256x2-32-32 | 61.2 MB | **cp -43** | **cp -46** | `3d3e ponder 2i3g` |
+| `halfka_hm2_1024/nagisa` (NAGISA_V3) | SFNN HalfKA_hm2 1024x2-15-64 k3k3 (LayerStack 9) | 74.8 MB | **cp -76** | **cp -54** | `3d3e ponder 2i3g` |
+
+探索ノード数:
+
+| 評価関数 | native | WASM |
+|---|---|---|
+| `k_p_256/uonuma` | 294,224 | 215,106 |
+| `k_p_256/suisho` | 309,313 | 269,297 |
+| `halfkp_768/aoba` | 582,688 | 582,688 |
+| `halfkp_256/suisho5` | 368,195 | 743,902 |
+| `halfkp_256/hao` | 214,377 | 241,948 |
+| `halfka_hm2_1024/nagisa` | 282,494 | 389,416 |
 
 ### 読み取れること
 
-- **6つ全てが同じ最善手 `3d3e` (ponder `2i3g`) を返した。** 評価値の絶対値は
-  cp -76 〜 +56 と 130cp の幅があるが、指し手の判断は一致している
-- 評価値の幅は評価関数ごとの**スケールの違い**を多分に含む。`FV_SCALE` を
-  揃えていない以上、この表から「どれが強い」は読み取れない
-- 軽量な KP256 系 (0.9MB) が最もプラス寄り、大型の SFNN が最もマイナス寄り
-- 探索ノード数は同じ depth 16 でも 214k 〜 583k とばらつく。評価関数が違えば
-  枝刈りの効き方が変わるため
+- **12 通り (6評価関数 × native/WASM) すべてが同じ最善手 `3d3e` (ponder `2i3g`) を返した**
+- 評価値は cp -76 〜 +56 と 130cp の幅があるが、これは評価関数ごとの
+  **スケールの違い**を多分に含む。`FV_SCALE` を揃えていない以上、
+  この表から「どれが強い」は読み取れない
+- **`halfkp_768/aoba` だけ native と WASM がノード数まで完全一致**した (582,688)。
+  他は depth 16 に届くまでの探索木がずれる。これは既知の
+  [native/WASM 乖離](../wasm_native_divergence.md) で、局面と評価関数によって
+  出たり出なかったりする
+- 差が大きいのは `halfkp_256/suisho5` (cp 8 vs 94)。同じ最善手には収束しているが、
+  この評価関数ではズレが評価値に出やすい
 
 ## Threads=8 のとき (非決定的)
 
@@ -60,7 +76,8 @@ KP256 (水匠 petite) で同一設定を3回:
 同条件で **±40cp 程度ばらつく**（Threads=1 の cp 52 とも違う）。
 評価関数同士を比較する目的なら Threads=1 を使うこと。
 
-参考として Threads=8 での1回の測定値:
+参考として Threads=8 / `USI_Hash 1024` / native での1回の測定値
+(上の表とは hash が違うので直接比較はできない):
 
 | 評価関数 | score | nodes | nps |
 |---|---|---|---|
@@ -93,6 +110,41 @@ KP256 (水匠 petite) で同一設定を3回:
    移植せずに使える。`progress.bin` は今回使っていない
    (このネットは `k3k3` = 玉位置3x3バケットで、進行度バケットではない)
 
+### WASM 化で見つかった不具合 2 件
+
+**(a) `wasm_simd.cpp` の明示的インスタンス化不足**
+
+`emscripten_wasm_simd::affine` は template だが定義が `.cpp` にしかないので、
+使う層のサイズの組を明示的にインスタンス化しておく必要がある。
+HalfKP768 と SFNN のサイズが無く、リンクエラーで落ちた。
+
+```
+wasm-ld: error: undefined symbol: emscripten_wasm_simd::affine<1024, 16, 1024>(...)
+```
+
+必要な組を追加して解決。エディションを増やすと再発するので、
+`wasm_simd.cpp` にその旨をコメントで残した。**リンクエラーで気づけるので安全**。
+
+**(b) explicit 層の重み配置が WASM で壊れる**
+
+こちらは**黙って壊れる**ので厄介だった。SFNN は
+`affine_transform_explicit.h` / `affine_transform_sparse_input_explicit.h` を使うが、
+これらは snake_case の `get_weight_index` を持っており、
+先に直した `GetWeightIndex` (`affine_transform.h` 等) とは別物だった。
+
+結果、`Propagate()` の WASM SIMD 経路は重みを dense として読むのに、
+読み込み時は scrambled 配置で並べる、という食い違いが残っていた。
+
+| | nodes | score | bestmove |
+|---|---|---|---|
+| 修正前 | 7,500,088 | cp -20 | `7c6e ponder B*7c` |
+| 修正後 | 389,416 | cp -54 | `3d3e ponder 2i3g` |
+| native (参考) | 282,494 | cp -76 | `3d3e ponder 2i3g` |
+
+**最善手が別物になっていた。** ビルドもリンクも通り、エンジンは正常に起動し、
+それらしい評価値を返すので、比較して初めて気づけた。
+NNUE 系エディションを WASM に載せるときは、必ず native と突き合わせること。
+
 ### ヘッダのアーキ文字列が実体と食い違う例
 
 `halfkp_768/aoba` のヘッダは `Features=HalfKP(Friend)[125388->256x2]` と
@@ -108,8 +160,8 @@ KP256 (水匠 petite) で同一設定を3回:
 ```sh
 node script/bench_nodes.mjs \
   --eval assets/eval/<家系>/<名前>/nn.bin \
-  --go "depth 16" --hash 1024 --threads 1 \
-  --native "label=<エンジンのパス>"
+  --go "depth 16" --hash 256 --threads 1 \
+  --native "label=<エンジンのパス>" --wasm "label=<WASMビルドのディレクトリ>"
 ```
 
 評価関数は `assets/` 配下に置く (`.gitignore` 済み。リポジトリには入れない)。
