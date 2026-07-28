@@ -174,10 +174,7 @@ class AffineTransformSparseInput {
 
     static constexpr IndexType GetWeightIndex(IndexType i) {
 #if defined(USE_WASM_SIMD)
-        // The WASM SIMD `Propagate()` short-circuit reads weights as dense
-        // row-major, not the SF17 scrambled layout (introduced in 9c41f5b7 /
-        // 434a3392). Keep the on-disk weight order dense on WASM so the
-        // reinterpret_cast in Propagate() sees the right bytes.
+        // affine_transform.h の同名関数と同じ理由で、WASM では dense を強制する。
         return i;
 #elif defined(USE_SSSE3) || USE_NEON >= 8
         return kOutputDimensions % 4 == 0 ? GetWeightIndexScrambled(i) : i;

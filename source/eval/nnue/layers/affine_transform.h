@@ -222,10 +222,11 @@ class AffineTransform {
 
     static constexpr IndexType GetWeightIndex(IndexType i) {
 #if defined(USE_WASM_SIMD)
-        // The WASM SIMD `Propagate()` short-circuit reads weights as dense
-        // row-major, not the SF17 scrambled layout (introduced in 9c41f5b7 /
-        // 434a3392). Keep the on-disk weight order dense on WASM so the
-        // reinterpret_cast in Propagate() sees the right bytes.
+        // WASM SIMD の Propagate() 短絡は重みを dense (row-major) として読むので、
+        // SF17 由来の scrambled 配置 (9c41f5b7 / 434a3392) にしてはいけない。
+        // ⚠ em++ ビルドは -DUSE_SSE42 を渡しており、それが config.h で
+        //   USE_SSE41 → USE_SSSE3 と連鎖するため、この分岐が無いと
+        //   下の #elif に吸われて scrambled になり、評価値が壊れる。
         return i;
 #elif defined(USE_SSSE3) || defined(USE_NEON_DOTPROD)
         return kOutputDimensions % 4 == 0 ? GetWeightIndexScrambled(i) : i;
