@@ -228,23 +228,45 @@ else
 	ifneq (,$(findstring em++,$(COMPILER)))
 		EM_EXPORT_NAME=YaneuraOu
 		EM_INITIAL_MEMORY_SIZE=$(shell if [ $(MATERIAL_LEVEL) -ge 5 ]; then echo 385875968; else echo 138412032; fi)
+		EM_MAXIMUM_MEMORY_SIZE ?= 4294967296
+		EM_STACK_SIZE ?= 67108864
+		EM_CLOSURE ?= 1
+		# web / node の 2 variant を同じ source から吐くので、ENVIRONMENT と
+		# EXPORTED_RUNTIME_METHODS は make 呼び出し側 (script/wasm_build.js)
+		# から上書きできるように ?= で default を置く。
+		EM_ENVIRONMENT ?= web,worker
+		EM_EXPORTED_RUNTIME_METHODS ?= ['FS','ccall']
+		# pthread 付きビルド (node/web variant 向け) か、single-thread ビルド
+		# (edge variant 向け, V8 Isolate 系ランタイムでは Worker / SharedArrayBuffer
+		# が使えないため) かを切り替える。
+		EM_PTHREAD ?= 1
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
-		CPPFLAGS += -pthread
+		ifeq ($(EM_PTHREAD),1)
+			CPPFLAGS += -pthread
+		endif
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
-		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node
-		LDFLAGS += -s PTHREAD_POOL_SIZE=32
-		# -s PTHREAD_POOL_SIZE_STRICT=32
-		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"
-		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=4294967296
-		LDFLAGS += -s STACK_SIZE=67108864
+		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s EXPORT_ES6=1 -s ENVIRONMENT=$(EM_ENVIRONMENT)
+		# emscripten >= 3.1.74 では INCOMING_MODULE_JS_API のデフォルトから
+		# print/printErr/postRun/preRun が外れ、wasm_pre.js の Module.print /
+		# Module.postRun 上書きが無視されるようになった (pthread ワーカーの
+		# stdout が吸い込まれる症状 B)。明示 whitelist で復活させる。
+		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
+		ifeq ($(EM_PTHREAD),1)
+			LDFLAGS += -pthread
+			LDFLAGS += -s PTHREAD_POOL_SIZE=32
+			# -s PTHREAD_POOL_SIZE_STRICT=32
+		endif
+		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
+		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=$(EM_MAXIMUM_MEMORY_SIZE)
+		LDFLAGS += -s STACK_SIZE=$(EM_STACK_SIZE)
 		# LDFLAGS += -s PROXY_TO_PTHREAD
 		# LDFLAGS += -s ALLOW_UNIMPLEMENTED_SYSCALLS
 		# LDFLAGS += -s ASSERTIONS
-		LDFLAGS += -s --closure 1
+		LDFLAGS += --closure $(EM_CLOSURE)
 	endif
 endif
 

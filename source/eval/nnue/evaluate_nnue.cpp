@@ -62,6 +62,14 @@ void add_options(OptionsMap& options, ThreadPool& threads) {
 bool        eval_loaded   = false;
 std::string last_eval_dir = "None";
 
+#if defined(__EMSCRIPTEN__)
+// yaneuraou.wasm
+// 前回のOptions["EvalFile"]
+// 📝 wasmでは評価関数ファイルをMEMFSへ実行時に流し込むので、
+//     ファイル名を固定にできずエンジンオプションで受け取る。
+std::string last_eval_file = "None";
+#endif
+
 // 📌 この評価関数で追加したいエンジンオプションはここで追加する。
 void add_options_(OptionsMap& options, ThreadPool& threads) {
 
@@ -87,6 +95,24 @@ void add_options_(OptionsMap& options, ThreadPool& threads) {
                     YaneuraOu::Eval::NNUE::FV_SCALE = int(o);
                     return std::nullopt;
                 }));
+
+#if defined(__EMSCRIPTEN__)
+    // yaneuraou.wasm
+    // 評価関数ファイル名。load_eval()がOptions["EvalFile"]を読むので、
+    // ここで生やしておかないと"isready"で落ちる。
+    const char* default_eval_file = "nn.bin";
+    last_eval_file                = default_eval_file;
+    Options.add("EvalFile", Option(default_eval_file, [](const Option& o) {
+                    std::string eval_file = std::string(o);
+                    if (last_eval_file != eval_file)
+                    {
+                        // 評価関数ファイル名の変更に際して、読み込みフラグをクリアする。
+                        last_eval_file = eval_file;
+                        eval_loaded    = false;
+                    }
+                    return std::nullopt;
+                }));
+#endif
 
 }
 #endif

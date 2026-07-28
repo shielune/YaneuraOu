@@ -155,6 +155,16 @@ public:
 	// 実行しているjob
 	std::function<void()>           jobFunc;
 
+#if defined(__EMSCRIPTEN__)
+	// yaneuraou.wasm
+	// このスレッドがidle_loop()に到達し、workerの生成まで終わったか。
+	// 📝 wasmではブラウザのメインスレッドをブロックできないので、
+	//     コンストラクタでスレッドの起動完了を待てない。代わりにこのフラグを公開し、
+	//     usi_command()が「まだ起動中」を呼び出し側(JS)に返せるようにする。
+	//     JS側は0以外が返ってきたらexponential backoffで再送する。
+	std::atomic_bool threadStarted = false;
+#endif
+
 private:
 	// exitフラグやsearchingフラグの状態を変更するときのmutex
 	std::mutex                mutex;
