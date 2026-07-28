@@ -52,6 +52,9 @@
 ### 読み取れること
 
 - **12 通り (6評価関数 × native/WASM) すべてが同じ最善手 `3d3e` (ponder `2i3g`) を返した**
+- ⚠ ただし `halfka_hm2_1024/nagisa` は **bucket 選択が学習時と食い違っており、
+  本来の強さで測れていない** (下記「NAGISA_V3 の bucket 不一致」)。
+  読み込めて、それらしい値を返すが、別物として扱うこと
 - 評価値は cp -76 〜 +56 と 130cp の幅があるが、これは評価関数ごとの
   **スケールの違い**を多分に含む。`FV_SCALE` を揃えていない以上、
   この表から「どれが強い」は読み取れない
@@ -105,10 +108,62 @@ KP256 (水匠 petite) で同一設定を3回:
 1. **HalfKP768 が動的アーキ生成だけで通った。** fork が手で配線していた
    アーキヘッダと Makefile 分岐 (`17fcf51c`, `3e1f9068`) は不要になる。
    ビルド時に `PYTHON=python3` を渡す必要がある
-2. **NAGISA_V3 の評価関数が upstream のエディション指定だけで読めた。**
-   SFNN + LayerStack が upstream 本体に入ったため、keinoda 側の実装を
-   移植せずに使える。`progress.bin` は今回使っていない
-   (このネットは `k3k3` = 玉位置3x3バケットで、進行度バケットではない)
+2. **NAGISA_V3 の評価関数は「読める」が、本来の性能は出ていない。**
+   → 詳細は下記「⚠ NAGISA_V3 の bucket 不一致」。
+
+## ⚠ NAGISA_V3 の bucket 不一致 (この計測値は本来の強さではない)
+
+**この表の `halfka_hm2_1024/nagisa` の数値は、本来と違う bucket 選択で
+測ったものなので、NAGISA_V3 の実力を表していない。**
+
+### 何が起きているか
+
+このネットは LayerStack を 9 個持つ。9 個のうちどれを使うかを決める規則が
+学習時と実行時で食い違っている。
+
+| | bucket の決め方 |
+|---|---|
+| 学習時 (keinoda) | `progress8ek` = 進行度で 0〜7、相入玉局面なら 8 |
+| 今回の計測 (upstream `k3k3`) | 玉の位置 (3x3 = 9通り) |
+
+どちらも 9 バケットなのでネットワーク構造は同一で、**hash 検証を通ってしまう**。
+つまりエラーも警告も出ないまま、学習時と別の重みが選ばれ続ける。
+
+`progress8ek` の実装は keinoda 側の `source/tanuki_progress.cpp` にあり、
+進行度モデルの係数を **`progress.bin` (別ファイル)** から読む:
+
+```cpp
+// keinoda/YaneuraOu source/tanuki_progress.cpp
+int LayerStackIndexProgress8Ek(const Position& pos) {
+    // 相入玉局面ではprogress係数を参照せず、9番目のLayerStackを選ぶ。
+    if (IsMutualEnteringKing(pos)) return 8;
+    return LayerStackIndex(pos);   // ← progress.bin の係数から進行度を計算
+}
+```
+
+### upstream の進行度 bucket では代用できない
+
+upstream HEAD にも進行度 bucket は入ったが、別物である。
+
+| | upstream | keinoda (NAGISA_V3) |
+|---|---|---|
+| bucket 数 | 2 / 3 / 4 / 8 / 16 / 32 | 9 (進行度8 + 相入玉1) |
+| 進行度係数の場所 | **`nn.bin` に埋め込み** (`evaluate_nnue.cpp:338` が同じ stream から読む) | **別ファイル `progress.bin`** |
+| 相入玉の特別扱い | 無し | 有り (bucket 8) |
+
+`YANEURAOU_ENGINE_SFNN_..._progress8` は 8 バケットなので 9 個のネットには
+合わないし、係数を `nn.bin` から読もうとするので `progress.bin` は使われない。
+
+### 本来の性能を出すには
+
+keinoda 側の `tanuki_progress.{cpp,h}` (約 290 行) と、`progress.bin` を
+`LS_PROGRESS_COEFF` で読ませる仕組みを移植する必要がある。
+これは [`2026-07-27_nagisa_v3_diff_survey.md`](2026-07-27_nagisa_v3_diff_survey.md)
+で「進行度SFNN」として整理した項目そのもので、**未着手**。
+
+移植すれば upstream の SFNN 基盤 (LayerStack, HalfKA_hm2) の上に
+bucket 選択規則を差し替えるだけで済むはずで、V8.50 時代に必要だった
+「NNUE 基盤ごと移植」よりは大幅に小さい。
 
 ### WASM 化で見つかった不具合 2 件
 
