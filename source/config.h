@@ -350,6 +350,23 @@ constexpr int MAX_PLY_NUM = 246;
 #define PRETTY_JP
 
 // --------------------
+// yaneuraou.wasm
+// --------------------
+
+// スレッドを1つも生成できないWASMビルドであるか。
+/*
+	📓 Cloudflare Workers / Vercel Edge などのV8 Isolate系ランタイムでは
+	    Worker も SharedArrayBuffer も使えないので、Makefileから
+	    EM_PTHREAD=0 でビルドする(= -pthread を渡さない)。
+	    このとき std::thread は生成した瞬間に例外を投げるが、
+	    -fno-exceptions でビルドしているので捕捉できずabortする。
+	    そのため、スレッドを作らず呼び出し元で同期実行する経路が必要になる。
+*/
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+	#define WASM_NO_PTHREAD
+#endif
+
+// --------------------
 // release configurations
 // --------------------
 

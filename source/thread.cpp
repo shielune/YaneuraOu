@@ -28,9 +28,18 @@ Thread::Thread(Search::SharedState& sharedState,
                OptionalThreadToNumaNodeBinder binder) :
     idx(n),
     idxInNuma(numaN),
-    totalNuma(totalNumaCount),
+    totalNuma(totalNumaCount)
     //nthreads(sharedState.options["Threads"]),
-    stdThread(&Thread::idle_loop, this) {
+#if !defined(WASM_NO_PTHREAD)
+    ,
+    stdThread(&Thread::idle_loop, this)
+#endif
+{
+#if defined(WASM_NO_PTHREAD)
+    // スレッドを作らないので、idle_loop()に入らない。
+    // run_custom_job()が呼び出し元で同期実行するため、待機状態にしておく。
+    searching = false;
+#endif
 
 #if !defined(__EMSCRIPTEN__)
 
@@ -104,10 +113,15 @@ Thread::~Thread() {
     // 探索中にスレッドオブジェクトが解体されることはない。
     ASSERT_LV3(!searching);
 
-    // 探索は終わっているのでexitフラグをセットしてstart_searching()を呼べば終了するはず。
     exit = true;
+
+#if !defined(WASM_NO_PTHREAD)
+    // 探索は終わっているのでexitフラグをセットしてstart_searching()を呼べば終了するはず。
     start_searching();
     stdThread.join();
+#else
+    // idle_loop()で待機しているスレッドが居ないので、起こす相手も待つ相手も居ない。
+#endif
 }
 
 // Wakes up the thread that will start the search
@@ -131,14 +145,40 @@ void Thread::clear_worker() {
 
 void Thread::wait_for_search_finished() {
 
+#if defined(WASM_NO_PTHREAD)
+    // run_custom_job()が同期実行するので、ここに来た時点で必ず終わっている。
+    // 待つとcvを誰も起こさないため永久に固まる。
+    return;
+#else
     std::unique_lock<std::mutex> lk(mutex);
     cv.wait(lk, [&] { return !searching; });
+#endif
 }
 
 // Launching a function in the thread
 // スレッド内で関数を実行します
 
 void Thread::run_custom_job(std::function<void()> f) {
+
+#if defined(WASM_NO_PTHREAD)
+    /*
+		📓 スレッドが無いので、jobを呼び出し元のスレッドでその場で実行する。
+
+		   これにより "go" は同期呼び出しになる。すなわち
+		   ThreadPool::start_thinking() が bestmove を出し終えてから返る。
+		   V8 Isolate系ランタイムはどのみち1リクエスト1スレッドなので、
+		   この挙動で困らない。
+		   ⚠ 逆に、探索中に "stop" を送って止めることはできない。
+		     時間制御 (go movetime / go nodes) で打ち切ること。
+	*/
+    if (exit)
+        return;
+
+    searching = true;
+    if (f)
+        f();
+    searching = false;
+#else
     {
         std::unique_lock<std::mutex> lk(mutex);
         cv.wait(lk, [&] { return !searching; });
@@ -146,6 +186,7 @@ void Thread::run_custom_job(std::function<void()> f) {
         searching = true;
     }
     cv.notify_one();
+#endif
 }
 
 void Thread::ensure_network_replicated() { worker->ensure_network_replicated(); }
@@ -210,6 +251,14 @@ void ThreadPool::set(const NumaConfig&   numaConfig,
 		NumaPolicyとoptions["Threads"]に変更がなければ、再確保せずに済むのだが、
 		worker_factoryが一致しない場合作り直す必要があり、その判定が難しいので毎回再確保することにする。
 	*/
+
+#if defined(WASM_NO_PTHREAD)
+    // スレッドを生成できないビルドでは、Workerを複数持っても
+    // run_custom_job()が呼び出し元で逐次実行するだけで並列にならない。
+    // (それどころか、探索が threads 個ぶん直列に走って時間を食う)
+    // よって常に1スレッドに畳む。
+    requested_threads = 1;
+#endif
 
 #if defined(__EMSCRIPTEN__)
     // yaneuraou.wasm
