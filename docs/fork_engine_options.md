@@ -142,4 +142,4 @@ info string NNUE header version mismatch: expected 2062757654 got 3735928559 (co
 [keinoda/YaneuraOu](https://github.com/keinoda/YaneuraOu) (NAGISA_V3) からの
 移植。あちらは upstream V9.60 ベースなので、いずれも V8.50 の構造に
 合わせて書き直してある。移植の可否を含む調査結果は
-`docs/nagisa_v3_diff_survey.md` にまとめてある。
+`docs/reports/2026-07-27_nagisa_v3_diff_survey.md` にまとめてある。

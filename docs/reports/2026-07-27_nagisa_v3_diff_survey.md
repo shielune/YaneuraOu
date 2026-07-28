@@ -72,7 +72,7 @@ keinoda 自身のコードは `tanuki_progress.*` と統合部分だけで、そ
 |---|---|---|
 | `script/spsa/{gen_params,apply_params,spsa_common}.py` | TUNABLE_PARAM 定義を読んで rshogi SPSA 用 params を生成 / 最終値をソースへ書き戻す | **高**（ソース非依存の Python） |
 | `script/spsa/test_spsa_tools.py` | 上記のテスト（395行） | 高 |
-| `docs/spsa-tuning.md` | 運用手順 | 高 |
+| `docs/spsa-tuning.md` (keinoda 側) | 運用手順 | 高 |
 | `source/tune.h` | `TUNABLE_PARAM` マクロ本体。USI オプション化の仕組み | **upstream V9.60 由来**（`96be9e0d`）。移植には V8.50 の `USI::Option` 実装に合わせた書き換えが必要 |
 | `source/config.h` | `FOR_TOURNAMENT` と `ENABLE_TUNE` の排他チェック 6行 | 高 |
 | 調整値 146 個（search.cpp 137 + movepick.cpp 9） | SPSA 実測値 | **不可** |

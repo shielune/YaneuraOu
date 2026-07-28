@@ -17,10 +17,8 @@ yaneurao/YaneuraOu のフォーク。WASM パッケージの配布と、いく�
 | [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike) |
 | [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) | WASM パッケージの利用ガイド |
 | [`docs/wasm_release_workflow.md`](docs/wasm_release_workflow.md) | WASM パッケージのリリース手順 |
-| [`docs/wasm_upgrade_changelog.md`](docs/wasm_upgrade_changelog.md) | emscripten / upstream 追従作業の記録 |
-| [`docs/nagisa_v3_diff_survey.md`](docs/nagisa_v3_diff_survey.md) | keinoda/YaneuraOu (NAGISA_V3) との差分調査 |
 | [`docs/wasm_native_divergence.md`](docs/wasm_native_divergence.md) | native と WASM で探索結果が分かれる件の調査記録 |
-| [`reports/`](reports/) | 作業報告と性能測定の記録 (日付ごと) |
+| [`docs/reports/`](docs/reports/) | 作業報告・調査記録・性能測定 (日付ごと)。emscripten 追従、NAGISA_V3 差分調査、V9.6x 移植と性能 |
 
 以下は upstream の README。
 
