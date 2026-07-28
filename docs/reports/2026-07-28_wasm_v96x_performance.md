@@ -96,7 +96,7 @@ browser : 1,000,322 nodes / cp -3 / bestmove 3d3e ponder 2i3g
 
 一方で native との間、および native NEON と native scalar の間には差がある。
 どちらも今回の移植が原因ではなく、調査の詳細は
-[`docs/wasm_native_divergence.md`](../docs/wasm_native_divergence.md) にまとめた。
+[`docs/wasm_native_divergence.md`](../wasm_native_divergence.md) にまとめた。
 
 ## 再現方法
 
