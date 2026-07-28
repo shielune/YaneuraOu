@@ -506,6 +506,21 @@ std::string Engine::thread_allocation_information_as_string() const {
 
 // 💡 USIで"isready"に対して時間のかかる処理を実行したい時に用いる。
 void Engine::run_heavy_job(std::function<void()> job) {
+
+#if defined(__EMSCRIPTEN__)
+    // yaneuraou.wasm
+    //
+    // keep alive用のスレッドを起こして、その起動をスピン待ちする実装は、
+    // wasmでは使えない:
+    //   - pthreadなしビルドではそもそもstd::threadを生成できない
+    //   - pthreadありビルドでも、この関数はブラウザのメインスレッドから
+    //     呼ばれるため、Tools::sleep()でのスピン待ちがイベントループを止めて
+    //     ワーカーの起動自体を妨げ、デッドロックする
+    // wasmではGUIのタイムアウトを気にする必要もないので、そのまま実行する。
+    job();
+    return;
+#endif
+
     // --- Keep Alive的な処理 ---
 
     // "isready"を受け取ったあと、"readyok"を返すまで5秒ごとに改行を送るように修正する。(keep alive的な処理)

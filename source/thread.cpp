@@ -62,16 +62,33 @@ Thread::Thread(Search::SharedState& sharedState,
 
 #else
     // yaneuraou.wasm
-    // wait_for_search_finished すると、ブラウザのメインスレッドをブロックしデッドロックが発生するため、コメントアウト。
+    //
+    // wait_for_search_finished() すると、ブラウザのメインスレッドをブロックして
+    // デッドロックするので待たない。ただし、worker生成のjob自体は投げる必要がある。
+    // 投げないとworkerが永久にnullptrのままになり、最初の"go"で
+    // ThreadPool::start_thinking()の th->worker->limits でnull参照して落ちる。
     //
     // 新しいスレッドが cv を設定するのを待ってから、ブラウザに処理をパスしたいが、
     // 新しいスレッド用のworkerを作成するためには、いったんブラウザに処理をパスする必要がある。
     //
     // https://bugzilla.mozilla.org/show_bug.cgi?id=1049079
     //
-    // threadStarted という変数を設けて全てのスレッドが開始するまでリトライするようにする
+    // 代わりに threadStarted を設けて、全てのスレッドが開始するまで
+    // usi_command()側でリトライさせる。
     //
     // 参考：https://github.com/lichess-org/stockfish.wasm/blob/a022fa1405458d1bc1ba22fe813bace961859102/src/thread.cpp#L38
+
+    run_custom_job([this, &binder, &sharedState, n, worker_factory]() {
+        this->numaAccessToken = binder();
+        this->worker          = std::move(
+          worker_factory(sharedState, {n, idxInNuma, totalNuma, this->numaAccessToken}));
+
+        // workerの生成まで終わって初めて "起動済み" とみなす。
+        // ⚠ idle_loop()の先頭ではなくここで立てること。idle_loop()の先頭で立てると
+        //   worker生成前に"go"を受け付けてしまい、null参照する。
+        this->threadStarted = true;
+    });
+
 #endif
 }
 
@@ -193,6 +210,19 @@ void ThreadPool::set(const NumaConfig&   numaConfig,
 		NumaPolicyとoptions["Threads"]に変更がなければ、再確保せずに済むのだが、
 		worker_factoryが一致しない場合作り直す必要があり、その判定が難しいので毎回再確保することにする。
 	*/
+
+#if defined(__EMSCRIPTEN__)
+    // yaneuraou.wasm
+    //
+    // この関数は"isready"のたびにEngine::resize_threads()から呼び出される。
+    // 解体側は ~Thread() → stdThread.join() でブロックするため、ブラウザの
+    // メインスレッドから呼ぶとデッドロックする。またwasmではNumaPolicyが
+    // 意味を持たないので、要求数が変わらないなら作り直す必要もない。
+    // 📝 wasmでスレッド数を変えたい場合は、いったんインスタンスを捨てて
+    //     作り直す運用とする。
+    if (threads.size() == requested_threads)
+        return;
+#endif
 
     // いま生成済みのスレッドは全部解体してしまう。
     if (threads.size() > 0)  // destroy any existing thread(s)

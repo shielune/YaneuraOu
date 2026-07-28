@@ -60,6 +60,15 @@ struct overload : Ts... {
 template<typename... Ts>
 overload(Ts...) -> overload<Ts...>;
 
+#if defined(__EMSCRIPTEN__)
+// yaneuraou.wasm
+// USIEngine::loop()から登録される、コマンドの宛先。
+// 📝 shipしている3種のentry point(YaneuraOuEngine / YaneuraOuMateEngine /
+//     TanukiMateEngine)のいずれから起動されても、loop()は必ず通るので
+//     ここ1箇所で受けられる。
+static USIEngine* g_wasm_usi = nullptr;
+#endif
+
 // string_viewで受け取ったものを"\n"で複数行に分割して、それをinfo stringとして出力する。
 void USIEngine::print_info_string(std::string_view str) {
 	sync_cout_start();
@@ -164,6 +173,11 @@ void USIEngine::loop()
 #else
 	// yaneuraOu.wasm
 	// ここでループしてしまうと、ブラウザのメインスレッドがブロックされてしまう。
+	// 代わりに、このインスタンスをusi_command()から到達できるように登録しておく。
+	// 📝 このあとentry point(engine_main)へ戻り、そこでengine/usiのunique_ptrが
+	//     意図的にrelease()される。EXIT_RUNTIME=0なのでmain()を抜けても
+	//     ランタイムは動き続け、JS側からのccallでこのインスタンスが使われる。
+	g_wasm_usi = this;
 #endif
 }
 
@@ -1800,30 +1814,52 @@ std::string USIEngine::value(Value v)
 
 
 
+#endif
+
 #if defined(__EMSCRIPTEN__)
 // --------------------
-// EMSCRIPTEN support
+// yaneuraou.wasm — JavaScript からの USI コマンド受け口
 // --------------------
-static StateListPtr states(new StateList(1));
 
-// USI応答部 emscriptenインターフェース
-EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char *c_cmd) {
-	std::string cmd(c_cmd);
+/*
+	📓 JS側との契約 (source/wasm_pre.js と npm パッケージ 20 種が依存している)
 
-	static Position pos;
-	string token;
+		Module.ccall("usi_command", "number", ["string"], [cmd])
 
-	for (Thread* th : Threads) {
+	戻り値:
+		0        … 受理した
+		0以外    … まだ準備ができていない。JS側は同じコマンドを
+		            exponential backoff で再送する。
+
+	"quit" は JS側 (Module.terminate) で握り潰されるのでここには来ない。
+	エンジンの出力は Module.print 経由で addMessageListener に配られる。
+*/
+
+// 全スレッドのworkerが生成済みか。
+bool USIEngine::wasm_threads_ready() const {
+	for (auto& th : const_cast<USIEngine*>(this)->engine.get_threads())
 		if (!th->threadStarted)
-			return 1;
-	}
+			return false;
+	return true;
+}
 
-	usi_cmdexec(pos, states, cmd);
+EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char* c_cmd) {
+
+	// USIEngine::loop()がまだ呼ばれていない(= 起動途中)。
+	if (g_wasm_usi == nullptr)
+		return 1;
+
+	// スレッドの起動待ち。
+	// 📝 ここでブロックして待つことはできない。ワーカーの起動には
+	//     ブラウザのイベントループに制御を返す必要があるため、待つと
+	//     そのまま固まる。JS側に再送してもらう。
+	if (!g_wasm_usi->wasm_threads_ready())
+		return 1;
+
+	g_wasm_usi->wasm_exec(std::string(c_cmd));
 
 	return 0;
 }
-#endif
-
 #endif
 
 } // namespace YaneuraOu
