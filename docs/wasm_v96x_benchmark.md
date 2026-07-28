@@ -65,18 +65,23 @@ node script/bench_nodes.mjs \
 ほぼ線形。1倍を超えるのは置換表の共有効果。
 ⚠ 2スレッド以上の探索は非決定的なので、この列は速度の比較にのみ使うこと。
 
-### node と browser の比較 — 未計測
+### node と browser の比較
 
-`EM_ENVIRONMENT=web,worker` のビルドをヘッドレス Chromium で走らせる計測は
-**この開発環境ではできなかった**。`~/.cache/ms-playwright/chromium-1217` の展開が
-途中で切れており (`icudtl.dat` も `.pak` も無い)、起動時に
-`Invalid file descriptor to ICU data received` で落ちる。入れ直しには
-`npx playwright install` が要る。
+`EM_ENVIRONMENT=node` のビルドを Node 26 で、`EM_ENVIRONMENT=web,worker` の
+ビルドをヘッドレス Chromium 147 で、同一条件で走らせたもの。
 
-計測用のハーネスは `script/bench_browser.mjs` に用意してある
-(COOP/COEP 付きの静的サーバー + ページ側の USI ドライバ + Playwright 起動)。
-**ブラウザが無いため未実行・未検証**なので、動くブラウザのある環境か CI で
-最初に流すときは、まず動作確認から入ること。
+| Threads | node nps | browser nps | browser / node |
+|---|---|---|---|
+| 1 | 686k | 678k | 0.99 |
+| 2 | 1,433k | 1,386k | 0.97 |
+| 4 | 2,916k | 2,678k | 0.92 |
+
+**1スレッドではほぼ同一**、スレッドを増やすとブラウザ側がわずかに不利になる
+(4スレッドで 8% 差)。`SharedArrayBuffer` 経由のワーカー同期が
+`node:worker_threads` よりやや重いためと思われるが、実用上は誤差の範囲。
+
+探索結果は 1スレッドで **node と完全一致** (どちらも 1,000,322 nodes / cp -3 /
+`bestmove 3d3e ponder 2i3g`)。ランタイムが違っても同じ木を読んでいる。
 
 ```sh
 node script/bench_browser.mjs --dir <web,worker ビルドのディレクトリ> \
@@ -86,6 +91,11 @@ node script/bench_browser.mjs --dir <web,worker ビルドのディレクトリ> 
 pthread 版は `SharedArrayBuffer` を使うので、配信側に
 `Cross-Origin-Opener-Policy: same-origin` と
 `Cross-Origin-Embedder-Policy: require-corp` が必須。ハーネスはこれを付けている。
+
+> 📝 `playwright install chromium` はこの環境では展開フェーズで停止した
+> (ダウンロードは完了、FS は高速、それでもファイル数が10のまま増えない)。
+> zip を直接落として `unzip` すると4秒で展開できたので、同じ症状に当たったら
+> `--chromium <path>` で展開先を直接指定すればよい。
 
 ---
 
