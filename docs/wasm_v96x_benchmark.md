@@ -22,14 +22,22 @@ node script/bench_nodes.mjs \
 局面 `l1g1k2nl/1r4g2/2nsppsp1/p1pp2p1p/1p4PP1/P1P2P2P/1PSPPS3/2GK1G1R1/LN5NL w Bb 32` を
 100万ノード読ませたときの所要時間 (3回の中央値)。`Threads=1` / `USI_Hash 256` / `usinewgame`。
 
-| ビルド | 時間 | nps | 対 scalar |
+| ビルド | 時間 | nps | 対 gcc scalar |
 |---|---|---|---|
-| native gcc (NEON / GRAVITON2) | 1,336 ms | 749k | 3.69× |
-| **wasm32 pthread** | **1,452 ms** | **689k** | 3.39× |
-| **wasm64 pthread (Memory64)** | 1,637 ms | 611k | 3.01× |
-| wasm32 SIMD なし | 1,760 ms | 568k | 2.80× |
-| native clang-14 (scalar) | 3,144 ms | 318k | 1.57× |
-| native gcc (scalar) | 4,925 ms | 203k | 1.00× |
+| native clang-14 (NEON / GRAVITON2) | 1,346 ms | 743k | 3.70× |
+| native gcc (NEON / GRAVITON2) | 1,350 ms | 741k | 3.69× |
+| **wasm32 pthread** | **1,452 ms** | **689k** | 3.43× |
+| **wasm64 pthread (Memory64)** | 1,637 ms | 611k | 3.04× |
+| wasm32 SIMD なし | 1,760 ms | 568k | 2.83× |
+| native clang-14 (scalar) | 3,202 ms | 313k | 1.56× |
+| native gcc (scalar) | 4,984 ms | 201k | 1.00× |
+
+コンパイラの効き方が SIMD の有無で大きく違う:
+
+- **NEON 版では gcc と clang に差がない** (741k vs 743k)。NNUE の重い部分が
+  intrinsics で書かれていて、コンパイラの裁量が小さいため
+- **scalar 版では clang が gcc より 56% 速い** (313k vs 201k)。手書き SIMD が無い分、
+  自動ベクトル化の質がそのまま出る
 
 `USI_Hash 16` で揃えた場合の edge 版:
 
@@ -56,6 +64,28 @@ node script/bench_nodes.mjs \
 
 ほぼ線形。1倍を超えるのは置換表の共有効果。
 ⚠ 2スレッド以上の探索は非決定的なので、この列は速度の比較にのみ使うこと。
+
+### node と browser の比較 — 未計測
+
+`EM_ENVIRONMENT=web,worker` のビルドをヘッドレス Chromium で走らせる計測は
+**この開発環境ではできなかった**。`~/.cache/ms-playwright/chromium-1217` の展開が
+途中で切れており (`icudtl.dat` も `.pak` も無い)、起動時に
+`Invalid file descriptor to ICU data received` で落ちる。入れ直しには
+`npx playwright install` が要る。
+
+計測用のハーネスは `script/bench_browser.mjs` に用意してある
+(COOP/COEP 付きの静的サーバー + ページ側の USI ドライバ + Playwright 起動)。
+**ブラウザが無いため未実行・未検証**なので、動くブラウザのある環境か CI で
+最初に流すときは、まず動作確認から入ること。
+
+```sh
+node script/bench_browser.mjs --dir <web,worker ビルドのディレクトリ> \
+  --eval assets/eval/k_p_256/suisho/nn.bin --nodes 1000000 --hash 256
+```
+
+pthread 版は `SharedArrayBuffer` を使うので、配信側に
+`Cross-Origin-Opener-Policy: same-origin` と
+`Cross-Origin-Embedder-Policy: require-corp` が必須。ハーネスはこれを付けている。
 
 ---
 
@@ -92,7 +122,30 @@ depth 8 / 10 / 12 / 14 のすべてがノード数まで完全一致する。
 | 非決定性 | 各ビルドを3回実行 | ✗ 無関係 (毎回同一) |
 
 構図としては **WASM 系 (32bit/64bit/SIMD有無) が全て一致**し、
-**native 系 (gcc/clang/NEON以外) が全て一致**し、その2陣営の間でだけ食い違う。
+**native scalar 系 (gcc/clang) が全て一致**し、その2陣営の間でだけ食い違う。
+
+### 別件: native NEON も scalar と食い違う
+
+上とは独立した現象として、`TARGET_CPU=GRAVITON2` (NEON) のビルドは
+native scalar とも WASM とも違う結果を返す。
+
+| ビルド | nodes | score | bestmove |
+|---|---|---|---|
+| gcc NEON / clang NEON | 1,000,268 | cp 1 | `8b5b ponder 3e3d` |
+| gcc scalar / clang scalar | 1,000,703 | cp -53 | `3d3e ponder 2i3g` |
+| wasm (全変種) | 1,000,322 | cp -3 | `3d3e ponder 2i3g` |
+
+**gcc と clang の NEON 版が完全一致する**ので、コンパイラのコード生成ではなく
+**NEON カーネルのコードそのもの**が scalar と違う答えを出している。
+
+この差異は V8.50 にも存在し、今回の移植とは無関係。怪しい点として
+`USE_NEON_DOTPROD` が `affine_transform.h` など9箇所で参照されているのに
+**ソースのどこでも定義されていない**ことを確認している
+(`TARGET_CPU=GRAVITON2` は `-march=...+dotprod` でコンパイルしているのに、
+コード側は dotprod 無しとして扱われる)。
+
+配布物は WASM と x86 中心なので実害は限定的だが、ARM ネイティブ
+(Apple Silicon 含む) でビルドして使う場合は影響しうる。
 
 ### 現時点の評価
 
