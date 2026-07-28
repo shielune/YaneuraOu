@@ -1,8 +1,8 @@
 # native と WASM で探索結果が分かれる件
 
 upstream V9.6x への追従作業中に見つけた差異の調査記録。
-性能の数値は [`reports/2026-07-28_wasm_v96x_performance.md`](../reports/2026-07-28_wasm_v96x_performance.md)、
-移植作業そのものは [`reports/2026-07-28_wasm_v96x_port.md`](../reports/2026-07-28_wasm_v96x_port.md) を参照。
+性能の数値は [`reports/2026-07-28_wasm_v96x_performance.md`](reports/2026-07-28_wasm_v96x_performance.md)、
+移植作業そのものは [`reports/2026-07-28_wasm_v96x_port.md`](reports/2026-07-28_wasm_v96x_port.md) を参照。
 
 計測条件は上記レポートと同じ (`Threads=1` / TTクリア / `PvInterval 0` /
 KP256 + 水匠 petite)。
