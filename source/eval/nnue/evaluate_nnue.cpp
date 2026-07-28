@@ -96,6 +96,21 @@ void add_options_(OptionsMap& options, ThreadPool& threads) {
                     return std::nullopt;
                 }));
 
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+    /*
+		📓 進行度係数を外部ファイルから読む場合のファイル名。
+
+		   既定は空 = nn.bin に埋め込まれた係数を使う。
+		   NAGISA_V3 のように係数を別ファイルで配布している評価関数では
+		   "progress.bin" のように指定する。EvalDir 基準で解決される。
+	*/
+    Options.add("LS_PROGRESS_COEFF", Option("", [](const Option&) {
+                    // 次の isready で読み直させる。
+                    eval_loaded = false;
+                    return std::nullopt;
+                }));
+#endif
+
 #if defined(__EMSCRIPTEN__)
     // yaneuraou.wasm
     // 評価関数ファイル名。load_eval()がOptions["EvalFile"]を読むので、
@@ -266,7 +281,112 @@ int Parameters::BucketIndex(const Position& pos, int bucket_count) const {
 	return std::clamp(bucket, 0, bucket_count - 1);
 }
 
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+/*
+	📓 相入玉バケット
+
+	   進行度バケットの最後の1つを、相入玉局面専用に取り分ける方式。
+	   相入玉は駒割も進行度も通常の局面と傾向が違うので、
+	   進行度で分類せず独立したLayerStackに割り当てる。
+
+	   bucket_count が 9 なら、0〜7 が進行度、8 が相入玉。
+*/
+bool IsMutualEnteringKing(const Position& pos) {
+	// 双方の玉が敵陣(を含む中段より先)へ入っている状態。
+	const auto black_king_rank = rank_of(pos.square<KING>(BLACK));
+	const auto white_king_rank = rank_of(pos.square<KING>(WHITE));
+	return black_king_rank <= RANK_5 && white_king_rank >= RANK_5;
+}
+
+int Parameters::BucketIndexWithEnteringKing(const Position& pos, int bucket_count) const {
+	if (bucket_count <= 1)
+		return 0;
+
+	// 最後の1つは相入玉専用なので、進行度側はそれを除いた個数で分類する。
+	if (IsMutualEnteringKing(pos))
+		return bucket_count - 1;
+
+	return BucketIndex(pos, bucket_count - 1);
+}
+#endif
+
+// 外部ファイル(progress.bin)から進行度の重みを読み込む。
+/*
+	📓 なぜ外部ファイルが要るのか
+
+	   upstream の進行度バケットは、係数を nn.bin の中に持つ
+	   (ReadParameters が同じ stream から読む)。
+	   一方 NAGISA_V3 の評価関数は係数を別ファイル progress.bin に持ち、
+	   しかも double 配列で保存されている。
+	   同じ nn.bin を使いつつ係数だけ差し替えられるようにするため、
+	   外部ファイルからの読み込みを用意する。
+
+	   ファイル形式: double[SQ_NB][fe_end] (bias無し)
+	   💡 内部の Q16 固定小数点へ変換して格納する。
+*/
+bool Parameters::ReadExternalCoefficients(std::istream& stream) {
+	constexpr std::size_t count = std::size_t(SQ_NB) * std::size_t(Eval::fe_end);
+	static_assert(count == kWeightCount, "progress coefficient count mismatch");
+
+	std::vector<double> raw(count);
+	stream.read(reinterpret_cast<char*>(raw.data()), std::streamsize(count * sizeof(double)));
+	if (!stream)
+		return false;
+
+	bias_q16_ = 0;
+	auto* dst = &weights_q16_[0][0];
+	for (std::size_t i = 0; i < count; ++i)
+	{
+		const double scaled = std::round(raw[i] * 65536.0);
+		dst[i] = std::int32_t(std::clamp(scaled,
+			double(std::numeric_limits<std::int32_t>::min()),
+			double(std::numeric_limits<std::int32_t>::max())));
+	}
+	return true;
+}
+
 } // namespace Progress
+#endif
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+    // LS_PROGRESS_COEFF が指定されていれば、進行度係数をそのファイルで差し替える。
+    // 指定が無ければ何もせず true を返す (nn.bin 内の係数をそのまま使う)。
+    static bool load_external_progress_coefficients(NnueNetworks& nets) {
+        if (!Options.count("LS_PROGRESS_COEFF"))
+            return !NNUE_SFNN_PROGRESS_EXTERNAL;
+
+        std::string coeff = Options["LS_PROGRESS_COEFF"];
+#if NNUE_SFNN_PROGRESS_EXTERNAL
+        // このeditionは係数を nn.bin に持たないので、外部ファイルが必須。
+        // 未指定なら既定名で探しにいく。
+        if (coeff.empty() || coeff == "<internal>")
+            coeff = "progress.bin";
+#else
+        if (coeff.empty() || coeff == "<internal>")
+            return true;
+#endif
+
+        // ディレクトリを含まない指定なら EvalDir 基準で解決する。
+        const std::string dir_name = Options["EvalDir"];
+        const std::string file_path =
+            coeff.find('/') != std::string::npos || coeff.find('\\') != std::string::npos
+            ? coeff
+            : Path::Combine(Path::Combine(Directory::GetBinaryFolder(),
+                                          dir_name == "<internal>" ? std::string("eval") : dir_name),
+                            coeff);
+
+        std::ifstream stream(file_path, std::ios::binary);
+        sync_cout << "info string loading progress file : " << file_path << sync_endl;
+        if (!stream.is_open()) {
+            sync_cout << "info string Error! : failed to open " << file_path << sync_endl;
+            return false;
+        }
+        if (!nets.progress.ReadExternalCoefficients(stream)) {
+            sync_cout << "info string Error! : failed to read " << file_path << sync_endl;
+            return false;
+        }
+        return true;
+    }
 #endif
 
     // NNUE評価関数パラメーター（共有メモリまたはローカルメモリ上に配置）
@@ -334,7 +454,7 @@ namespace {
 			sync_cout << "info string NNUE feature params read failed: " << result.to_string() << sync_endl;
 			return result;
 		}
-#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1 && !NNUE_SFNN_PROGRESS_EXTERNAL
 		result = Detail::ReadParameters<Progress::Parameters>(stream, tmp->progress);
 		if (result.is_not_ok()) {
 			sync_cout << "info string NNUE progress params read failed: " << result.to_string() << sync_endl;
@@ -351,6 +471,22 @@ namespace {
 
 		if (!stream || stream.peek() != std::ios::traits_type::eof())
 			return Tools::ResultCode::FileCloseError;
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+		/*
+			📓 進行度係数を外部ファイルで差し替える
+
+			   既定では係数は nn.bin の中にある (上で読んだ Progress::Parameters)。
+			   LS_PROGRESS_COEFF が指定されていれば、その内容で上書きする。
+
+			   NAGISA_V3 のように、係数を progress.bin として nn.bin とは
+			   別に配布している評価関数のためのもの。
+			   ⚠ 共有メモリへ publish する前に差し替えること。publish 後は
+			     const 参照しか取れない。
+		*/
+		if (!load_external_progress_coefficients(*tmp))
+			return Tools::ResultCode::FileReadError;
+#endif
 
 		// 共有メモリに配置（同一ハッシュの共有メモリが既に存在すればそちらを参照）
 		shared_networks = SystemWideSharedConstant<NnueNetworks>(*tmp);
@@ -413,36 +549,21 @@ namespace {
     }
 
 #if defined(SFNNwoPSQT)
-    static_assert(NNUE_SFNN_HAND_BUCKETS == 1 || NNUE_SFNN_HAND_BUCKETS == 4
-        || NNUE_SFNN_HAND_BUCKETS == 16 || NNUE_SFNN_HAND_BUCKETS == 64
+    static_assert(NNUE_SFNN_HAND_BUCKETS == 1 || NNUE_SFNN_HAND_BUCKETS == 64
         || NNUE_SFNN_HAND_BUCKETS == 256 || NNUE_SFNN_HAND_BUCKETS == 1024,
         "unsupported NNUE_SFNN_HAND_BUCKETS");
-    static_assert(
-        (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_NONE && NNUE_SFNN_HAND_BUCKETS == 1)
-        || (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND4 && NNUE_SFNN_HAND_BUCKETS == 4)
-        || (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND16 && NNUE_SFNN_HAND_BUCKETS == 16)
-        || (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND64 && NNUE_SFNN_HAND_BUCKETS == 64)
-        || (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND64Z && NNUE_SFNN_HAND_BUCKETS == 64)
-        || (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND256 && NNUE_SFNN_HAND_BUCKETS == 256)
-        || (NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND1024 && NNUE_SFNN_HAND_BUCKETS == 1024),
-        "NNUE_SFNN_HAND_BUCKET_TYPE does not match NNUE_SFNN_HAND_BUCKETS");
     static_assert(NNUE_SFNN_KING_BUCKETS == 1 || NNUE_SFNN_KING_BUCKETS == 9
-        || NNUE_SFNN_KING_BUCKETS == 81 || NNUE_SFNN_KING_BUCKETS == 169
-        || NNUE_SFNN_KING_BUCKETS == 441 || NNUE_SFNN_KING_BUCKETS == 841,
+        || NNUE_SFNN_KING_BUCKETS == 81 || NNUE_SFNN_KING_BUCKETS == 441
+        || NNUE_SFNN_KING_BUCKETS == 841,
         "unsupported NNUE_SFNN_KING_BUCKETS");
-    static_assert(
-        (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_NONE && NNUE_SFNN_KING_BUCKETS == 1)
-        || (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K3K3 && NNUE_SFNN_KING_BUCKETS == 9)
-        || (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K9K9 && NNUE_SFNN_KING_BUCKETS == 81)
-        || (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K21K21 && NNUE_SFNN_KING_BUCKETS == 441)
-        || (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K29K29 && NNUE_SFNN_KING_BUCKETS == 841)
-        || (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K9K9Z && NNUE_SFNN_KING_BUCKETS == 81)
-        || (NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K13K13Z && NNUE_SFNN_KING_BUCKETS == 169),
-        "NNUE_SFNN_KING_BUCKET_TYPE does not match NNUE_SFNN_KING_BUCKETS");
-    static_assert(NNUE_SFNN_PROGRESS_BUCKETS == 1 || NNUE_SFNN_PROGRESS_BUCKETS == 2
-        || NNUE_SFNN_PROGRESS_BUCKETS == 3 || NNUE_SFNN_PROGRESS_BUCKETS == 4
-        || NNUE_SFNN_PROGRESS_BUCKETS == 8 || NNUE_SFNN_PROGRESS_BUCKETS == 16
-        || NNUE_SFNN_PROGRESS_BUCKETS == 32,
+    // 💡 相入玉バケット付き(progressNek)のときは、進行度N個 + 相入玉1個 なので
+    //    NNUE_SFNN_PROGRESS_BUCKETS は N+1 になる。判定はそれを差し引いて行う。
+    static constexpr int kProgressBucketsWithoutEk =
+        NNUE_SFNN_PROGRESS_BUCKETS - NNUE_SFNN_PROGRESS_ENTERING_KING;
+    static_assert(kProgressBucketsWithoutEk == 1 || kProgressBucketsWithoutEk == 2
+        || kProgressBucketsWithoutEk == 3 || kProgressBucketsWithoutEk == 4
+        || kProgressBucketsWithoutEk == 8 || kProgressBucketsWithoutEk == 16
+        || kProgressBucketsWithoutEk == 32,
         "unsupported NNUE_SFNN_PROGRESS_BUCKETS");
     static_assert(kLayerStacks == NNUE_SFNN_HAND_BUCKETS * NNUE_SFNN_KING_BUCKETS * NNUE_SFNN_PROGRESS_BUCKETS,
         "LayerStacks must match the SFNN bucket product");
@@ -473,54 +594,6 @@ namespace {
         if (e_rank < 0) e_rank = 0;
         if (e_rank > 8) e_rank = 8;
         return f_rank * 9 + e_rank;
-    }
-
-    static int file3_bucket(int file) {
-        if (file < 0) file = 0;
-        if (file > 8) file = 8;
-        return file / 3;
-    }
-
-    static int king9_zone_single_bucket(Square sq) {
-        int rank = int(rank_of(sq));
-        int file = int(file_of(sq));
-        if (rank < 0) rank = 0;
-        if (rank > 8) rank = 8;
-
-        if (rank < 3) return 0;
-        if (rank < 6) return 1;
-        if (rank == 6) return 2;
-        return 3 + (rank - 7) * 3 + file3_bucket(file);
-    }
-
-    // レイヤースタックの選択。玉1つを9 zoneに分け、双方の玉で81通りに分岐させる。
-    static int king9_zone_by_king9_zone_bucket(const Position& pos) {
-        const auto stm = pos.side_to_move();
-        const auto f_king = pos.square<KING>(stm);
-        const auto e_king = pos.square<KING>(~stm);
-        const auto f_sq = stm == BLACK ? f_king : Inv(f_king);
-        const auto e_sq = stm == BLACK ? Inv(e_king) : e_king;
-        return king9_zone_single_bucket(f_sq) * 9 + king9_zone_single_bucket(e_sq);
-    }
-
-    static int king13_zone_single_bucket(Square sq) {
-        int rank = int(rank_of(sq));
-        int file = int(file_of(sq));
-        if (rank < 0) rank = 0;
-        if (rank > 8) rank = 8;
-
-        if (rank < 7) return rank;
-        return 7 + (rank - 7) * 3 + file3_bucket(file);
-    }
-
-    // レイヤースタックの選択。玉1つを13 zoneに分け、双方の玉で169通りに分岐させる。
-    static int king13_zone_by_king13_zone_bucket(const Position& pos) {
-        const auto stm = pos.side_to_move();
-        const auto f_king = pos.square<KING>(stm);
-        const auto e_king = pos.square<KING>(~stm);
-        const auto f_sq = stm == BLACK ? f_king : Inv(f_king);
-        const auto e_sq = stm == BLACK ? Inv(e_king) : e_king;
-        return king13_zone_single_bucket(f_sq) * 13 + king13_zone_single_bucket(e_sq);
     }
 
     static int king21_single_bucket(Square sq) {
@@ -570,31 +643,7 @@ namespace {
         return king29_single_bucket(f_sq) * 29 + king29_single_bucket(e_sq);
     }
 
-    static int hand4_single_bucket(Hand hand) {
-        return hand_count(hand, BISHOP) > 0 ? 1 : 0;
-    }
-
-    static int hand16_single_bucket(Hand hand) {
-        int bucket = 0;
-        if (hand_count(hand, PAWN) > 0)
-            bucket |= 1;
-        if (hand_count(hand, BISHOP) > 0)
-            bucket |= 2;
-        return bucket;
-    }
-
     static int hand64_single_bucket(Hand hand) {
-        int bucket = 0;
-        if (hand_count(hand, PAWN) + hand_count(hand, LANCE) + hand_count(hand, KNIGHT) > 0)
-            bucket |= 1;
-        if (hand_count(hand, GOLD) + hand_count(hand, SILVER) + hand_count(hand, ROOK) > 0)
-            bucket |= 2;
-        if (hand_count(hand, BISHOP) > 0)
-            bucket |= 4;
-        return bucket;
-    }
-
-    static int hand64z_single_bucket(Hand hand) {
         const int score =
               hand_count(hand, PAWN)
             + (hand_count(hand, LANCE) + hand_count(hand, KNIGHT)) * 2
@@ -635,30 +684,11 @@ namespace {
         return bucket;
     }
 
-    static int hand4_bucket(const Position& pos) {
-        const auto stm = pos.side_to_move();
-        return hand4_single_bucket(pos.hand_of(stm)) * 2
-            + hand4_single_bucket(pos.hand_of(~stm));
-    }
-
-    static int hand16_bucket(const Position& pos) {
-        const auto stm = pos.side_to_move();
-        return hand16_single_bucket(pos.hand_of(stm)) * 4
-            + hand16_single_bucket(pos.hand_of(~stm));
-    }
-
-    // 手番側/非手番側の手駒有無を3bitずつ見て、64通りに分岐させる。
+    // 手番側/非手番側の手駒点を8段階ずつに分け、64通りに分岐させる。
     static int hand64_bucket(const Position& pos) {
         const auto stm = pos.side_to_move();
         return hand64_single_bucket(pos.hand_of(stm)) * 8
             + hand64_single_bucket(pos.hand_of(~stm));
-    }
-
-    // 手番側/非手番側の手駒点zoneを8段階ずつに分け、64通りに分岐させる。
-    static int hand64z_bucket(const Position& pos) {
-        const auto stm = pos.side_to_move();
-        return hand64z_single_bucket(pos.hand_of(stm)) * 8
-            + hand64z_single_bucket(pos.hand_of(~stm));
     }
 
     static int hand256_bucket(const Position& pos) {
@@ -676,42 +706,34 @@ namespace {
     static int progress_bucket(const Position& pos) {
 #if NNUE_SFNN_PROGRESS_BUCKETS == 1
         return 0;
+#elif NNUE_SFNN_PROGRESS_ENTERING_KING
+        return networks().progress.BucketIndexWithEnteringKing(pos, NNUE_SFNN_PROGRESS_BUCKETS);
 #else
         return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS);
 #endif
     }
 
     static int stack_index_for_nnue(const Position& pos) {
-#if NNUE_SFNN_HAND_BUCKETS == 1 && NNUE_SFNN_KING_BUCKETS == 9 && NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K3K3 && NNUE_SFNN_PROGRESS_BUCKETS == 1
+#if NNUE_SFNN_HAND_BUCKETS == 1 && NNUE_SFNN_KING_BUCKETS == 9 && NNUE_SFNN_PROGRESS_BUCKETS == 1
         return king3_by_king3_bucket(pos);
 #else
         int idx = 0;
 
-#if NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND4
-        idx = hand4_bucket(pos);
-#elif NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND16
-        idx = hand16_bucket(pos);
-#elif NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND64
+#if NNUE_SFNN_HAND_BUCKETS == 64
         idx = hand64_bucket(pos);
-#elif NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND64Z
-        idx = hand64z_bucket(pos);
-#elif NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND256
+#elif NNUE_SFNN_HAND_BUCKETS == 256
         idx = hand256_bucket(pos);
-#elif NNUE_SFNN_HAND_BUCKET_TYPE == NNUE_SFNN_HAND_BUCKET_TYPE_HAND1024
+#elif NNUE_SFNN_HAND_BUCKETS == 1024
         idx = hand1024_bucket(pos);
 #endif
 
-#if NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K3K3
+#if NNUE_SFNN_KING_BUCKETS == 9
         idx = idx * 9 + king3_by_king3_bucket(pos);
-#elif NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K9K9
+#elif NNUE_SFNN_KING_BUCKETS == 81
         idx = idx * 81 + king9_by_king9_bucket(pos);
-#elif NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K9K9Z
-        idx = idx * 81 + king9_zone_by_king9_zone_bucket(pos);
-#elif NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K13K13Z
-        idx = idx * 169 + king13_zone_by_king13_zone_bucket(pos);
-#elif NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K21K21
+#elif NNUE_SFNN_KING_BUCKETS == 441
         idx = idx * 441 + king21_by_king21_bucket(pos);
-#elif NNUE_SFNN_KING_BUCKET_TYPE == NNUE_SFNN_KING_BUCKET_TYPE_K29K29
+#elif NNUE_SFNN_KING_BUCKETS == 841
         idx = idx * 841 + king29_by_king29_bucket(pos);
 #endif
 
@@ -891,6 +913,7 @@ void load_eval() {
 		// 評価関数ファイルの読み込みが完了した。
 		eval_loaded = true;
     }
+
 }
 
 
