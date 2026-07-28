@@ -64,6 +64,16 @@
 
 #endif
 
+// 📝 進行度バケットの最後を相入玉専用にするか。
+//    アーキヘッダ (nnue_arch_gen.py が生成) が定義するが、
+//    それ以前に生成された古いヘッダには無いので既定値を置く。
+#if !defined(NNUE_SFNN_PROGRESS_ENTERING_KING)
+	#define NNUE_SFNN_PROGRESS_ENTERING_KING 0
+#endif
+#if !defined(NNUE_SFNN_PROGRESS_EXTERNAL)
+	#define NNUE_SFNN_PROGRESS_EXTERNAL 0
+#endif
+
 namespace YaneuraOu {
 namespace Eval::NNUE {
 

@@ -52,9 +52,25 @@ namespace Progress {
 		int Value0To255(const Position& pos) const;
 		int BucketIndex(const Position& pos, int bucket_count) const;
 
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+		// 最後の1バケットを相入玉専用に割り当てる版。
+		// 💡 NAGISA_V3 の progress8ek がこれ (0〜7=進行度, 8=相入玉)。
+		int BucketIndexWithEnteringKing(const Position& pos, int bucket_count) const;
+#endif
+
+		// 進行度係数を外部ファイル(progress.bin)から読み込む。
+		// 💡 形式は double[SQ_NB][fe_end] で bias を持たない。
+		//     nn.bin に埋め込まれた係数を上書きする形で使う。
+		bool ReadExternalCoefficients(std::istream& stream);
+
 		std::int32_t bias_q16_ = 0;
 		std::int32_t weights_q16_[SQ_NB][Eval::fe_end] = {};
 	};
+
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+	// 双方の玉が入玉している(に近い)局面か。
+	bool IsMutualEnteringKing(const Position& pos);
+#endif
 
 } // namespace Progress
 #endif
@@ -63,7 +79,9 @@ namespace Progress {
 	// 評価関数の構造のハッシュ値
 #if defined(SFNNwoPSQT)
 	constexpr std::uint32_t kSfnnBaseHashValue = 0x3c203b32u;
-#if NNUE_SFNN_PROGRESS_BUCKETS != 1
+#if NNUE_SFNN_PROGRESS_BUCKETS != 1 && !NNUE_SFNN_PROGRESS_EXTERNAL
+	// 💡 nn.bin 内に進行度セクションを持つ場合だけ、hashにそれを混ぜる。
+	//    外部ファイルから読む場合の nn.bin は進行度セクションを持たないので混ぜない。
 	constexpr std::uint32_t kHashValue =
 	    kSfnnBaseHashValue ^ Progress::Parameters::GetHashValue();
 #else
@@ -95,6 +113,7 @@ namespace Progress {
 	// 共有メモリ上のNnueNetworksへのconst参照を返すヘルパー。
 	// 評価関数の呼び出しで毎回使われるので、インライン化する。
 	inline const NnueNetworks& networks() { return *shared_networks; }
+
 
 	// 評価関数ファイル名
 	extern const char* const kFileName;
