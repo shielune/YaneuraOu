@@ -5931,6 +5931,11 @@ void engine_main() {
 
     // USIコマンドの応答のためのループ
     usi->loop();
+
+    #if defined(__EMSCRIPTEN__)
+    // yaneuraou.wasm: loop()は即returnするので、ここで解体させない。
+    wasm_retain_engine(engine, usi);
+    #endif
 }
 
 // このentry pointを登録しておく。
