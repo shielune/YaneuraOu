@@ -182,9 +182,14 @@ private:
 	bool                      exit = false, searching = true;  // Set before starting std::thread
 															   // std::threadが始まる前にセットされる
 
+#if !defined(WASM_NO_PTHREAD)
 	// stack領域を増やしたstd::thread
 	// Workerは、このthreadに割り当てて実行する。
 	NativeThread              stdThread;
+#else
+	// 📝 スレッドを生成できないWASMビルドでは、jobは呼び出し元で同期実行するので
+	//     std::threadを持たない。持つとコンストラクタでabortする。
+#endif
 
 	// このスレッドおよび評価関数パラメーターが、どのNUMAに属するか。
 	NumaReplicatedAccessToken numaAccessToken;
