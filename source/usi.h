@@ -140,6 +140,26 @@ public:
 
 	// このclassのUnitTest。
 	static void UnitTest(Test::UnitTester& tester, IEngine& engine);
+
+#if defined(__EMSCRIPTEN__)
+	// --------------------
+	// yaneuraou.wasm のためのbridge
+	// --------------------
+	/*
+		📓 wasmでは標準入力が無いので、USIコマンドはJavaScript側から
+		    ccall("usi_command", ...) で1行ずつ流し込まれる。
+		    その受け口(usi.cppのusi_command())が使うためのpublic API。
+	*/
+
+	// 全ての探索スレッドが起動し、workerの生成まで終わっているか。
+	// 📝 falseの間にコマンドを実行すると、まだ生成されていないworkerを
+	//     参照して落ちるので、JS側に「あとで再送してくれ」と返す必要がある。
+	bool wasm_threads_ready() const;
+
+	// USIコマンドを1行実行する。"quit"が来たらtrueを返す。
+	// 💡 usi_cmdexec()がprivateなので、bridgeのために公開する薄いwrapper。
+	bool wasm_exec(const std::string& cmd) { return usi_cmdexec(cmd); }
+#endif
 #endif
 
 private:
@@ -240,6 +260,25 @@ private:
 
 #endif
 };
+
+#if defined(__EMSCRIPTEN__)
+/*
+	📓 yaneuraou.wasm では USIEngine::loop() が即座に return する
+	   (標準入力が無く、ループするとブラウザのメインスレッドを止めてしまうため)。
+
+	   このため entry point (engine_main) のローカルである engine / usi の
+	   unique_ptr が、JavaScript から最初のコマンドが来る前に解体されてしまう。
+	   そこで wasm では意図的に所有権を手放し、プロセス終了まで生かしておく。
+
+	   ⚠ 解体しないのは意図的。EXIT_RUNTIME=0 なので main() を抜けても
+	     ランタイムは生き続け、以降 JS からの ccall がこのインスタンスを叩く。
+*/
+template<typename EnginePtr, typename UsiPtr>
+inline void wasm_retain_engine(EnginePtr& engine, UsiPtr& usi) {
+	engine.release();
+	usi.release();
+}
+#endif
 
 } // namespace YaneuraOu
 
