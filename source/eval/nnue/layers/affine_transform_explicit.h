@@ -58,7 +58,15 @@ class AffineTransformExplicit {
     }
 
     static constexpr IndexType get_weight_index(IndexType i) {
-#if defined(USE_SSSE3) || defined(USE_NEON_DOTPROD)
+#if defined(USE_WASM_SIMD)
+        // 下の Propagate() の USE_WASM_SIMD 経路は重みを dense (row-major) として
+        // reinterpret_cast するので、scrambled 配置にしてはいけない。
+        // ⚠ affine_transform.h / affine_transform_sparse_input.h の GetWeightIndex と
+        //   同じ理由。em++ は -DUSE_SSE42 を渡しており、config.h で
+        //   USE_SSE41 → USE_SSSE3 と連鎖するため、この分岐が無いと下の #elif に
+        //   吸われて評価値が壊れる。
+        return i;
+#elif defined(USE_SSSE3) || defined(USE_NEON_DOTPROD)
         return kOutputDimensions % 4 == 0 ? get_weight_index_scrambled(i) : i;
 #else
         return i;
