@@ -2,8 +2,8 @@
 // Definition of the AffineTransform layer with block-sparse input in the NNUE evaluation function
 // NNUE評価関数におけるブロック疎な入力を持つAffineTransform層の定義
 
-#ifndef NNUE_LAYERS_AFFINE_TRANSFORM_SPARSE_INPUT_H_INCLUDED
-#define NNUE_LAYERS_AFFINE_TRANSFORM_SPARSE_INPUT_H_INCLUDED
+#ifndef CLASSIC_NNUE_LAYERS_AFFINE_TRANSFORM_SPARSE_INPUT_H_INCLUDED
+#define CLASSIC_NNUE_LAYERS_AFFINE_TRANSFORM_SPARSE_INPUT_H_INCLUDED
 
 #include "../../../config.h"
 
@@ -13,6 +13,7 @@
 #include "affine_transform.h"
 #include "simd.h"
 
+namespace YaneuraOu {
 namespace Eval::NNUE::Layers {
 
 #if defined(USE_SSSE3) || USE_NEON >= 8
@@ -148,6 +149,15 @@ class AffineTransformSparseInput {
 		hash_value += kOutputDimensions;
 		hash_value ^= PreviousLayer::GetHashValue() >> 1;
 		hash_value ^= PreviousLayer::GetHashValue() << 31;
+		return hash_value;
+	}
+
+	// ハッシュ値を前段の値から更新するときのヘルパー
+	static constexpr std::uint32_t GetHashValue(std::uint32_t prevHash) {
+		std::uint32_t hash_value = 0xCC03DAE4u;
+		hash_value += kOutputDimensions;
+		hash_value ^= prevHash >> 1;
+		hash_value ^= prevHash << 31;
 		return hash_value;
 	}
 
@@ -334,10 +344,11 @@ class AffineTransformSparseInput {
 #endif
 
 #if defined(USE_NEON_DOTPROD)
-        if constexpr (kOutputDimensions % 8 == 0)
+        if constexpr (kOutputDimensions % (sizeof(int32x4_t) / sizeof(OutputType)) == 0)
         {
             constexpr IndexType kNumChunks = CeilToMultiple<IndexType>(kInputDimensions, 8) / kChunkSize;
-            constexpr IndexType kNumRegs   = kOutputDimensions / 8;
+            constexpr IndexType kOutputSimdWidth = sizeof(int32x4_t) / sizeof(OutputType);
+            constexpr IndexType kNumRegs   = kOutputDimensions / kOutputSimdWidth;
             std::uint16_t       nnz[kNumChunks];
             IndexType           count;
 
@@ -389,9 +400,6 @@ class AffineTransformSparseInput {
 	using BiasType   = OutputType;
 	using WeightType = std::int8_t;
 
-	// 学習用クラスをfriendにする
-	friend class Trainer<AffineTransformSparseInput>;
-
 	// この層の直前の層
 	PreviousLayer previous_layer_;
 
@@ -400,7 +408,8 @@ class AffineTransformSparseInput {
 	alignas(kCacheLineSize) WeightType weights_[kOutputDimensions * kPaddedInputDimensions];
 };
 
-}  // namespace Eval::NNUE::Layers
+} // namespace Eval::NNUE::Layers
+} // namespace YaneuraOu
 
 #endif  // defined(EVAL_NNUE)
 
