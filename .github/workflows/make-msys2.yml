@@ -52,7 +52,7 @@ jobs:
 
     steps:
       - name: Checkout own repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           path: main
 
@@ -71,7 +71,7 @@ jobs:
           .\main\script\msys2_build.ps1 -Edition ${{ matrix.edition }} -Compiler ${{ matrix.compiler }} -Target ${{ matrix.target }} -Cpu ${{ matrix.archcpu }}
         shell: pwsh
 
-      # - uses: actions/upload-artifact@v4
+      # - uses: actions/upload-artifact@v7
       #   with:
       #     name: build-windows_${{ github.run_number }}__${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
       #     path: ./main/build/**/*

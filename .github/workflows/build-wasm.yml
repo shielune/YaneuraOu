@@ -276,7 +276,7 @@ jobs:
             eval_note: "**embedded**"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: docker pull
         run: |
@@ -334,7 +334,7 @@ jobs:
           fi
           ls -lh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.package.dir }}-dist
           path: packages/${{ matrix.package.dir }}/dist/
@@ -348,7 +348,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -363,7 +363,7 @@ jobs:
           echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Download all WASM artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: yaneuraou-wasm-*-dist
           path: download/
@@ -443,7 +443,7 @@ jobs:
           head -20 release_body.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "yaneuraou-wasm ${{ steps.version.outputs.version }}"
