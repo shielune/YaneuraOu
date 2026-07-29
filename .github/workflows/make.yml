@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout own repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           path: main
 
@@ -162,7 +162,7 @@ jobs:
       - name: make
         run: ./main/script/build.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }}
 
-      # - uses: actions/upload-artifact@v4
+      # - uses: actions/upload-artifact@v7
       #   with:
       #     name: build-linux_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
       #     path: ./main/build/**/**/*

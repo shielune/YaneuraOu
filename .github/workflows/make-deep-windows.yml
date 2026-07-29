@@ -19,14 +19,14 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - uses: nuget/setup-nuget@v1
+      - uses: nuget/setup-nuget@v4
         with:
           nuget-version: '5.x'
 
-      - uses: microsoft/setup-msbuild@v1
+      - uses: microsoft/setup-msbuild@v3
 
       - name: Checkout own repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           path: main
 
@@ -40,7 +40,7 @@ jobs:
           MSBuild.exe /t:build /p:Configuration=Release-Deep-ORT-DML /p:Platform=x64
         working-directory: main
 
-      # - uses: actions/upload-artifact@v4
+      # - uses: actions/upload-artifact@v7
       #   with:
       #     name: build-deep-windows_${{ github.run_number }}_${{ github.sha }}
       #     path: ./main/build/**/*
