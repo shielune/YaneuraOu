@@ -135,6 +135,16 @@ void YaneuraOuEngine::add_options() {
             set_tt_size(o);
             return std::nullopt;
         }));
+#elif defined(__EMSCRIPTEN__)
+	// 🌈 WASMでは、default値をStockfishと同じ16に戻す。
+	//     resize_threads()が"Threads"のadd時に走るので、setoptionが届く前に
+	//     このdefault値でTTを確保する。1024MBはブラウザのMAXIMUM_MEMORYを
+	//     超えるため、そこでexit(EXIT_FAILURE)して起動できない。
+    options.add(  //
+        "USI_Hash", Option(16, 1, MaxHashMB, [this](const Option& o) {
+            set_tt_size(o);
+            return std::nullopt;
+        }));
 #else
 	// 🌈 やねうら王では、default値を1024に変更。
     options.add(  //
