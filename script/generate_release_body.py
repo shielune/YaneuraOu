@@ -235,11 +235,14 @@ WASM bundle には評価関数を内蔵していないので、別途 nn.bin を
 |---|---|---|---|
 | suisho5 nn.bin | HalfKP_256x2_32_32 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
 | AobaNNUE nn.bin | HalfKP_768x2_16_64 | 数十 MB | https://github.com/yssaya/AobaNNUE/releases |
+| NAGISA V3.1 | SFNN HalfKA_hm2 1024x2_15_64 progress8ek | nn.bin ~75 MB + progress.bin ~1 MB + eval_options.txt | https://github.com/keinoda/YaneuraOu/releases/tag/nagisa-v3.1 |
 | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
 
 > suisho5 / suishopetite は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。AobaNNUE は素の `nn.bin` がそのまま配布されている。
 
-> KP256 / HalfKP_256x2_32_32 / HalfKP_768x2_16_64 の eval はそれぞれ互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。"""
+> NAGISA V3.1 は上記Releaseから **nn.bin、progress.bin、eval_options.txt の3ファイルすべて**を取得して `/eval` に置く。評価ファイルはWASM packageやこのReleaseには同梱しない。`eval_options.txt` が `LS_PROGRESS_COEFF eval/progress.bin` を指定する。
+
+> KP256 / HalfKP_256x2_32_32 / HalfKP_768x2_16_64 / NAGISA V3.1 のevalはそれぞれ互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) はcfworkersの128 MB heapでOOMになるためpthread variantでのみ使える。NAGISA V3.1も同じ理由でpthread/Node variantのみ提供する。"""
 
 STATIC_BOOK_SECTION = """## Optional: opening book
 

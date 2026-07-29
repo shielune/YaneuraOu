@@ -85,6 +85,18 @@ jobs:
             category: pthread
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (数十 MB)"
+          - name: pthread-nagisa
+            dir: yaneuraou-wasm-pthread-nagisa
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+            export_name: YaneuraOu_NAGISA
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            extra_make_args: "PYTHON=python3"
+            category: pthread
+            engine_label: "NAGISA V3.1 (SFNN HalfKA_hm2 1024x2_15_64 progress8ek)"
+            eval_note: "external (nn.bin + progress.bin + eval_options.txt)"
           - name: material-cfworkers
             dir: yaneuraou-wasm-material-cfworkers
             edition: YANEURAOU_ENGINE_MATERIAL
@@ -247,6 +259,20 @@ jobs:
             category: node
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (数十 MB)"
+          - name: node-nagisa
+            dir: yaneuraou-wasm-node-nagisa
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+            export_name: YaneuraOu_NAGISA
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            extra_make_args: "PYTHON=python3"
+            category: node
+            engine_label: "NAGISA V3.1 (SFNN HalfKA_hm2 1024x2_15_64 progress8ek)"
+            eval_note: "external (nn.bin + progress.bin + eval_options.txt)"
           - name: node-material
             dir: yaneuraou-wasm-node-material
             edition: YANEURAOU_ENGINE_MATERIAL

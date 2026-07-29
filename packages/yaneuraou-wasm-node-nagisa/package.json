@@ -1,0 +1,40 @@
+{
+  "name": "@ultemica/yaneuraou-wasm-node-nagisa",
+  "version": "8.50.0",
+  "description": "YaneuraOu NNUE NAGISA V3.1 SFNN HalfKA_hm2_1024x2_15_64 (NAGISA V3.1) shogi engine for Node.js (Wasm, multi-threaded via node:worker_threads). Built with emscripten 3.1.43 — the only toolchain confirmed Node-compatible.",
+  "license": "GPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/yaneuraou.js",
+    "dist/yaneuraou.wasm",
+    "dist/yaneuraou.worker.js",
+    "dist/worker_shim.js",
+    "dist/worker_shim.d.ts",
+    "README.md",
+    "SPEC.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./wasm": "./dist/yaneuraou.wasm",
+    "./engine": "./dist/yaneuraou.js"
+  },
+  "scripts": {
+    "build:loader": "bun tsc",
+    "build": "bun run build:loader",
+    "test:e2e": "bun run test/run.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
