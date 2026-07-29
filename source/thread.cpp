@@ -1,517 +1,671 @@
 ﻿#include <algorithm> // std::count
 #include <cmath>     // std::abs
+#include <map>
+#include <memory>
 #include <unordered_map>
 
+#include "history.h"
 #include "thread.h"
 #include "usi.h"
 #include "tt.h"
+#include "movegen.h"
 
-ThreadPool Threads;		// Global object
+namespace YaneuraOu {
 
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
-// edge variant: single-thread emscripten build.
-// std::thread を生成できないため、search() を呼び出し元スレッドで同期実行する。
+// Constructor launches the thread and waits until it goes to sleep
+// in idle_loop(). Note that 'searching' and 'exit' should be already set.
 
-Thread::Thread(size_t n) : idx(n)
-{
-	// idle_loop 相当の初期化: searching == true 状態ではないものとして扱う
-	searching = false;
-#if defined(__EMSCRIPTEN__)
-	threadStarted = true;
+// コンストラクタはスレッドを起動し、スレッドが idle_loop() 内で
+// スリープ状態に入るまで待機します。
+// 'searching' および 'exit' は、すでに設定されている必要がある点に注意してください。
+
+Thread::Thread(Search::SharedState& sharedState,
+               //std::unique_ptr<Search::ISearchManager> sm,
+               Search::WorkerFactory          worker_factory,
+               size_t                         n,               // threadIdx
+               size_t                         numaN,           // numaThreadIdx
+               size_t                         totalNumaCount,  // numaTotal
+               OptionalThreadToNumaNodeBinder binder) :
+    idx(n),
+    idxInNuma(numaN),
+    totalNuma(totalNumaCount)
+    //nthreads(sharedState.options["Threads"]),
+#if !defined(WASM_NO_PTHREAD)
+    ,
+    stdThread(&Thread::idle_loop, this)
 #endif
-}
-
-Thread::~Thread()
 {
-	ASSERT_LV3(!searching);
-	exit = true;
-}
+#if defined(WASM_NO_PTHREAD)
+    // スレッドを作らないので、idle_loop()に入らない。
+    // run_custom_job()が呼び出し元で同期実行するため、待機状態にしておく。
+    searching = false;
+#endif
 
-#else
-
-Thread::Thread(size_t n) : idx(n) , stdThread(&Thread::idle_loop, this)
-{
 #if !defined(__EMSCRIPTEN__)
-	// スレッドはsearching == trueで開始するので、このままworkerのほう待機状態にさせておく
-	wait_for_search_finished();
+
+#if STOCKFISH
+	run_custom_job([this, &binder, &sharedState /*, &sm*/, n]() {
 #else
-	// yaneuraou.wasm
-	// wait_for_search_finished すると、ブラウザのメインスレッドをブロックしデッドロックが発生するため、コメントアウト。
-	//
-	// 新しいスレッドが cv を設定するのを待ってから、ブラウザに処理をパスしたいが、
-	// 新しいスレッド用のworkerを作成するためには、いったんブラウザに処理をパスする必要がある。
-	//
-	// https://bugzilla.mozilla.org/show_bug.cgi?id=1049079
-	//
-	// threadStarted という変数を設けて全てのスレッドが開始するまでリトライするようにする
-	//
-	// 参考：https://github.com/lichess-org/stockfish.wasm/blob/a022fa1405458d1bc1ba22fe813bace961859102/src/thread.cpp#L38
+	run_custom_job([this, &binder, &sharedState , n , worker_factory]() {
 #endif
-}
+		// Use the binder to [maybe] bind the threads to a NUMA node before doing
+        // the Worker allocation. Ideally we would also allocate the SearchManager
+        // here, but that's minor.
 
-// std::threadの終了を待つ
-Thread::~Thread()
-{
-	// 探索中にスレッドオブジェクトが解体されることはない。
-	ASSERT_LV3(!searching);
+        // スレッドを Worker 割り当ての前に NUMA ノードに（必要なら）バインドするために binder を使う。
+        // 理想的にはここで SearchManager も割り当てたいが、それは些細なことだ。
 
-	// 探索は終わっているのでexitフラグをセットしてstart_searching()を呼べば終了するはず。
-	exit = true;
-	start_searching();
-	stdThread.join();
-}
-
-#endif
-
-// このクラスが保持している探索で必要なテーブル(historyなど)をクリアする。
-void Thread::clear()
-{
-#if defined(USE_MOVE_PICKER)
-	mainHistory.fill(0);
-	captureHistory.fill(-758);
-#if defined(ENABLE_PAWN_HISTORY)
-	pawnHistory.fill(-1158);
-	pawnCorrectionHistory.fill(0);
-	materialCorrectionHistory.fill(0);
-	majorPieceCorrectionHistory.fill(0);
-	minorPieceCorrectionHistory.fill(0);
-	nonPawnCorrectionHistory[WHITE].fill(0);
-	nonPawnCorrectionHistory[BLACK].fill(0);
-
-	for (auto& to : continuationCorrectionHistory)
-		for (auto& h : to)
-			h->fill(0);
-#endif
-
-	// ここは、未初期化のときに[NO_PIECE][SQ_ZERO]を指すので、ここを-1で初期化しておくことによって、
-	// history > 0 を条件にすれば自ずと未初期化のときは除外されるようになる。
-
-	// ほとんどの履歴エントリがいずれにせよ後で負になるため、
-	// 開始値を「正しい」方向に少しシフトさせるため、-71で埋めている。
-	// この効果は、深度が深くなるほど薄れるので、長時間思考させる時には
-	// あまり意味がないが、無駄ではないらしい。
-	// Tweak history initialization : https://github.com/official-stockfish/Stockfish/commit/7d44b43b3ceb2eebc756709432a0e291f885a1d2
-
-	for (bool inCheck : { false, true })
-		for (StatsType c : { NoCaptures, Captures })
-			//for (auto& to : continuationHistory[inCheck][c])
-			//	for (auto& h : to)
-			//		h->fill(-675);
-
-			// ↑この初期化コードは、ContinuationHistory::fill()に移動させた。
-
-			continuationHistory[inCheck][c].fill(-645);
-
-#endif
-}
-
-// 待機していたスレッドを起こして探索を開始させる
-void Thread::start_searching()
-{
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
-	// edge variant: search() を呼び出しスレッドで同期実行する。
-	if (exit)
-		return;
-	searching = true;
-	search();
-	searching = false;
+        this->numaAccessToken = binder();
+#if STOCKFISH
+        this->worker = make_unique_large_page<Search::Worker>(
+          sharedState, std::move(sm), n, idxInNuma, totalNuma, this->numaAccessToken);
 #else
-	mutex.lock();
-	searching = true;
-    mutex.unlock(); // Unlock before notifying saves a few CPU-cycles
-	cv.notify_one(); // idle_loop()で回っているスレッドを起こす。(次の処理をさせる)
+		// 🌈 やねうら王では、ここでworker_factoryを使ってWorker派生classを生成する。
+		this->worker = std::move(worker_factory(sharedState,
+												{n, idxInNuma, totalNuma, this->numaAccessToken}));
 #endif
-}
+    });
 
-// 探索が終わるのを待機する。(searchingフラグがfalseになるのを待つ)
-void Thread::wait_for_search_finished()
-{
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
-	// edge variant: start_searching() が同期実行するため、既に終わっている。
-	return;
+    // スレッドはsearching == trueで開始するので、このままworkerのほう待機状態にさせておく
+    wait_for_search_finished();
+
 #else
-	std::unique_lock<std::mutex> lk(mutex);
-	cv.wait(lk, [&] { return !searching; });
+    // yaneuraou.wasm
+    //
+    // wait_for_search_finished() すると、ブラウザのメインスレッドをブロックして
+    // デッドロックするので待たない。ただし、worker生成のjob自体は投げる必要がある。
+    // 投げないとworkerが永久にnullptrのままになり、最初の"go"で
+    // ThreadPool::start_thinking()の th->worker->limits でnull参照して落ちる。
+    //
+    // 新しいスレッドが cv を設定するのを待ってから、ブラウザに処理をパスしたいが、
+    // 新しいスレッド用のworkerを作成するためには、いったんブラウザに処理をパスする必要がある。
+    //
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1049079
+    //
+    // 代わりに threadStarted を設けて、全てのスレッドが開始するまで
+    // usi_command()側でリトライさせる。
+    //
+    // 参考：https://github.com/lichess-org/stockfish.wasm/blob/a022fa1405458d1bc1ba22fe813bace961859102/src/thread.cpp#L38
+
+    run_custom_job([this, &binder, &sharedState, n, worker_factory]() {
+        this->numaAccessToken = binder();
+        this->worker          = std::move(
+          worker_factory(sharedState, {n, idxInNuma, totalNuma, this->numaAccessToken}));
+
+        // workerの生成まで終わって初めて "起動済み" とみなす。
+        // ⚠ idle_loop()の先頭ではなくここで立てること。idle_loop()の先頭で立てると
+        //   worker生成前に"go"を受け付けてしまい、null参照する。
+        this->threadStarted = true;
+    });
+
 #endif
 }
 
-// 探索するときのmaster,slave用のidle_loop。探索開始するまで待っている。
+// Destructor wakes up the thread in idle_loop() and waits
+// for its termination. Thread should be already waiting.
+
+// デストラクタは idle_loop() 内でスレッドを起こし、
+// 終了するのを待ちます。
+// スレッドはすでに待機状態にある必要があります。
+
+Thread::~Thread() {
+
+    // 探索中にスレッドオブジェクトが解体されることはない。
+    ASSERT_LV3(!searching);
+
+    exit = true;
+
+#if !defined(WASM_NO_PTHREAD)
+    // 探索は終わっているのでexitフラグをセットしてstart_searching()を呼べば終了するはず。
+    start_searching();
+    stdThread.join();
+#else
+    // idle_loop()で待機しているスレッドが居ないので、起こす相手も待つ相手も居ない。
+#endif
+}
+
+// Wakes up the thread that will start the search
+// 探索を開始するスレッドを起こします
+
+void Thread::start_searching() {
+    assert(worker != nullptr);
+    run_custom_job([this]() { worker->start_searching(); });
+}
+
+// Clears the histories for the thread worker (usually before a new game)
+// スレッドワーカーの履歴をクリアします（通常は新しい対局の前に実行されます）
+
+void Thread::clear_worker() {
+    assert(worker != nullptr);
+    run_custom_job([this]() { worker->clear(); });
+}
+
+// Blocks on the condition variable until the thread has finished searching
+// 条件変数でブロックし、スレッドが探索を完了するのを待ちます
+
+void Thread::wait_for_search_finished() {
+
+#if defined(WASM_NO_PTHREAD)
+    // run_custom_job()が同期実行するので、ここに来た時点で必ず終わっている。
+    // 待つとcvを誰も起こさないため永久に固まる。
+    return;
+#else
+    std::unique_lock<std::mutex> lk(mutex);
+    cv.wait(lk, [&] { return !searching; });
+#endif
+}
+
+// Launching a function in the thread
+// スレッド内で関数を実行します
+
+void Thread::run_custom_job(std::function<void()> f) {
+
+#if defined(WASM_NO_PTHREAD)
+    /*
+		📓 スレッドが無いので、jobを呼び出し元のスレッドでその場で実行する。
+
+		   これにより "go" は同期呼び出しになる。すなわち
+		   ThreadPool::start_thinking() が bestmove を出し終えてから返る。
+		   V8 Isolate系ランタイムはどのみち1リクエスト1スレッドなので、
+		   この挙動で困らない。
+		   ⚠ 逆に、探索中に "stop" を送って止めることはできない。
+		     時間制御 (go movetime / go nodes) で打ち切ること。
+	*/
+    if (exit)
+        return;
+
+    searching = true;
+    if (f)
+        f();
+    searching = false;
+#else
+    {
+        std::unique_lock<std::mutex> lk(mutex);
+        cv.wait(lk, [&] { return !searching; });
+        jobFunc   = std::move(f);
+        searching = true;
+    }
+    cv.notify_one();
+#endif
+}
+
+void Thread::ensure_network_replicated() { worker->ensure_network_replicated(); }
+
+// Thread gets parked here, blocked on the condition variable
+// when the thread has no work to do.
+
+// スレッドに処理すべき仕事がないとき、ここで待機状態（パーク）になり、
+// 条件変数でブロックされます。
+
 void Thread::idle_loop() {
+    while (true)
+    {
+        std::unique_lock<std::mutex> lk(mutex);
+        searching = false;
+        cv.notify_one();  // Wake up anyone waiting for search finished
+                          // 探索の完了を待っているすべてのスレッドを起こします
 
-	// NUMA環境では、8スレッド未満だと異なるNUMAに割り振られることがあり、パフォーマンス激減するのでその回避策。
-	// ・8スレッド未満のときはOSに任せる
-	// ・8スレッド以上のときは、自前でbindThisThreadを行なう。
-	// cf. Upon changing the number of threads, make sure all threads are bound : https://github.com/official-stockfish/Stockfish/commit/1c50d8cbf554733c0db6ab423b413d75cc0c1928
-	// その後、
-	// ・fishtestを8スレッドで行うから、9以上にしてくれとのことらしい。
-	// cf. NUMA for 9 threads or more : https://github.com/official-stockfish/Stockfish/commit/bc3b148d5712ef9ea00e74d3ff5aea10a4d3cabe
+        cv.wait(lk, [&] { return searching; });
 
-#if !defined(FORCE_BIND_THIS_THREAD)
-	// "Threads"というオプションがない時は、強制的にbindThisThread()しておいていいと思う。(使うスレッド数がここではわからないので..)
-	if (Options.count("Threads")==0 || Options["Threads"] > 8)
+        if (exit)
+            return;
+
+        std::function<void()> job = std::move(jobFunc);
+        jobFunc                   = nullptr;
+
+        lk.unlock();
+
+        if (job)
+            job();
+    }
+}
+
+
+//Search::SearchManager* ThreadPool::main_manager() { return main_thread()->worker->main_manager(); }
+
+uint64_t ThreadPool::nodes_searched() const { return accumulate(&Search::Worker::nodes); }
+//uint64_t ThreadPool::tb_hits() const { return accumulate(&Search::Worker::tbHits); }
+
+static size_t next_power_of_two(uint64_t count) { return count > 1 ? (2ULL << msb(count - 1)) : 1; }
+
+// Creates/destroys threads to match the requested number.
+// Created and launched threads will immediately go to sleep in idle_loop.
+// Upon resizing, threads are recreated to allow for binding if necessary.
+
+// 要求されたスレッド数に合わせてスレッドを作成・破棄します。
+// 作成され起動されたスレッドは、すぐに idle_loop 内でスリープ状態に入ります。
+// リサイズ時には、必要に応じてスレッドのバインディングを可能にするために再作成されます。
+
+void ThreadPool::set(const NumaConfig&   numaConfig,
+                     Search::SharedState sharedState,
+                     const Search::UpdateContext& updateContext,
+                     // 🤔 やねうら王ではさらに抽象化する。
+                     size_t                       requested_threads,
+                     const Search::WorkerFactory& worker_factory
+) {
+
+    /*  📓
+		このあと、スレッドをいったん全部解体しているのは、確保するスレッド数がいま確保しているスレッド数と
+		変わらないとしても、NumaPolicyに変更があると、割り当て方法が変わるからである。
+
+		NumaPolicyとoptions["Threads"]に変更がなければ、再確保せずに済むのだが、
+		worker_factoryが一致しない場合作り直す必要があり、その判定が難しいので毎回再確保することにする。
+	*/
+
+#if defined(WASM_NO_PTHREAD)
+    // スレッドを生成できないビルドでは、Workerを複数持っても
+    // run_custom_job()が呼び出し元で逐次実行するだけで並列にならない。
+    // (それどころか、探索が threads 個ぶん直列に走って時間を食う)
+    // よって常に1スレッドに畳む。
+    requested_threads = 1;
 #endif
-		WinProcGroup::bindThisThread(idx);
-		// このifを有効にすると何故かNUMA環境のマルチスレッド時に弱くなることがある気がする。
-		// (長い時間対局させ続けると安定するようなのだが…)
-		// 上の投稿者と条件が何か違うのだろうか…。
-		// 前のバージョンのソフトが、こちらのNUMAの割当を阻害している可能性が微レ存。
 
-	while (true)
-	{
-		std::unique_lock<std::mutex> lk(mutex);
-		searching = false;
 #if defined(__EMSCRIPTEN__)
-		// yaneuraOu.wasm
-		threadStarted = true;
-#endif
-		cv.notify_one(); // 他のスレッドがこのスレッドを待機待ちしてるならそれを起こす
-		cv.wait(lk, [&] { return searching; });
-
-		if (exit)
-			return;
-
-		lk.unlock();
-
-		// exit == falseということはsearch == trueというわけだから探索する。
-		search();
-	}
-}
-
-// スレッド数を変更する。
-void ThreadPool::set(size_t requested)
-{
-	// bindThreadの都合があるので、スレッドをいったんすべて解体して、再度作り直す。
-	// ただし、__EMSCRIPTEN__の時は、スレッド数がrequestedと同じならスレッドを作り直さず、
-	// また、いったんすべて解放する処理も端折る。
-
-
-#if defined(__EMSCRIPTEN__)
-	// yaneuraou.wasm
-	// ブラウザのメインスレッドをブロックしないようstockfish.wasmと同様の実装に修正
-	if (size() == requested)
-		return;
+    // yaneuraou.wasm
+    //
+    // この関数は"isready"のたびにEngine::resize_threads()から呼び出される。
+    // 解体側は ~Thread() → stdThread.join() でブロックするため、ブラウザの
+    // メインスレッドから呼ぶとデッドロックする。またwasmではNumaPolicyが
+    // 意味を持たないので、要求数が変わらないなら作り直す必要もない。
+    // 📝 wasmでスレッド数を変えたい場合は、いったんインスタンスを捨てて
+    //     作り直す運用とする。
+    if (threads.size() == requested_threads)
+        return;
 #endif
 
-	if (threads.size() > 0) { // いったんすべてのスレッドを解体(NUMA対策)
-		main()->wait_for_search_finished();
+    // いま生成済みのスレッドは全部解体してしまう。
+    if (threads.size() > 0)  // destroy any existing thread(s)
+    {
+        main_thread()->wait_for_search_finished();
 
-#if !defined(__EMSCRIPTEN__)
-		while (threads.size() > 0)
-			delete threads.back(), threads.pop_back();
+        // 📝 これは、vector::clear()を呼び出してスレッドを解体している。
+        threads.clear();
+
+        boundThreadToNumaNode.clear();
+    }
+
+#if STOCKFISH
+    const size_t requested = sharedState.options["Threads"];
 #else
-		// yaneuraou.wasm
-		while (threads.size() > requested)
-			delete threads.back(), threads.pop_back();
-#endif
-	}
-
-	if (requested > 0) { // 要求された数だけのスレッドを生成
-#if !defined(__EMSCRIPTEN__)
-		threads.push_back(new MainThread(0));
-
-		while (size() < requested)
-			threads.push_back(new Thread(size()));
-#else
-		// yaneuraou.wasm
-		while (size() < requested)
-			threads.push_back(size() ? new Thread(size()) : new MainThread(0));
-#endif
-		clear();
-
-		// Reallocate the hash with the new threadpool size
-		// 新しいスレッドプールのサイズで置換表用のメモリを再確保する。
-
-		// →　大きなメモリの置換表だと確保に時間がかかるのでやりたくない。
-		// 　　isreadyの応答でやるべき。
-
-		//TT.resize(size_t(Options["USI_Hash"]));
-	}
-
-#if defined(EVAL_LEARN)
-	// 学習用の実行ファイルでは、スレッド数が変更になったときに各ThreadごとのTTに
-	// メモリを再割り当てする必要がある。
-	TT.init_tt_per_thread();
+    const size_t requested = requested_threads;
+    // 🤔 やねうら王では、ここ、"Threads"の値を反映させたくない。(DL系などで、ここに柔軟性が必要)
 #endif
 
-}
+    if (requested > 0)  // create new thread(s)
+    {
+        // Binding threads may be problematic when there's multiple NUMA nodes and
+        // multiple Stockfish instances running. In particular, if each instance
+        // runs a single thread then they would all be mapped to the first NUMA node.
+        // This is undesirable, and so the default behaviour (i.e. when the user does not
+        // change the NumaConfig UCI setting) is to not bind the threads to processors
+        // unless we know for sure that we span NUMA nodes and replication is required.
 
-// ThreadPool::clear()は、threadPoolのデータを初期値に設定する。
-void ThreadPool::clear() {
+        // スレッドのバインディングは、複数のNUMAノードや複数のStockfishインスタンスが
+        // 実行されている場合に問題を引き起こす可能性があります。
+        // 特に、各インスタンスが1スレッドだけで動作する場合、それらはすべて
+        // 最初のNUMAノードに割り当てられてしまうことになります。
+        // これは望ましくないため、デフォルトの動作（つまり、ユーザーが
+        // NumaConfig UCI設定を変更していない場合）は、
+        // NUMAノードをまたいでおりレプリケーションが必要であることが
+        // 確実に分かっている場合を除き、スレッドをプロセッサにバインドしないようになっています。
 
-	for (Thread* th : threads)
-		th->clear();
+        // NumaPolicy
+        //   none     ... バインドしない(1PCで複数エンジンを動かすときはこちらにすべき。)
+        //   system   ... システムから利用可能なNUMA情報を取得。
+        //   auto     ... systemとnoneを自動選択。
+        //   hardware ... Windows10など古いシステムでスレッドを使い切らない時用。
+        // 💡 詳しくは、やねうら王Wikiの「思考エンジンオプション」の説明を参考にすること。
 
-	main()->callsCnt = 0;
-	main()->bestPreviousScore        = VALUE_INFINITE;
-	main()->bestPreviousAverageScore = VALUE_INFINITE;
-	main()->previousTimeReduction    = 1.0;
-}
+        // options["NumaPolicy"]と要求されたスレッド数から考慮して、スレッドのbindが必要であるかを判定する。
 
-// ilde_loop()で待機しているmain threadを起こして即座にreturnする。
-// main threadは他のスレッドを起こして、探索を開始する。
-void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
-								const Search::LimitsType& limits , bool ponderMode)
-{
-	// 思考中であれば停止するまで待つ。
-	main()->wait_for_search_finished();
+        const std::string numaPolicy(sharedState.options["NumaPolicy"]);
+        const bool        doBindThreads = [&]() {
+            if (numaPolicy == "none")
+                return false;
 
-	// ponderに関して、StockfishではstopOnPonderhitというのがあるが、やねうら王にはこのフラグはない。
-	/* main()->stopOnPonderhit = */ stop = false;
-	increaseDepth = true;
-	main()->ponder = ponderMode;
-	main()->time_to_return_bestmove = false;
-	Search::Limits = limits;
-	Search::RootMoves rootMoves;
+            if (numaPolicy == "auto")
+                return numaConfig.suggests_binding_threads(requested);
 
-	// 初期局面では合法手すべてを生成してそれをrootMovesに設定しておいてやる。
-	// このとき、歩の不成などの指し手は除く。(そのほうが勝率が上がるので)
-	// また、goコマンドでsearchmovesが指定されているなら、そこに含まれていないものは除く。
+            // numaPolicy == "system", or explicitly set by the user
+            // numaPolicy が "system" であるか、またはユーザーによって明示的に設定された場合
 
-	// あと宣言勝ちできるなら、その指し手を先頭に入れておいてやる。
-	// (ただし、トライルールのときはMOVE_WINではないので、トライする指し手はsearchmovesに含まれていなければ
-	// 指しては駄目な手なのでrootMovesに追加しない。)
-#if defined (USE_ENTERING_KING_WIN)
-	if (pos.DeclarationWin() == Move::win())
-		rootMoves.emplace_back(Move::win());
-#endif
+            return true;
+        }();
 
-	// 全合法手を生成するオプションが有効ならば。
-	if (limits.generate_all_legal_moves)
-	{
-		for (auto m : MoveList<LEGAL_ALL>(pos))
-			if (limits.searchmoves.empty()
-				|| std::count(limits.searchmoves.begin(), limits.searchmoves.end(), m))
-				rootMoves.emplace_back(m);
+        std::map<NumaIndex, size_t> counts;
 
-	} else {
+        boundThreadToNumaNode = doBindThreads
+                                ? numaConfig.distribute_threads_among_numa_nodes(requested)
+                                : std::vector<NumaIndex>{};
 
-		for (auto m : MoveList<LEGAL>(pos))
-			if (limits.searchmoves.empty()
-				|| std::count(limits.searchmoves.begin(), limits.searchmoves.end(), m))
-				rootMoves.emplace_back(m);
-	}
-
-	// After ownership transfer 'states' becomes empty, so if we stop the search
-	// and call 'go' again without setting a new position states.get() == nullptr.
-	// 所有権の移動後、statesが空になるので、探索を停止させ、
-	// "go"をstate.get() == nullptrである新しいpositionをセットせずに再度呼び出す。
-
-	ASSERT_LV3(states.get() || setupStates.get());
-
-	// statesが呼び出し元から渡されているならこの所有権をSearch::SetupStatesに移しておく。
-	// このstatesは、positionコマンドに対して用いたStateInfoでなければならない。(CheckInfoが異なるため)
-	// 引数で渡されているstatesは、そうなっているものとする。
-	if (states.get())
-		setupStates = std::move(states);	// Ownership transfer, states is now empty
-
-	// We use Position::set() to set root position across threads. But there are
-	// some StateInfo fields (previous, pliesFromNull, capturedPiece) that cannot
-	// be deduced from a fen string, so set() clears them and they are set from
-	// setupStates->back() later. The rootState is per thread, earlier states are shared
-	// since they are read-only.
-
-	// Position::set()によってst->previosがクリアされるので事前にコピーして保存する。
-	// これは、rootStateの役割。これはスレッドごとに持っている。
-	// cf. Fix incorrect StateInfo : https://github.com/official-stockfish/Stockfish/commit/232c50fed0b80a0f39322a925575f760648ae0a5
-
-	auto sfen = pos.sfen();
-
-#if defined(USE_HUMANLIKE_OPTIONS)
-	// ForceCapture (FC / ForceCaptureProb): 1 go ごとに 1 回乱数を振り、全スレッド同じ fc_active を共有。
-	bool fc_active_this_go = false;
-	{
-		static AsyncPRNG fc_prng;
-		const int fc_value = (int)Options["ForceCaptureProb"];
-		fc_active_this_go = (fc_value > 0) && ((int)(fc_prng.rand<u64>() % 100) < fc_value);
-	}
-
-	// StableKing (SK / StableKingProb): 同様に 1 go ごとに乱数を振り、全スレッド共有。
-	bool sk_active_this_go = false;
-	{
-		static AsyncPRNG sk_prng;
-		const int sk_value = (int)Options["StableKingProb"];
-		sk_active_this_go = (sk_value > 0) && ((int)(sk_prng.rand<u64>() % 100) < sk_value);
-	}
-
-	// GreedyKing (GK / GreedyKingProb): 1 go ごとに 1 回乱数を振り、全スレッド同じ gk_active を共有。
-	bool gk_active_this_go = false;
-	{
-		static AsyncPRNG gk_prng;
-		const int gk_value = (int)Options["GreedyKingProb"];
-		gk_active_this_go = (gk_value > 0) && ((int)(gk_prng.rand<u64>() % 100) < gk_value);
-	}
-
-	// GreedyMove (GM / GreedyMoveProb): 同様に 1 go ごとに乱数を振り、全スレッド共有。
-	bool gm_active_this_go = false;
-	{
-		static AsyncPRNG gm_prng;
-		const int gm_value = (int)Options["GreedyMoveProb"];
-		gm_active_this_go = (gm_value > 0) && ((int)(gm_prng.rand<u64>() % 100) < gm_value);
-	}
-
-	// NoSacrifice (NS): 1 go ごとに gate。
-	bool ns_active_this_go = false;
-	{
-		static AsyncPRNG ns_prng;
-		const int ns_value = (int)Options["NoSacrificeProb"];
-		ns_active_this_go = (ns_value > 0) && ((int)(ns_prng.rand<u64>() % 100) < ns_value);
-	}
-
-	// NoMateSacrifice (NMS): 1 go ごとに gate。
-	bool nms_active_this_go = false;
-	{
-		static AsyncPRNG nms_prng;
-		const int nms_value = (int)Options["NoMateSacrificeProb"];
-		nms_active_this_go = (nms_value > 0) && ((int)(nms_prng.rand<u64>() % 100) < nms_value);
-	}
-
-	// Blind variants。
-	bool fc_blind_this_go  = false;
-	bool ns_blind_this_go  = false;
-	bool nms_blind_this_go = false;
-	bool gk_blind_this_go  = false;
-	{
-		static AsyncPRNG fc_blind_prng, ns_blind_prng, nms_blind_prng, gk_blind_prng;
-		const int fc_b  = (int)Options["ForceCaptureBlindProb"];
-		const int ns_b  = (int)Options["NoSacrificeBlindProb"];
-		const int nms_b = (int)Options["NoMateSacrificeBlindProb"];
-		const int gk_b  = (int)Options["GreedyKingBlindProb"];
-		fc_blind_this_go  = (fc_b  > 0) && ((int)(fc_blind_prng.rand<u64>()  % 100) < fc_b);
-		ns_blind_this_go  = (ns_b  > 0) && ((int)(ns_blind_prng.rand<u64>()  % 100) < ns_b);
-		nms_blind_this_go = (nms_b > 0) && ((int)(nms_blind_prng.rand<u64>() % 100) < nms_b);
-		gk_blind_this_go  = (gk_b  > 0) && ((int)(gk_blind_prng.rand<u64>()  % 100) < gk_b);
-	}
-#endif
-
-	for (Thread* th : *this)
-	{
-		// th->nodes = th->tbHits = th->nmpMinPly = th->bestMoveChanges = 0;
-		// Stockfish12のこのコード、bestMoveChangesがatomic型なのでそこからint型に代入してることになってコンパイラが警告を出す。
-		// ↓のように書いたほうが良い。
-		th->nodes = th->bestMoveChanges = /* th->tbHits = */ th->nmpMinPly = 0;
-
-		th->rootDepth = th->completedDepth = 0;
-
-#if defined(USE_HUMANLIKE_OPTIONS)
-		// SK soft-hybrid: 思考開始時は king-locked、main thread が必要時に解除する。
-		th->sk_allow_king = false;
-
-		// RF soft-hybrid: 思考開始時は RF 有効、main thread が必要時に解除する。
-		th->rf_allow_violate = false;
-
-		// FC / SK: 上で 1 度振った結果を全スレッドにコピー。
-		th->fc_active = fc_active_this_go;
-		th->sk_active = sk_active_this_go;
-
-		// GK: 上で 1 度振った結果を全スレッドにコピー。
-		th->gk_active = gk_active_this_go;
-
-		// GM: 同様にコピー、snapshot をクリア。
-		th->gm_active = gm_active_this_go;
-		th->gm_depth1_top4.clear();
-
-		// NS / NMS: gate 値をコピー。
-		th->ns_active = ns_active_this_go;
-		th->nms_active = nms_active_this_go;
-
-		// Blind variants: 相手の手番にも同フィルタを発動させる per-search gate。
-		th->fc_blind_active  = fc_blind_this_go;
-		th->ns_blind_active  = ns_blind_this_go;
-		th->nms_blind_active = nms_blind_this_go;
-		th->gk_blind_active  = gk_blind_this_go;
-#endif
-
-		// 以上の初期化、探索スレッド側でやるべきだと思うが、しかしth->nodesなどはmain threadが探索ノード数の
-		// 出力のために積算するので、main threadが積算する時にはすでに他のスレッドのth->nodesがゼロ初期化されている状態でないと
-		// おかしい値になってしまう。
-		//
-		// そこで、main threadが開始する時点では、すべてのスレッドのスレッド初期化が完了していることを保証しなければならない。
-		// ゆえにここに書くしかないのである。
-
-		th->rootMoves = rootMoves;
-		th->rootPos.set(sfen, &th->rootState,th);
-		th->rootState = setupStates->back();
-	    //th->rootSimpleEval = Eval::simple_eval(pos, pos.side_to_move());
-		// →　やねうら王では使っていない。
-	}
-
-	main()->start_searching();
-}
-
-
-// 探索終了時に、一番良い探索ができていたスレッドを選ぶ。
-Thread* ThreadPool::get_best_thread() const {
-
-	// 深くまで探索できていて、かつそっちの評価値のほうが優れているならそのスレッドの指し手を採用する
-	// 単にcompleteDepthが深いほうのスレッドを採用しても良さそうだが、スコアが良いほうの探索深さのほうが
-	// いい指し手を発見している可能性があって楽観合議のような効果があるようだ。
-
-	Thread* bestThread = threads.front();
-
-	std::unordered_map<Move, int64_t, Move::MoveHash> votes(
-		2 * std::min(size(), bestThread->rootMoves.size()));
-
-	Value minScore = VALUE_NONE;
-
-	// Find minimum score of all threads
-	for (Thread* th : threads)
-		minScore = std::min(minScore, th->rootMoves[0].score);
-
-	// Vote according to score and depth, and select the best thread
-    auto thread_value = [minScore](Thread* th) {
-            return (th->rootMoves[0].score - minScore + 14) * int(th->completedDepth);
-        };
-
-    for (Thread* th : threads)
-        votes[th->rootMoves[0].pv[0]] += thread_value(th);
-
-    for (Thread* th : threads)
-        if (std::abs(bestThread->rootMoves[0].score) >= VALUE_TB_WIN_IN_MAX_PLY)
+        if (boundThreadToNumaNode.empty())
+            counts[0] = requested;  // Pretend all threads are part of numa node 0
+        else
         {
-            // Make sure we pick the shortest mate / TB conversion or stave off mate the longest
-            if (th->rootMoves[0].score > bestThread->rootMoves[0].score)
-                bestThread = th;
+            for (size_t i = 0; i < boundThreadToNumaNode.size(); ++i)
+                counts[boundThreadToNumaNode[i]]++;
         }
-        else if (   th->rootMoves[0].score >= VALUE_TB_WIN_IN_MAX_PLY
-                 || (   th->rootMoves[0].score > VALUE_TB_LOSS_IN_MAX_PLY
-                     && (   votes[th->rootMoves[0].pv[0]] > votes[bestThread->rootMoves[0].pv[0]]
-                         || (   votes[th->rootMoves[0].pv[0]] == votes[bestThread->rootMoves[0].pv[0]]
-                             &&   thread_value(th) * int(th->rootMoves[0].pv.size() > 2)
-                                > thread_value(bestThread) * int(bestThread->rootMoves[0].pv.size() > 2)))))
-            bestThread = th;
 
-    return bestThread;
+        sharedState.sharedHistories.clear();
+        for (auto pair : counts)
+        {
+            NumaIndex numaIndex = pair.first;
+            uint64_t  count     = pair.second;
+            auto      f         = [&]() {
+                sharedState.sharedHistories.try_emplace(numaIndex, next_power_of_two(count));
+            };
+            if (doBindThreads)
+                numaConfig.execute_on_numa_node(numaIndex, f);
+            else
+                f();
+        }
+
+        auto threadsPerNode = counts;
+        counts.clear();
+
+        while (threads.size() < requested)
+        {
+            const size_t    threadId      = threads.size();
+            const NumaIndex numaId        = doBindThreads ? boundThreadToNumaNode[threadId] : 0;
+            auto create_thread = [&]() {
+#if STOCKFISH
+                auto manager = threadId == 0
+                               ? std::unique_ptr<Search::ISearchManager>(
+                                   std::make_unique<Search::SearchManager>(updateContext))
+                               : std::make_unique<Search::NullSearchManager>();
+                // 💡 Stockfishのこの実装は、main threadのときだけSearchManagerを渡して、main thread以外のときは
+                //     SearchManagerを使わせない(NullSearchManagerを渡す)という意味。しかし、結局探索部からmain threadでしか
+                //     SearchManagerを呼び出さないので、このような設計にする必要はないと思う。
+                //     WorkerからSearchManagerにアクセスできればそれだけでいいので、やねうら王では上の設計は採用しない。
+#endif
+
+                // When not binding threads we want to force all access to happen
+                // from the same NUMA node, because in case of NUMA replicated memory
+                // accesses we don't want to trash cache in case the threads get scheduled
+                // on the same NUMA node.
+
+                // スレッドをバインドしない場合、すべてのアクセスが同じNUMAノードから
+                // 行われるように強制したいと考えています。
+                // なぜなら、NUMAのレプリケートメモリにアクセスする場合、
+                // スレッドが同じNUMAノードにスケジューリングされるときに
+                // キャッシュが破棄されるのを防ぎたいからです。
+
+                auto binder = doBindThreads ? OptionalThreadToNumaNodeBinder(numaConfig, numaId)
+                                            : OptionalThreadToNumaNodeBinder(numaId);
+#if STOCKFISH
+                threads.emplace_back(std::make_unique<Thread>(sharedState, std::move(manager),
+                                                              threadId, counts[numaId]++,
+                                                              threadsPerNode[numaId], binder));
+#else
+                threads.emplace_back(std::make_unique<Thread>(sharedState, worker_factory, threadId,
+                                                              counts[numaId]++,
+                                                              threadsPerNode[numaId], binder));
+#endif
+            };
+
+            // Ensure the worker thread inherits the intended NUMA affinity at creation.
+            if (doBindThreads)
+                numaConfig.execute_on_numa_node(numaId, create_thread);
+            else
+                create_thread();
+        }
+
+        // 生成したスレッドに対してThread::clear_worker()を呼び出す。
+        // 🤔 std::make_unique<Thread>()でもWorker::clear()が呼び出されるので
+        //     起動時には二重にclearしてしまうが、仕方がないか…。
+        clear();
+
+        // 🤔 これ、ThreadPool::clear()のなかでやっているので不要なのでは…。
+        main_thread()->wait_for_search_finished();
+    }
 }
 
-/// Start non-main threads
-// 探索を開始する(main thread以外)
+
+// Sets threadPool data to initial values
+// threadPool のデータを初期値に設定する
+
+// 📝 このmethodは、resize_threads()に対して呼び出される。
+//     resize_threads()は、"isready"コマンドに対して呼び出されるので、
+//     つまりは、このmethodは対局ごとに対局開始時に必ず呼び出される。
+
+void ThreadPool::clear() {
+	if (threads.size() == 0)
+		return;
+
+	for (auto&& th : threads)
+		th->clear_worker();
+
+	for (auto&& th : threads)
+		th->wait_for_search_finished();
+
+	// 🤔 これはEngine派生class側で行うべき。
+	//     ここにあったコードは、YaneuraOuEngine::clear()に移動させた。
+#if STOCKFISH
+	// These two affect the time taken on the first move of a game:
+	main_manager()->bestPreviousAverageScore = VALUE_INFINITE;
+	main_manager()->previousTimeReduction = 0.85;
+
+	main_manager()->callsCnt = 0;
+	main_manager()->bestPreviousScore = VALUE_INFINITE;
+	main_manager()->originalTimeAdjust = -1;
+	main_manager()->tm.clear();
+#endif
+}
+
+void ThreadPool::run_on_thread(size_t threadId, std::function<void()> f) {
+	assert(threads.size() > threadId);
+	threads[threadId]->run_custom_job(std::move(f));
+}
+
+void ThreadPool::wait_on_thread(size_t threadId) {
+	assert(threads.size() > threadId);
+	threads[threadId]->wait_for_search_finished();
+}
+
+size_t ThreadPool::num_threads() const { return threads.size(); }
+
+
+// Wakes up main thread waiting in idle_loop() and returns immediately.
+// Main thread will wake up other threads and start the search.
+
+// idle_loop() で待機しているメインスレッドを起こし、すぐにリターンする。
+// メインスレッドは他のスレッドを起こして探索を開始する。
+
+void ThreadPool::start_thinking(const OptionsMap&  options,
+                                Position&          pos,
+                                StateListPtr&      states,
+                                Search::LimitsType limits) {
+
+    main_thread()->wait_for_search_finished();
+
+    // 📝 increaseDepthはmain_managerに移動させた。
+    //     ここのある初期化のうち、stopとabortedSearch以外は、Worker派生classで処理すべき。
+    // 🌈 SearchManager::pre_start_searching()に移動させた。
+	//     これは、Workerの派生classのpre_start_searching()から呼び出される。
+#if STOCKFISH
+    main_manager()->stopOnPonderhit = stop = abortedSearch = false;
+    main_manager()->ponder                                 = limits.ponderMode;
+    increaseDepth                                          = true;
+#else
+    stop = abortedSearch = false;
+#endif
+
+    Search::RootMoves rootMoves;
+#if STOCKFISH
+    const auto legalmoves = MoveList<LEGAL_ALL>(pos);
+
+    for (const auto& usiMove : limits.searchmoves)
+    {
+        auto move = USIEngine::to_move(pos, usiMove);
+
+        if (std::find(legalmoves.begin(), legalmoves.end(), move) != legalmoves.end())
+            rootMoves.emplace_back(move);
+    }
+
+    // limits.searchmovesが指定されていないとき、rootMovesがemptyになる。
+    // このとき、すべての合法手でスタートする必要がある。
+    if (rootMoves.empty())
+        for (const auto& m : legalmoves)
+            rootMoves.emplace_back(m);
+
+#else
+
+    // 🌈  GenerateAllLegalMoves反映させないと..
+    bool generate_all_legal_moves =
+      options.count("GenerateAllLegalMoves") && options["GenerateAllLegalMoves"];
+
+    // ⚠ MoveList<LEGAL_ALL>とMoveList<LEGAL>は異なる型なので1つの変数に代入できない。
+    //     std::variantを使うよりは次のように書いたほうがすっきりする。
+
+    auto setup_rootMoves = [&](auto& moveList) {
+        for (const auto& usiMove : limits.searchmoves)
+        {
+            auto move = USIEngine::to_move(pos, usiMove);
+
+			// これだと角不成のような指し手が GenerateAllLegalMoves == falseだと rootMovesにないから除外されてしまう..
+            if (std::find(moveList.begin(), moveList.end(), move) != moveList.end())
+                rootMoves.emplace_back(move);
+        }
+
+        if (rootMoves.empty())
+            for (const auto& m : moveList)
+                rootMoves.emplace_back(m);
+    };
+
+    if (generate_all_legal_moves) {
+        auto legalmoves = MoveList<LEGAL_ALL>(pos);
+        setup_rootMoves(legalmoves);
+    } else {
+        auto legalmoves = MoveList<LEGAL>(pos);
+        setup_rootMoves(legalmoves);
+    }
+
+#endif
+
+    //Tablebases::Config tbConfig = Tablebases::rank_root_moves(options, pos, rootMoves);
+    // ⇨  Tablebasesは将棋では用いないのでコメントアウト
+
+    // After ownership transfer 'states' becomes empty, so if we stop the search
+    // and call 'go' again without setting a new position states.get() == nullptr.
+
+    // 所有権の移動後、'states' は空になるため、検索を中断して
+    // 新しい局面を設定せずに再度 'go' を呼び出すと、states.get() == nullptr となる。
+
+    assert(states.get() || setupStates.get());
+
+    if (states.get())
+        setupStates = std::move(states);  // Ownership transfer, states is now empty
+
+    // We use Position::set() to set root position across threads. But there are
+    // some StateInfo fields (previous, pliesFromNull, capturedPiece) that cannot
+    // be deduced from a fen string, so set() clears them and they are set from
+    // setupStates->back() later. The rootState is per thread, earlier states are
+    // shared since they are read-only.
+
+    // 複数のスレッドでルート局面を設定するために Position::set() を使用します。
+    // しかし、StateInfo の一部のフィールド（previous、pliesFromNull、capturedPiece）は
+    // FEN 文字列からは推測できないため、set() はそれらをクリアし、後で setupStates->back() から設定されます。
+    // rootState はスレッドごとに個別ですが、それ以前の状態は読み取り専用のため共有されます。
+
+    for (auto&& th : threads)
+    {
+        th->run_custom_job([&]() {
+#if STOCKFISH
+            th->worker->limits = limits;
+            th->worker->nodes = th->worker->tbHits = th->worker->bestMoveChanges = 0;
+            th->worker->nmpMinPly                                                = 0;
+            th->worker->rootDepth = th->worker->completedDepth = 0;
+            th->worker->rootMoves                              = rootMoves;
+            th->worker->rootPos.set(pos.fen(), pos.is_chess960(), &th->worker->rootState);
+            th->worker->rootState = setupStates->back();
+            th->worker->tbConfig  = tbConfig;
+#else
+
+            th->worker->limits = limits;
+            th->worker->nodes  = 0;
+#endif
+
+			// 📝 tbHits、tbConfigは将棋では使わない。
+
+#if STOCKFISH
+            th->worker->nmpMinPly = 0;
+			th->worker->bestMoveChanges = 0;
+            th->worker->rootDepth = th->worker->completedDepth = 0;
+
+            // 🤔 やねうら王では、Worker派生classのpre_start_searching()で行うようにする。
+            //     やねうら王では、void Search::YaneuraOuWorker::pre_start_searching()で行っている。
+#endif
+
+            th->worker->rootMoves = rootMoves;
+            th->worker->rootPos.set(pos.sfen(), &th->worker->rootState);
+            th->worker->rootState = setupStates->back();
+
+#if !STOCKFISH
+			// ⚠ どうせなら、↑でworker->rootPos.set()が終わってから呼び出したい。
+			//     (rootPosを使って入玉判定などを行いたいため)
+            th->worker->pre_start_searching();
+#endif
+		});
+    }
+
+    for (auto&& th : threads)
+        th->wait_for_search_finished();
+
+    main_thread()->start_searching();
+}
+
+// ⚠ このメソッドは、やねうら王の標準探索エンジンでしか使わないので、
+//     YaneuraOuEngine側に移動させた。
+//Thread* ThreadPool::get_best_thread() const
+
+
+// Start non-main threads.
+// Will be invoked by main thread after it has started searching.
+
+// メインスレッド以外のスレッドを開始する。
+// メインスレッドが探索を開始した後に呼び出される。
 
 void ThreadPool::start_searching() {
 
-	for (Thread* th : threads)
+	for (auto&& th : threads)
 		if (th != threads.front())
 			th->start_searching();
 }
 
 
-/// Wait for non-main threads
-// main threadがそれ以外の探索threadの終了を待つ。
+// Wait for non-main threads
+
+// メインスレッド以外のスレッドを待機する
 
 void ThreadPool::wait_for_search_finished() const {
 
-	for (Thread* th : threads)
+	for (auto&& th : threads)
 		if (th != threads.front())
 			th->wait_for_search_finished();
 }
 
-// main thread以外の探索スレッドがすべて終了しているか。
-// すべて終了していればtrueが返る。
-bool ThreadPool::search_finished() const
-{
-	for (Thread* th : threads)
-		if (th != threads.front())
-			if (th->is_searching())
-				return false;
+std::vector<size_t> ThreadPool::get_bound_thread_count_by_numa_node() const {
+	std::vector<size_t> counts;
 
-	return true;
+	if (!boundThreadToNumaNode.empty())
+	{
+		NumaIndex highestNumaNode = 0;
+		for (NumaIndex n : boundThreadToNumaNode)
+			if (n > highestNumaNode)
+				highestNumaNode = n;
+
+		counts.resize(highestNumaNode + 1, 0);
+
+		for (NumaIndex n : boundThreadToNumaNode)
+			counts[n] += 1;
+	}
+
+	return counts;
 }
+
+void ThreadPool::ensure_network_replicated() {
+	for (auto&& th : threads)
+		th->ensure_network_replicated();
+}
+
+} // namespace YaneuraOu

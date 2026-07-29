@@ -1,8 +1,8 @@
 ﻿// Definition of layer AffineTransform of NNUE evaluation function
 // NNUE評価関数の層AffineTransformの定義
 
-#ifndef NNUE_LAYERS_AFFINE_TRANSFORM_H_INCLUDED
-#define NNUE_LAYERS_AFFINE_TRANSFORM_H_INCLUDED
+#ifndef CLASSIC_NNUE_LAYERS_AFFINE_TRANSFORM_H_INCLUDED
+#define CLASSIC_NNUE_LAYERS_AFFINE_TRANSFORM_H_INCLUDED
 
 #include "../../../config.h"
 
@@ -11,6 +11,7 @@
 #include "../nnue_common.h"
 #include "simd.h"
 
+namespace YaneuraOu {
 namespace Eval::NNUE::Layers {
 
 template<IndexType kInputDimensions, IndexType kPaddedInputDimensions, IndexType kOutputDimensions>
@@ -33,6 +34,7 @@ static void affine_transform_unaligned(std::int32_t*       output,
     constexpr IndexType kNumChunks  = CeilToMultiple<IndexType>(kInputDimensions, 16) / 16;
     const __m128i       kZeros      = _mm_setzero_si128();
     const auto          inputVector = reinterpret_cast<const __m128i*>(input);
+
 #elif defined(USE_NEON)
     constexpr IndexType kNumChunks  = CeilToMultiple<IndexType>(kInputDimensions, 16) / 16;
     const auto          inputVector = reinterpret_cast<const int8x8_t*>(input);
@@ -112,7 +114,6 @@ static void affine_transform_unaligned(std::int32_t*       output,
         __m128i    sumLo = _mm_cvtsi32_si128(biases[i]);
         __m128i    sumHi = kZeros;
         const auto row   = reinterpret_cast<const __m128i*>(&weights[offset]);
-
         for (IndexType j = 0; j < kNumChunks; ++j)
         {
             __m128i row_j           = _mm_load_si128(&row[j]);
@@ -126,7 +127,6 @@ static void affine_transform_unaligned(std::int32_t*       output,
             sumLo                   = _mm_add_epi32(sumLo, productLo);
             sumHi                   = _mm_add_epi32(sumHi, productHi);
         }
-
         __m128i sum           = _mm_add_epi32(sumLo, sumHi);
         __m128i sumHigh_64    = _mm_shuffle_epi32(sum, _MM_SHUFFLE(1, 0, 3, 2));
         sum                   = _mm_add_epi32(sum, sumHigh_64);
@@ -138,7 +138,6 @@ static void affine_transform_unaligned(std::int32_t*       output,
 
         int32x4_t  sum = {biases[i]};
         const auto row = reinterpret_cast<const int8x8_t*>(&weights[offset]);
-
         for (IndexType j = 0; j < kNumChunks; ++j)
         {
             int16x8_t product = vmull_s8(inputVector[j * 2], row[j * 2]);
@@ -201,6 +200,15 @@ class AffineTransform {
 		return hash_value;
 	}
 
+	// ハッシュ値を前段の値から更新するときのヘルパー
+	static constexpr std::uint32_t GetHashValue(std::uint32_t prevHash) {
+		std::uint32_t hash_value = 0xCC03DAE4u;
+		hash_value += kOutputDimensions;
+		hash_value ^= prevHash >> 1;
+		hash_value ^= prevHash << 31;
+		return hash_value;
+	}
+
 	// 入力層からこの層までの構造を表す文字列
 	static std::string GetStructureString() {
 		return "AffineTransform[" + std::to_string(kOutputDimensions) + "<-" + std::to_string(kInputDimensions) + "](" +
@@ -214,10 +222,11 @@ class AffineTransform {
 
     static constexpr IndexType GetWeightIndex(IndexType i) {
 #if defined(USE_WASM_SIMD)
-        // The WASM SIMD `Propagate()` short-circuit reads weights as dense
-        // row-major, not the SF17 scrambled layout (introduced in 9c41f5b7 /
-        // 434a3392). Keep the on-disk weight order dense on WASM so the
-        // reinterpret_cast in Propagate() sees the right bytes.
+        // WASM SIMD の Propagate() 短絡は重みを dense (row-major) として読むので、
+        // SF17 由来の scrambled 配置 (9c41f5b7 / 434a3392) にしてはいけない。
+        // ⚠ em++ ビルドは -DUSE_SSE42 を渡しており、それが config.h で
+        //   USE_SSE41 → USE_SSSE3 と連鎖するため、この分岐が無いと
+        //   下の #elif に吸われて scrambled になり、評価値が壊れる。
         return i;
 #elif defined(USE_SSSE3) || defined(USE_NEON_DOTPROD)
         return kOutputDimensions % 4 == 0 ? GetWeightIndexScrambled(i) : i;
@@ -365,10 +374,11 @@ class AffineTransform {
 #endif
 
 #if defined(USE_NEON_DOTPROD)
-			if constexpr (kOutputDimensions % 4 == 0)
+			if constexpr (kOutputDimensions % (sizeof(int32x4_t) / sizeof(OutputType)) == 0)
 			{
 				constexpr IndexType kNumChunks = CeilToMultiple<IndexType>(kInputDimensions, 8) / 4;
-				constexpr IndexType kNumRegs = kOutputDimensions / 4;
+				constexpr IndexType kOutputSimdWidth = sizeof(int32x4_t) / sizeof(OutputType);
+				constexpr IndexType kNumRegs = kOutputDimensions / kOutputSimdWidth;
 
 				const auto       input32 = reinterpret_cast<const std::int32_t*>(input);
 				const int32x4_t* biasvec = reinterpret_cast<const int32x4_t*>(biases_);
@@ -460,9 +470,6 @@ class AffineTransform {
 	using BiasType   = OutputType;
 	using WeightType = std::int8_t;
 
-	// 学習用クラスをfriendにする
-	friend class Trainer<AffineTransform>;
-
 	// この層の直前の層
 	PreviousLayer previous_layer_;
 
@@ -471,7 +478,8 @@ class AffineTransform {
 	alignas(kCacheLineSize) WeightType weights_[kOutputDimensions * kPaddedInputDimensions];
 };
 
-}  // namespace Eval::NNUE::Layers
+} // namespace Eval::NNUE::Layers
+} // namespace YaneuraOu
 
 #endif  // defined(EVAL_NNUE)
 

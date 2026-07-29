@@ -7,17 +7,14 @@
 #include "../search.h"
 #include "../misc.h"
 #include "../book/book.h"
+#include "../tt.h"
 
 using namespace std;
-
-#if defined(YANEURAOU_ENGINE) && defined (EVAL_LEARN)
-namespace Learner {
-	void UnitTest(Test::UnitTester& unittest);
-}
-#endif
+namespace YaneuraOu {
 
 namespace Test
 {
+
 	// --------------------
 	//      UnitTest
 	// --------------------
@@ -30,6 +27,7 @@ namespace Test
 	{
 		cout << "=== Start UnitTest ===" << endl;
 	}
+
 	UnitTester::~UnitTester()
 	{
 		cout << "=== Summary UnitTest ===" << endl;
@@ -73,13 +71,13 @@ namespace Test
 		++test_count;
 	}
 
-	void UnitTester::run(std::function<void(UnitTester&)> f)
+	void UnitTester::run(std::function<void(UnitTester&, IEngine& )> f)
 	{
 		// 対象の関数を実行する前に呼び出されるcallback
 		if (before_run)
 			before_run();
 
-		f(*this);
+		f(*this, *engine);
 
 		if (after_run)
 			after_run();
@@ -115,57 +113,28 @@ namespace Test
 	//	→　通常のUnitTest
 	//  unittest random_player_loop 1000
 	//  →　ランダムプレイヤーでの自己対局1000回を行うUnitTest
-	//  unittest auto_player_loop 1000 auto_player_depth 6
-	//  →　探索深さ6での自己対局を1000回行うUnitTest。(やねうら王探索部 + EVAL_LEARN版が必要)
 
-	void UnitTest([[maybe_unused]] Position& pos, istringstream& is)
+	void UnitTest(istringstream& is, IEngine& engine)
 	{
-		// UnitTest開始時に"isready"コマンドを実行したのに相当する初期化はなされているものとする。
-		is_ready();
-
 		// UnitTestを呼び出してくれるclass。
 		UnitTester tester;
 
 		// 入力文字列を解釈
 		string token;
 		s64 random_player_loop = 0; // ランダムプレイヤーの対局回数(0を指定するとskip)
-		s64 auto_player_loop   = 0; // 自己対局の対局回数(0を指定するとskip)
-		s64 auto_player_depth  = 6; // 自己対局の時のdepth
 		while (is >> token)
 		{
 			if (token == "random_player_loop")
 				is >> random_player_loop;
-			else if (token == "auto_player_loop")
-				is >> auto_player_loop;
-			else if (token == "auto_player_depth")
-				is >> auto_player_depth;
 		}
 		cout << "random_player_loop : " << random_player_loop << endl;
-		cout << "auto_player_loop   : " << auto_player_loop   << endl;
-		cout << "auto_player_depth  : " << auto_player_depth  << endl;
 
 		// testerのoptionsに代入しておく。
-		tester.options["random_player_loop"] << USI::Option(random_player_loop, (s64)0, INT64_MAX );
-		tester.options["auto_player_loop"  ] << USI::Option(auto_player_loop  , (s64)0, INT64_MAX );
-		tester.options["auto_player_depth" ] << USI::Option(auto_player_depth , (s64)0, INT64_MAX );
-
-		// --- run()の実行ごとに退避させていたものを元に戻す。
-
-		// 退避させるもの
-		auto limits_org = Search::Limits;
-		tester.after_run = [&]() { Search::Limits = limits_org; };
-
-		// ConsiderationModeをオフにしておかないとPV出力の時に置換表を漁るのでその時にdo_move()をして
-		// 探索ノード数が加算されてしまい、depth固定のbenchなのに探索ノード数や読み筋が変化することがある。
-		// (これが変化されてしまうと再現性がなくなってしまい、デバッグする時に都合が悪い。)
-		Search::Limits.consideration_mode = false;
+		tester.options.add("random_player_loop", Option(random_player_loop));
 
 		// --- 各classに対するUnitTest
 
-#if defined(YANEURAOU_ENGINE) && defined(EVAL_LEARN)
-		// 自己対局のテスト(これはデバッガで追いかけたいことがあるので、他のをすっ飛ばして最初にやって欲しい)
-		tester.run(Learner::UnitTest);
-#endif
+		tester.engine = &engine;
 
 		// Book namespace
 		tester.run(Book::UnitTest);
@@ -181,7 +150,7 @@ namespace Test
 		tester.run(TranspositionTable::UnitTest);
 
 		// USI namespace
-		tester.run(USI::UnitTest);
+		tester.run(USIEngine::UnitTest);
 
 		// Misc tools
 		tester.run(Misc::UnitTest);
@@ -191,5 +160,5 @@ namespace Test
 
 	}
 
-}
-
+} // namespace Test;
+} // namespace YaneuraOu;
