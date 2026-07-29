@@ -254,15 +254,6 @@ STATIC_BOOK_SECTION = """## Optional: opening book
 > 700T-shock (32 MB) は cfworkers の 128 MB heap だと OOM。cfworkers で book を使う場合は 100T-shock まで。petabook は pthread variant でも heap 圧迫するので注意。"""
 
 
-# Verification numbers from the local KP256 + suishopetite smoke test.
-# Refresh when re-benchmarked on a new toolchain.
-STATIC_NODE_VERIFICATION = (
-    "Verified locally on Node 26 with KP256 + suishopetite — depth 24 in "
-    "~3.4 s @ threads=1 (≈0.84 M nps), ~6.8 s @ threads=4 (≈3.32 M nps, "
-    "~4× linear scale)."
-)
-
-
 # ---------------------------------------------------------------------------
 # Top-level assembly
 # ---------------------------------------------------------------------------
@@ -284,28 +275,31 @@ def build_body(packages: list[dict]) -> str:
 
     total = len(packages)
     n_node = len(node_rows)
-    n_non_node = total - n_node
 
     intro = (
         f"YaneuraOu shogi engine — WebAssembly builds.\n"
         f"\n"
-        f"**What's new in this release**: {word(n_node)} brand-new "
-        f"**Node.js-targeted** packages (`@ultemica/yaneuraou-wasm-node-*`) "
-        f"join the existing {word(n_non_node)}. Total: **{word(total)} "
-        f"npm-shaped packages**, each shipped as its own `tar.gz` asset "
-        f"on this page.\n"
+        f"**What's new in this release**: the engine base moves to "
+        f"**YaneuraOu V9.60** (upstream). All **{word(total)} npm-shaped "
+        f"packages** are rebuilt on that model and shipped as their own "
+        f"`tar.gz` asset on this page — the package set and loader API are "
+        f"unchanged from 8.50.0.\n"
         f"\n"
-        f"- `kp256` / `mate` / `halfkp256` / `halfkp768` / `material` / "
-        f"`mobility`, all multi-threaded via `node:worker_threads`.\n"
-        f"- Built with **emscripten 3.1.43** — the only toolchain currently "
-        f"verified to drive a pthread-backed YaneuraOu cleanly under Node "
-        f"(newer emscriptens stall, see `docs/wasm_client_usage.md` for "
-        f"the matrix).\n"
-        f"- Drop-in `createEngine()` loader: zero boilerplate on the "
-        f"consumer side. The package wraps the `node:worker_threads` "
-        f"plumbing, `Worker` polyfill, web-globals shim, and `noInitialRun` "
-        f"+ `callMain` bootstrap internally.\n"
-        f"- {STATIC_NODE_VERIFICATION}\n"
+        f"- WebAssembly support restored on the V9.6x engine model: the NNUE "
+        f"weights stay in the dense layout (upstream's scrambled/sparse "
+        f"layout is AVX-only), and the explicit affine layers stay dense "
+        f"under WASM too.\n"
+        f"- Edge variants build with pthreads fully off rather than "
+        f"pthread-capable-but-single-threaded.\n"
+        f"- Fork engine options carried over: `FullTimeMode` (stop shrinking "
+        f"the think time on stable positions), hidden USI options settable "
+        f"only via `setoption`, and a tolerant NNUE header-version check. "
+        f"See `docs/fork_engine_options.md`.\n"
+        f"- Node variants remain pinned to **emscripten 3.1.43** — the only "
+        f"toolchain verified to drive a pthread-backed YaneuraOu cleanly "
+        f"under Node (newer emscriptens stall, see "
+        f"`docs/wasm_client_usage.md` for the matrix). The rest build on "
+        f"5.0.5.\n"
         f"\n"
         f"---\n"
         f"\n"
@@ -335,7 +329,7 @@ def build_body(packages: list[dict]) -> str:
     if hlsl_rows:
         sections.append(table_hlsl(hlsl_rows))
     sections.append(STATIC_HLSL_NOTES)
-    sections.append("### Node.js variants ✨ new in this release")
+    sections.append("### Node.js variants")
     sections.append(
         f"{Word(n_node)} packages built with `EM_ENVIRONMENT=node`, "
         f"`EM_PTHREAD=1`, and `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall',"
