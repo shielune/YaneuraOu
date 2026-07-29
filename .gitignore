@@ -795,6 +795,7 @@ FodyWeavers.xsd
 !source/eval/nnue/architectures/sfnn_network.h
 
 # Project-local files
+.claude/settings.local.json
 *.bat
 *.rb
 YaneuraOu_backup*.lnk
