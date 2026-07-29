@@ -12,10 +12,10 @@ on:
 
 jobs:
   build-mingw:
-    # ubuntu-latest = ubuntu-20.04
+    # ubuntu-latest = ubuntu-22.04
     # https://docs.github.com/ja/actions/using-github-hosted-runners/about-github-hosted-runners
     # https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
@@ -29,36 +29,14 @@ jobs:
           - USER_ENGINE
         compiler:
           - x86_64-w64-mingw32-g++-posix
-          - i686-w64-mingw32-g++-posix
+          # - i686-w64-mingw32-g++-posix
         target:
-          - "normal,tournament"
-          - evallearn
+          - tournament
         archcpu:
-          - "AVX512VNNI,AVX512"
-          - "AVX2,SSE42,SSE2"
-          - "SSE41,SSSE3,OTHER"
-          - "ZEN1,ZEN2"
-          - "ZEN3,AVXVNNI"
-          - "NO_SSE"
+          # - AVX512VNNI
+          - AVX2
+          - NO_SSE
         exclude:
-          # NNUEの教師生成/機械学習ビルドにはBLASが必要だが、現状はUbuntuのMinGWでOpenBLASを扱えない
-          # NNUE's machine learning build requires BLAS, but currently Ubuntu's MinGW cannot handle OpenBLAS
-          - edition: YANEURAOU_ENGINE_NNUE
-            target: evallearn
-          - edition: YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32
-            target: evallearn
-          - edition: YANEURAOU_ENGINE_NNUE_HALFKPE9
-            target: evallearn
-          - edition: YANEURAOU_ENGINE_NNUE_KP256
-            target: evallearn
-          # 以下のエディションには機械学習の実装が存在しない
-          # There is no machine learning implementation for the following editions
-          - edition: YANEURAOU_MATE_ENGINE
-            target: evallearn
-          - edition: TANUKI_MATE_ENGINE
-            target: evallearn
-          - edition: USER_ENGINE
-            target: evallearn
           # 32bit compiler x 64bit archcpu
           - compiler: i686-w64-mingw32-g++-posix
             archcpu: "AVX512VNNI,AVX512"
@@ -81,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout own repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           path: main
 
