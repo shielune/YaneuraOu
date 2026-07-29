@@ -304,6 +304,7 @@ jobs:
             make -j$(nproc) clean tournament \
               COMPILER=em++ \
               TARGET_CPU=WASM \
+              PYTHON=python3 \
               YANEURAOU_EDITION=${{ matrix.package.edition }} \
               TARGET="../${DIST_DIR}/yaneuraou.js" \
               EM_EXPORT_NAME=${{ matrix.package.export_name }} \
