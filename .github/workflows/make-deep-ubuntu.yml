@@ -3,12 +3,12 @@ name: Make CI (DeepLearning for Ubuntu Linux)
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches:
-  #     - "**"
-  # pull_request:
-  #   branches:
-  #     - "**"
+#  push:
+#    branches:
+#      - "**"
+#  pull_request:
+#    branches:
+#      - "**"
 
 jobs:
   build-ubuntu:
@@ -24,7 +24,7 @@ jobs:
           - YANEURAOU_ENGINE_DEEP_ORT_CPU
           - YANEURAOU_ENGINE_DEEP_TENSOR_RT_UBUNTU
         compiler:
-          - g++-11
+          # - g++-11
           - clang++-15
         target:
           - normal
@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout own repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           path: main
 

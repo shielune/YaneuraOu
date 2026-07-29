@@ -5,8 +5,9 @@
 #include <fstream>
 #include <cstring>	// memset()
 
-namespace EvalIO
-{
+namespace YaneuraOu {
+namespace EvalIO {
+
 	bool eval_convert(const EvalInfo& input, const EvalInfo& output, const std::vector<u16>* map)
 	{
 		// 特徴因子の型の数が異なるとそもそも変換できない。
@@ -83,18 +84,8 @@ namespace EvalIO
 						return out_.file_or_memory.ptr;
 					}).is_not_ok() )
 					{
-#if defined(EVAL_LEARN)
-						if (Options["SkipLoadingEval"])
-						{
-							std::cout << "info string read file error , file = " << in_.file_or_memory.filename << " , but SkipLoadingEval == true , so ignore this." << std::endl;
-							memset(out_.file_or_memory.ptr, 0, input_block_size);
-						}
-						else
-#endif
-						{
-							std::cout << "info string Error! : read file error , file = " << in_.file_or_memory.filename << std::endl;
-							return false;
-						}
+						std::cout << "info string Error! : read file error , file = " << in_.file_or_memory.filename << std::endl;
+						return false;
 					}
 				}
 				// memory to file
@@ -339,4 +330,6 @@ namespace EvalIO
 
 		return true;
 	}
-}
+
+} // namespace EvalIO
+} // namespace YaneuraOu

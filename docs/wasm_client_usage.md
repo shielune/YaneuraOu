@@ -670,6 +670,7 @@ Cloudflare Workers / Vercel Edge Functions / Deno Deploy 等、
 | `go movetime N` | 推奨。ほぼ N ms で打ち切る |
 | `MultiPV` / `SkillLevel` / `DepthLimit` / `NodesLimit` | 動く |
 | `USI_Hash` / `EvalHash` | 動くが並列 init が無いので `isready` 応答が他変種比でやや遅め |
+| `FullTimeMode` | **効かない**。`go movetime` では時間制御の動的係数計算自体が走らないため。`usi` の応答には出てくるので注意 (`docs/fork_engine_options.md`) |
 
 ### 9.2 パッケージ別対応状況
 
