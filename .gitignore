@@ -51,6 +51,8 @@ YaneuraOu.VC.VC.opendb
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+# ...but docs/releases/ holds the release notes, not build output.
+!docs/releases/
 x64/
 x86/
 build/
