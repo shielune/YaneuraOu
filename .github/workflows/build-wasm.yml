@@ -84,110 +84,13 @@ jobs:
             maximum_memory: 2147483648
             category: pthread
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
-            eval_note: "external (数十 MB)"
-          - name: material-cfworkers
-            dir: yaneuraou-wasm-material-cfworkers
-            edition: YANEURAOU_ENGINE_MATERIAL
-            export_name: YaneuraOu_Material
-            environment: web
-            pthread: 0
-            initial_memory: 67108864
-            maximum_memory: 134217728
-            # 駒得のみ評価 (Lv1)。eval は同梱不要 (handcrafted)。
-            extra_make_args: "MATERIAL_LEVEL=1"
-            category: cfworkers
-            engine_label: "Material Lv1 (handcrafted)"
-            eval_note: "**embedded**"
-          - name: mobility-cfworkers
-            dir: yaneuraou-wasm-mobility-cfworkers
-            edition: YANEURAOU_ENGINE_KIKI
-            export_name: YaneuraOu_Mobility
-            environment: web
-            pthread: 0
-            initial_memory: 67108864
-            maximum_memory: 134217728
-            # Mobility (KIKI) 評価関数。重みは mobility_weights_embedded.cpp に焼き込み済み。
-            extra_make_args: ""
-            category: cfworkers
-            engine_label: "Mobility / KIKI (164-dim learned linear)"
-            eval_note: "**embedded**"
+            eval_note: "external (~184 MB)"
 
-          # HumanLike SkillLevel (hlsl) variants — humanlike personality USI options
-          # (ForceCaptureProb / StableKingProb / *BlindProb 等) を有効化したビルド。
-          # 各 OFF 版と同じ edition / memory / export name で、USE_HUMANLIKE_OPTIONS=ON
-          # を make に渡すだけの差分。
-          - name: kp256-cfworkers-hlsl
-            dir: yaneuraou-wasm-kp256-cfworkers-hlsl
-            edition: YANEURAOU_ENGINE_NNUE_KP256
-            export_name: YaneuraOu_K_P
-            environment: web
-            pthread: 0
-            initial_memory: 67108864
-            maximum_memory: 134217728
-            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
-            category: cfworkers-hlsl
-            engine_label: "NNUE KP256 (Suishopetite)"
-            eval_note: "external (~873 KB)"
-          - name: pthread-kp256-hlsl
-            dir: yaneuraou-wasm-pthread-kp256-hlsl
-            edition: YANEURAOU_ENGINE_NNUE_KP256
-            export_name: YaneuraOu_K_P
-            environment: web,worker
-            pthread: 1
-            initial_memory: 134217728
-            maximum_memory: 1073741824
-            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
-            category: pthread-hlsl
-            engine_label: "NNUE KP256 (Suishopetite)"
-            eval_note: "external (~873 KB)"
-          - name: pthread-halfkp256-hlsl
-            dir: yaneuraou-wasm-pthread-halfkp256-hlsl
-            edition: YANEURAOU_ENGINE_NNUE
-            export_name: YaneuraOu_HalfKP256
-            environment: web,worker
-            pthread: 1
-            initial_memory: 268435456
-            maximum_memory: 2147483648
-            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
-            category: pthread-hlsl
-            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
-            eval_note: "external (~62 MB)"
-          - name: pthread-halfkp768-hlsl
-            dir: yaneuraou-wasm-pthread-halfkp768-hlsl
-            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
-            export_name: YaneuraOu_HalfKP768
-            environment: web,worker
-            pthread: 1
-            initial_memory: 268435456
-            maximum_memory: 2147483648
-            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
-            category: pthread-hlsl
-            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
-            eval_note: "external (数十 MB)"
-          - name: material-cfworkers-hlsl
-            dir: yaneuraou-wasm-material-cfworkers-hlsl
-            edition: YANEURAOU_ENGINE_MATERIAL
-            export_name: YaneuraOu_Material
-            environment: web
-            pthread: 0
-            initial_memory: 67108864
-            maximum_memory: 134217728
-            extra_make_args: "MATERIAL_LEVEL=1 USE_HUMANLIKE_OPTIONS=ON"
-            category: cfworkers-hlsl
-            engine_label: "Material Lv1 (handcrafted)"
-            eval_note: "**embedded**"
-          - name: mobility-cfworkers-hlsl
-            dir: yaneuraou-wasm-mobility-cfworkers-hlsl
-            edition: YANEURAOU_ENGINE_KIKI
-            export_name: YaneuraOu_Mobility
-            environment: web
-            pthread: 0
-            initial_memory: 67108864
-            maximum_memory: 134217728
-            extra_make_args: "USE_HUMANLIKE_OPTIONS=ON"
-            category: cfworkers-hlsl
-            engine_label: "Mobility / KIKI (164-dim learned linear)"
-            eval_note: "**embedded**"
+          # Material / Mobility / HumanLike (hlsl) の各 variant はビルド対象から外して
+          # いる。packages/ 配下のソースは残してあるので、配布を再開したくなったら
+          # ここに matrix エントリを戻すだけでよい。
+          # 配布するのは NNUE 4 種 (KP256 / HalfKP256 / HalfKP768) + Mate の
+          # 実用構成のみ。
 
           # Node.js variants — built with EM_ENVIRONMENT=node and
           # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
@@ -246,34 +149,7 @@ jobs:
             maximum_memory: 2147483648
             category: node
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
-            eval_note: "external (数十 MB)"
-          - name: node-material
-            dir: yaneuraou-wasm-node-material
-            edition: YANEURAOU_ENGINE_MATERIAL
-            export_name: YaneuraOu_Material
-            environment: node
-            pthread: 1
-            exported_runtime_methods: "['FS','ccall','callMain']"
-            emsdk_version: "3.1.43"
-            initial_memory: 134217728
-            maximum_memory: 1073741824
-            extra_make_args: "MATERIAL_LEVEL=1"
-            category: node
-            engine_label: "Material Lv1 (handcrafted)"
-            eval_note: "**embedded**"
-          - name: node-mobility
-            dir: yaneuraou-wasm-node-mobility
-            edition: YANEURAOU_ENGINE_KIKI
-            export_name: YaneuraOu_Mobility
-            environment: node
-            pthread: 1
-            exported_runtime_methods: "['FS','ccall','callMain']"
-            emsdk_version: "3.1.43"
-            initial_memory: 134217728
-            maximum_memory: 1073741824
-            category: node
-            engine_label: "Mobility / KIKI (164-dim learned linear)"
-            eval_note: "**embedded**"
+            eval_note: "external (~184 MB)"
 
     steps:
       - uses: actions/checkout@v7
@@ -432,12 +308,13 @@ jobs:
 
       - name: Generate release body from matrix
         run: |
-          # Render the Markdown body from the matrix + static prose.
-          # Adding/removing a package updates the tables and the "Twenty"
-          # /"Six" literals automatically. See script for details.
+          # Tables and package counts come from the matrix; the per-release
+          # prose comes from docs/releases/<version>.md (missing file falls
+          # back to a generic headline). See docs/releases/README.md.
           python3 script/generate_release_body.py \
             --workflow .github/workflows/build-wasm.yml \
             --version "${{ steps.version.outputs.version }}" \
+            --notes-dir docs/releases \
             --output release_body.md
           echo "--- release body preview ---"
           head -20 release_body.md

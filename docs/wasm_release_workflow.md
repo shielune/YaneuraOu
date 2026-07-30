@@ -1,11 +1,11 @@
 # WASM パッケージのリリース手順
 
 `.github/workflows/build-wasm.yml` が `wasm-v*` タグを push されると
-発火して、20 個 (現状) の npm-shaped パッケージを並列ビルドし、tar.gz
+発火して、10 個 (現状) の npm-shaped パッケージを並列ビルドし、tar.gz
 として GitHub Release に並べる。
 
 このドキュメントは **そのリリースに新しいパッケージを 1 つ追加するとき** の
-最小ステップをまとめる。今日のセッションで Node 用パッケージを 6 個足したとき、
+最小ステップをまとめる。過去に Node 用パッケージを 6 個足したとき、
 matrix / for ループ / files 列 / release body の表 / 数値 literal の **5 箇所**
 を別々に編集しなくちゃいけなかったが、それを **matrix への 1 ブロック追加 だけ**
 に圧縮する設計に作り替えてある。
@@ -54,9 +54,14 @@ cp -R packages/yaneuraou-wasm-node-kp256 packages/yaneuraou-wasm-node-foo
 
 `category` の値はリリース本文で表をどのセクションに振り分けるかを決める:
 
-- `cfworkers` / `pthread` → "Default (humanlike OFF)" 表
+- `cfworkers` / `pthread` → "Browser / Cloudflare Workers" 表
 - `cfworkers-hlsl` / `pthread-hlsl` → "HumanLike SkillLevel (hlsl) variants" 表
 - `node` → "Node.js variants" 表
+
+hlsl のセクションは該当エントリが matrix に無ければ丸ごと出力されない。
+現在は Material / Mobility / hlsl の各 variant を matrix から外しているので、
+配布されるのは NNUE 3 種 + Mate の実用構成 10 パッケージのみ。
+`packages/` 配下のソースは残してあるので、再開したければ matrix に戻すだけでよい。
 
 未知の `category` 値は `script/generate_release_body.py` が **明示的に
 エラー** で落とすので、typo はビルドが先に教えてくれる。
@@ -73,11 +78,11 @@ git push origin wasm-v8.50.1
 
 CI が自動で:
 
-1. 21 個 (新 1 個含む) を並列ビルド
+1. 11 個 (新 1 個含む) を並列ビルド
 2. それぞれを `${dir}-v8.50.1.tar.gz` にパッケージング
 3. `script/generate_release_body.py` が matrix を読んで本文 Markdown を生成
    - 全パッケージ表に新 row が自動追加される
-   - "Twenty" → "Twenty-one" / "Six" → "Seven" 等の literal も自動更新
+   - "ten" → "eleven" / "Four" → "Five" 等の literal も自動更新
 4. `files: yaneuraou-wasm-*-v8.50.1.tar.gz` の glob で全 tar.gz を Release アセットに添付
 
 ---
@@ -91,13 +96,13 @@ CI が自動で:
 | `release-wasm` の `for d in \ ...` ループ | matrix から `Parse matrix as SoT` ステップが dirs を流し込む |
 | `release-wasm` の `files:` ブロック | `yaneuraou-wasm-*-v${version}.tar.gz` glob 1 行で網羅 |
 | `release-wasm` の `body:` (Markdown 表) | `generate_release_body.py` が matrix から表を組み立てる |
-| body 内の "Twenty" / "Six" / "fourteen" などの literal 数値 | generator が自動英訳 (`script/generate_release_body.py` の `_WORDS` 表) |
+| body 内の "ten" / "Four" などの literal 数値 | generator が自動英訳 (`script/generate_release_body.py` の `_WORDS` 表) |
 
 これらを **手で触ろうとしている** = 設計の意図に反している、警告サイン。
 
 ---
 
-## 既存パッケージを 「同じ 20 個のまま別バージョンでリリース」 するとき
+## 既存パッケージを 「同じ 10 個のまま別バージョンでリリース」 するとき
 
 matrix も script も触らない。タグを切って push するだけ:
 
@@ -117,7 +122,7 @@ GitHub Actions UI から `Build wasm` を手動実行し、`emsdk_version` 入�
 Run workflow → emsdk_version: 5.0.6 → Run
 ```
 
-ただし node variant (`emsdk_version: "3.1.43"` を matrix で固定している 6 個)
+ただし node variant (`emsdk_version: "3.1.43"` を matrix で固定している 4 個)
 は **per-matrix 設定が dispatch 入力より優先される** ので、3.1.43 のまま
 ビルドされる。これは設計通り(他バージョンでは Node が動かない)。
 
@@ -152,6 +157,9 @@ memory / extra_make_args) は **matrix.package のみ** から取り、デフォ
   組み立てるレンダラ。表のレイアウト、静的な散文 (Quickstart コード片、
   eval/book URL 表、注意書き)、`category` → セクション分けロジック、
   数値英訳辞書 (`_WORDS`) を持つ。
+- **`docs/releases/<version>.md`** ── そのリリース固有の散文 (What's new)。
+  generator が `--version` で選んで冒頭に差し込む。無ければパッケージ数だけの
+  汎用文にフォールバックする。詳細は [`docs/releases/README.md`](releases/README.md)。
 - **`docs/wasm_client_usage.md`** ── 利用者向け実装ガイド。リリース本文の
   Quickstart より詳しいことが書いてある。
 

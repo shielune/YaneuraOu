@@ -101,7 +101,7 @@ NNUE 評価関数 (`nn.bin`) と定跡ファイルはバイナリに同梱しな
 
 | File | Architecture | Size | Note |
 |---|---|---|---|
-| AobaNNUE nn.bin | HalfKP_768x2_16_64 | 数十 MB | [AobaNNUE Release](https://github.com/yssaya/AobaNNUE/releases) から取得。本パッケージに対応する唯一の評価関数 |
+| AobaNNUE nn.bin | HalfKP_768x2_16_64 | ~184 MB | [AobaNNUE Release](https://github.com/yssaya/AobaNNUE/releases) から取得。本パッケージに対応する唯一の評価関数 |
 | 100T-shock book | - | 4.7 MB | 定跡 (任意) |
 | 700T-shock book | - | 32 MB | 定跡 (大、HASH と合わせてヒープ要確認) |
 
