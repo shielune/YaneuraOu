@@ -127,7 +127,7 @@ export interface YaneuraOuModule extends EmscriptenModule {
 
 「`script/loaders/node/*` の世話までしたくない、Node でただ
 YaneuraOu を動かしたい」── 大半のユースケースはこれ。`.github/workflows/build-wasm.yml`
-が `wasm-v*` タグ push のたびに `@ultemica/yaneuraou-wasm-node-*` を 6 種類
+が `wasm-v*` タグ push のたびに `@ultemica/yaneuraou-wasm-node-*` を 4 種類
 ビルドして GitHub Releases に並べる。**中身は emscripten 3.1.43 で焼いた
 node variant + ESM の TypeScript loader (`createEngine`)。**
 
@@ -138,9 +138,7 @@ node variant + ESM の TypeScript loader (`createEngine`)。**
 | `@ultemica/yaneuraou-wasm-node-kp256` | NNUE KP256 (Suishopetite) | 外部 (~873 KB) | 軽い NNUE、起動速い |
 | `@ultemica/yaneuraou-wasm-node-mate` | Mate (DfPn) | 不要 | 詰将棋ソルバ |
 | `@ultemica/yaneuraou-wasm-node-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | 外部 (~62 MB) | 強い NNUE |
-| `@ultemica/yaneuraou-wasm-node-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | 外部 (数十 MB) | AobaNNUE 系 |
-| `@ultemica/yaneuraou-wasm-node-material` | Material Lv1 (handcrafted) | **内蔵** | 教育用 / 軽い対戦 |
-| `@ultemica/yaneuraou-wasm-node-mobility` | Mobility / KIKI (164-dim 線形) | **内蔵** | material 以上 NNUE 未満 |
+| `@ultemica/yaneuraou-wasm-node-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | 外部 (~184 MB) | AobaNNUE 系 |
 
 ブラウザ用と Cloudflare Workers 用は別パッケージ
 (`@ultemica/yaneuraou-wasm-pthread-*`, `@ultemica/yaneuraou-wasm-*-cfworkers`)
@@ -185,7 +183,6 @@ engine.dispose();
 - HalfKP eval を Suisho5 でなく AobaNNUE 用に間違えるなどフォーマット違いを
   踏むと `isready` で `exit(1)` する。バイナリ形式は KP256 / HalfKP_256x2_32_32 /
   HalfKP_768x2_16_64 の 3 系列が **互いに互換性なし**。
-- material / mobility は eval 内蔵なので `evalBin` を渡しても無視される。
 - emscripten 3.1.44 以上で Node が動かないのは下流バグ (本書の §5 参照)。それが
   解決するまで、Node 用バイナリは 3.1.43 で焼き続ける。
 

@@ -8,11 +8,16 @@ previously wrote inline in the workflow file.
 
 The point of this script is that adding/removing a WASM package becomes a
 matrix-only edit — the for-loop in release-wasm, the files: glob, the
-Markdown tables in the body, and the literal counts ("Twenty", "Six")
+Markdown tables in the body, and the literal counts ("Ten", "Four")
 all derive from the matrix automatically.
 
+The per-release prose ("what's new in this one") comes from
+docs/releases/<version>.md instead, so release notes are reviewable in the
+repository and can be regenerated to fix a published release. See
+docs/releases/README.md.
+
 When the Node loader API changes, or the eval/book URL tables need updating,
-edit the static prose at the bottom of this file (search for `STATIC_*`).
+edit the static prose in the middle of this file (search for `STATIC_*`).
 
 Usage:
     python3 script/generate_release_body.py \\
@@ -221,11 +226,41 @@ console.log(result.bestmove, result.score); // -> "7g7f", { kind: "cp", value: .
 engine.dispose();
 ```
 
-> Requires **Node.js 18 or later**. Browsers cannot load these binaries (built with `EM_ENVIRONMENT=node`, not `web,worker`); use the `pthread-*` packages there. Cloudflare Workers / V8 Isolate environments can't host pthread builds at all; use the `*-cfworkers` packages there. Node variants are not shipped in `-hlsl` form in this release."""
+> Requires **Node.js 18 or later**. Browsers cannot load these binaries (built with `EM_ENVIRONMENT=node`, not `web,worker`); use the `pthread-*` packages there. Cloudflare Workers / V8 Isolate environments can't host pthread builds at all; use the `*-cfworkers` packages there."""
 
-STATIC_HLSL_NOTES = """> Mate engine variants are not provided in -hlsl form because humanlike options are search-time personality filters and have no effect on the DfPn mate solver.
+STATIC_HLSL_NOTES = """> Mate engine variants are not provided in -hlsl form because humanlike options are search-time personality filters and have no effect on the DfPn mate solver."""
 
-> Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget). Material / Mobility variants ship an embedded evaluator and need no external weights."""
+STATIC_VARIANT_NOTES = """> Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget)."""
+
+STATIC_PERFORMANCE_SECTION = """## Performance — how close to native?
+
+WASM is not the slow option. Measured on one machine with the same eval and the
+same search parameters, **WASM reaches about 92% of a native SIMD build**.
+
+| Build | nps | vs native NEON |
+|---|---|---|
+| native clang-14 (NEON) | 764k | 102% |
+| native gcc (NEON) | 748k | 100% |
+| **wasm32 pthread** | **691k** | **92%** |
+| wasm32 (no SIMD) | 585k | 78% |
+| native clang-14 (scalar) | 320k | 43% |
+| native gcc (scalar) | 203k | 27% |
+
+`Threads=1` / `go nodes 1000000` / KP256 + suishopetite / median of 3 runs.
+Absolute numbers are machine-dependent — only the ratios carry over.
+
+- **WASM SIMD is doing real work.** Turning it off drops 691k to 585k (-15%).
+  WASM still beats both native scalar builds by more than 2x.
+- **Threads scale.** On Node, 1 to 4 threads goes 686k to 2,916k (4.25x) —
+  superlinear thanks to the shared transposition table.
+- **Browser and Node are within noise.** 99% at 1 thread, 92% at 4 threads;
+  `SharedArrayBuffer` synchronisation costs the browser a little.
+
+Search results are **bit-identical across every WASM variant** (32/64-bit,
+SIMD on/off, browser/Node/edge) down to the node count, so switching runtimes
+does not change what the engine plays.
+
+Full conditions and raw data: `docs/reports/2026-07-28_wasm_v96x_performance.md`."""
 
 STATIC_EVAL_SECTION = """## Required: NNUE eval file (NNUE builds only)
 
@@ -234,7 +269,7 @@ WASM bundle には評価関数を内蔵していないので、別途 nn.bin を
 | Eval | Engine | Size | URL |
 |---|---|---|---|
 | suisho5 nn.bin | HalfKP_256x2_32_32 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
-| AobaNNUE nn.bin | HalfKP_768x2_16_64 | 数十 MB | https://github.com/yssaya/AobaNNUE/releases |
+| AobaNNUE nn.bin | HalfKP_768x2_16_64 | ~184 MB | https://github.com/yssaya/AobaNNUE/releases |
 | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
 
 > suisho5 / suishopetite は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。AobaNNUE は素の `nn.bin` がそのまま配布されている。
@@ -257,7 +292,20 @@ STATIC_BOOK_SECTION = """## Optional: opening book
 # ---------------------------------------------------------------------------
 # Top-level assembly
 # ---------------------------------------------------------------------------
-def build_body(packages: list[dict]) -> str:
+def load_headline(version: str, notes_dir: Path) -> str | None:
+    """Read the per-release prose from docs/releases/<version>.md.
+
+    Returns None when the file does not exist, so a tag can be cut without
+    hand-writing notes first.
+    """
+    path = notes_dir / f"{version}.md"
+    if not path.is_file():
+        return None
+    text = path.read_text().strip()
+    return text or None
+
+
+def build_body(packages: list[dict], headline: str | None = None) -> str:
     by_cat: dict[str, list[dict]] = {}
     for p in packages:
         cat = p.get("category")
@@ -276,30 +324,18 @@ def build_body(packages: list[dict]) -> str:
     total = len(packages)
     n_node = len(node_rows)
 
+    # Per-release prose lives in docs/releases/<version>.md; without it we
+    # still emit a usable body describing the package set as the matrix has it.
+    if headline is None:
+        headline = (
+            f"**{Word(total)} npm-shaped packages**, each shipped as its own "
+            f"`tar.gz` asset on this page."
+        )
+
     intro = (
         f"YaneuraOu shogi engine — WebAssembly builds.\n"
         f"\n"
-        f"**What's new in this release**: the engine base moves to "
-        f"**YaneuraOu V9.60** (upstream). All **{word(total)} npm-shaped "
-        f"packages** are rebuilt on that model and shipped as their own "
-        f"`tar.gz` asset on this page — the package set and loader API are "
-        f"unchanged from 8.50.0.\n"
-        f"\n"
-        f"- WebAssembly support restored on the V9.6x engine model: the NNUE "
-        f"weights stay in the dense layout (upstream's scrambled/sparse "
-        f"layout is AVX-only), and the explicit affine layers stay dense "
-        f"under WASM too.\n"
-        f"- Edge variants build with pthreads fully off rather than "
-        f"pthread-capable-but-single-threaded.\n"
-        f"- Fork engine options carried over: `FullTimeMode` (stop shrinking "
-        f"the think time on stable positions), hidden USI options settable "
-        f"only via `setoption`, and a tolerant NNUE header-version check. "
-        f"See `docs/fork_engine_options.md`.\n"
-        f"- Node variants remain pinned to **emscripten 3.1.43** — the only "
-        f"toolchain verified to drive a pthread-backed YaneuraOu cleanly "
-        f"under Node (newer emscriptens stall, see "
-        f"`docs/wasm_client_usage.md` for the matrix). The rest build on "
-        f"5.0.5.\n"
+        f"**What's new in this release**: {headline}\n"
         f"\n"
         f"---\n"
         f"\n"
@@ -314,21 +350,24 @@ def build_body(packages: list[dict]) -> str:
         f"scope)."
     )
 
-    sections = [intro, "## Packages", "### Default (humanlike OFF)"]
+    sections = [intro, "## Packages"]
     if default_rows:
+        sections.append("### Browser / Cloudflare Workers")
         sections.append(table_default(default_rows))
-    sections.append("### HumanLike SkillLevel (hlsl) variants")
-    n_hlsl = len(hlsl_rows)
-    sections.append(
-        f"Same {word(n_hlsl)} engine-bearing variants above (NNUE 4 + "
-        f"Material + Mobility) but built with `USE_HUMANLIKE_OPTIONS=ON`, "
-        f"exposing the humanlike personality USI options "
-        f"(`ForceCaptureProb`, `StableKingProb`, `*BlindProb`, etc.) for "
-        f"skill-level tuning / personality emulation."
-    )
+    # hlsl variants are built only when the matrix carries them; the section
+    # disappears entirely otherwise rather than rendering an empty heading.
     if hlsl_rows:
+        sections.append("### HumanLike SkillLevel (hlsl) variants")
+        sections.append(
+            f"Same {word(len(hlsl_rows))} engine-bearing variants above but "
+            f"built with `USE_HUMANLIKE_OPTIONS=ON`, exposing the humanlike "
+            f"personality USI options (`ForceCaptureProb`, `StableKingProb`, "
+            f"`*BlindProb`, etc.) for skill-level tuning / personality "
+            f"emulation."
+        )
         sections.append(table_hlsl(hlsl_rows))
-    sections.append(STATIC_HLSL_NOTES)
+        sections.append(STATIC_HLSL_NOTES)
+    sections.append(STATIC_VARIANT_NOTES)
     sections.append("### Node.js variants")
     sections.append(
         f"{Word(n_node)} packages built with `EM_ENVIRONMENT=node`, "
@@ -343,6 +382,7 @@ def build_body(packages: list[dict]) -> str:
     if node_rows:
         sections.append(table_node(node_rows))
     sections.append(STATIC_NODE_QUICKSTART)
+    sections.append(STATIC_PERFORMANCE_SECTION)
     sections.append(STATIC_EVAL_SECTION)
     sections.append(STATIC_BOOK_SECTION)
 
@@ -360,9 +400,14 @@ def main() -> int:
     ap.add_argument(
         "--version",
         required=True,
-        help='release version like "8.50.0" (currently unused in body; '
-             "kept as positional argument for forward-compat with future "
-             "version-stamped sections).",
+        help='release version like "8.50.0". Selects the prose file '
+             "docs/releases/<version>.md.",
+    )
+    ap.add_argument(
+        "--notes-dir",
+        type=Path,
+        default=Path("docs/releases"),
+        help="directory holding the per-release prose (default: docs/releases)",
     )
     ap.add_argument(
         "--output",
@@ -374,7 +419,14 @@ def main() -> int:
 
     wf = yaml.safe_load(args.workflow.read_text())
     packages = wf["jobs"]["build-wasm"]["strategy"]["matrix"]["package"]
-    body = build_body(packages)
+    headline = load_headline(args.version, args.notes_dir)
+    if headline is None:
+        print(
+            f"NOTE: {args.notes_dir / (args.version + '.md')} not found — "
+            f"using the generic package-count headline.",
+            file=sys.stderr,
+        )
+    body = build_body(packages, headline)
     args.output.write_text(body)
     print(f"wrote {args.output} ({len(body)} bytes, {body.count(chr(10))} lines)", file=sys.stderr)
     return 0
