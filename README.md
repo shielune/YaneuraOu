@@ -1,163 +1,134 @@
-﻿[![Make CI (MSYS2 for Windows)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-msys2.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-msys2.yml)
-[![Make CI (DeepLearning for Windows)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-deep-windows.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-deep-windows.yml)
-[![Make CI (MinGW for Windows)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-mingw.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-mingw.yml)
-[![Make CI (for Ubuntu Linux)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make.yml)
-[![Make CI (DeepLearning for Ubuntu Linux)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-deep-ubuntu.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-deep-ubuntu.yml)
-[![NDK CI (for Android)](https://github.com/yaneurao/YaneuraOu/actions/workflows/ndk.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/ndk.yml)
-[![Make CI (for macOS)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-macos.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-macos.yml)
-[![Make CI (for WebAssembly)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-wasm.yml/badge.svg?event=push)](https://github.com/yaneurao/YaneuraOu/actions/workflows/make-wasm.yml)
+[![Build wasm](https://github.com/shielune/YaneuraOu/actions/workflows/build-wasm.yml/badge.svg)](https://github.com/shielune/YaneuraOu/actions/workflows/build-wasm.yml)
 
-# このフォークについて
+# YaneuraOu WASM (fork)
 
-yaneurao/YaneuraOu のフォーク。WASM パッケージの配布と、いくつかの独自
-エンジンオプションを追加している。フォーク独自の文書は以下:
+[yaneurao/YaneuraOu](https://github.com/yaneurao/YaneuraOu) のフォーク。将棋エンジン
+やねうら王を **WebAssembly にビルドして npm 形の配布物にする**ことを目的にしている。
+ブラウザ・Node.js・Cloudflare Workers で、ネイティブに近い速度で動く。
+
+エンジン本体は upstream V9.60 ベース。フォーク独自のエンジンオプションもいくつか
+足している (`docs/fork_engine_options.md`)。
+
+## パッケージ
+
+エンジン 5 種 × ランタイム 3 種の組み合わせで 10 パッケージを配布している。
+最新版は [Releases](https://github.com/shielune/YaneuraOu/releases) の `tar.gz` から取得する。
+
+| Package | 評価関数 | 並列 | Initial / Max memory | 動作環境 |
+|---|---|---|---|---|
+| `@ultemica/yaneuraou-wasm-pthread-kp256` | KP256 (外部 ~873 KB) | pthread | 128 MB / 1 GB | ブラウザ |
+| `@ultemica/yaneuraou-wasm-pthread-halfkp256` | HalfKP_256x2_32_32 (外部 ~62 MB) | pthread | 256 MB / 2 GB | ブラウザ |
+| `@ultemica/yaneuraou-wasm-pthread-halfkp768` | HalfKP_768x2_16_64 (外部 ~184 MB) | pthread | 256 MB / 2 GB | ブラウザ |
+| `@ultemica/yaneuraou-wasm-mate-pthread` | 不要 (詰将棋 DfPn) | pthread | 128 MB / 1 GB | ブラウザ |
+| `@ultemica/yaneuraou-wasm-node-kp256` | KP256 (外部 ~873 KB) | pthread | 128 MB / 1 GB | Node.js 18+ |
+| `@ultemica/yaneuraou-wasm-node-halfkp256` | HalfKP_256x2_32_32 (外部 ~62 MB) | pthread | 256 MB / 2 GB | Node.js 18+ |
+| `@ultemica/yaneuraou-wasm-node-halfkp768` | HalfKP_768x2_16_64 (外部 ~184 MB) | pthread | 256 MB / 2 GB | Node.js 18+ |
+| `@ultemica/yaneuraou-wasm-node-mate` | 不要 (詰将棋 DfPn) | pthread | 128 MB / 1 GB | Node.js 18+ |
+| `@ultemica/yaneuraou-wasm-kp256-cfworkers` | KP256 (外部 ~873 KB) | single | 64 MB / 128 MB | Cloudflare Workers |
+| `@ultemica/yaneuraou-wasm-mate-cfworkers` | 不要 (詰将棋 DfPn) | single | 64 MB / 128 MB | Cloudflare Workers |
+
+ランタイムごとにバイナリが別物なので、環境に合った variant を選ぶ必要がある。
+
+- **ブラウザ (`pthread-*`)** — `SharedArrayBuffer` を使うので、配信側に
+  `Cross-Origin-Opener-Policy: same-origin` と `Cross-Origin-Embedder-Policy: require-corp` が必要
+- **Node.js (`node-*`)** — `EM_ENVIRONMENT=node` ビルド。ブラウザでは読み込めない
+- **Cloudflare Workers (`*-cfworkers`)** — V8 Isolate は pthread を持てないので単一スレッド。
+  128 MB heap に収まらない HalfKP は cfworkers variant を用意していない
+
+評価関数は WASM バイナリに内蔵していない。`FS.writeFile` で MEMFS に書いてから
+`EvalDir` で読ませる。入手先とサイズは
+[`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) にまとめてある。
+
+## 性能 — ネイティブと比べてどうか
+
+「WASM だから遅い」ということはない。同一マシン・同一評価関数・同一探索条件で測ると、
+**WASM はネイティブ SIMD ビルドの約 92% の探索速度**が出る。
+
+| ビルド | nps | 対 native NEON |
+|---|---|---|
+| native clang-14 (NEON) | 764k | 102% |
+| native gcc (NEON) | 748k | 100% |
+| **wasm32 pthread** | **691k** | **92%** |
+| wasm32 (SIMD なし) | 585k | 78% |
+| native clang-14 (scalar) | 320k | 43% |
+| native gcc (scalar) | 203k | 27% |
+
+`Threads=1` / `go nodes 1000000` / KP256 + 水匠 petite / 3回の中央値。
+絶対値はマシン依存なので、意味があるのは比のほう。
+
+読み取れるのは次の3点。
+
+- **WASM SIMD が効いている。** 切ると 691k → 585k (15% 減) まで落ちる。
+  手書き SIMD の無い native scalar ビルド (203k〜320k) より WASM のほうが倍以上速い
+- **スレッドは素直にスケールする。** Node で 1→4 スレッドが 686k → 2,916k (4.25×)。
+  置換表の共有が効いて線形を超える
+- **ブラウザと Node はほぼ同速。** 1スレッドで 99%、4スレッドで 92%。
+  `SharedArrayBuffer` 同期のぶんブラウザがわずかに不利だが実用上は誤差
+
+探索結果も **WASM 変種すべて (32/64bit・SIMD 有無・ブラウザ/Node/edge) でノード数までビット一致**する。
+ランタイムを変えても読み筋は変わらない。
+
+計測条件と生データは
+[`docs/reports/2026-07-28_wasm_v96x_performance.md`](docs/reports/2026-07-28_wasm_v96x_performance.md)。
+
+## 使い方 (Node.js)
+
+```ts
+import fs from "node:fs/promises";
+import { createRequire } from "node:module";
+import { createEngine } from "@ultemica/yaneuraou-wasm-node-kp256";
+import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-kp256/engine";
+
+const require = createRequire(import.meta.url);
+const engine = await createEngine({
+  factory: YaneuraOuFactory,
+  enginePath: require.resolve("@ultemica/yaneuraou-wasm-node-kp256/engine"),
+  wasmBinary: await fs.readFile(require.resolve("@ultemica/yaneuraou-wasm-node-kp256/wasm")),
+  evalBin: await fs.readFile("./eval/nn.bin"),
+  threads: 4,
+  usiHash: 64,
+});
+
+const result = await engine.eval({
+  sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+  byoyomi: 2_000,
+});
+console.log(result.bestmove, result.score);
+engine.dispose();
+```
+
+ブラウザ・Cloudflare Workers 版の使い方、定跡の読み込み、USI オプションの効き方の
+variant 差は [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) にある。
+
+> ⚠ WASM ビルドは `USI_Hash` の既定値が **16 MB** (ネイティブは 1024 MB)。
+> 1024 MB は WASM の `MAXIMUM_MEMORY` を超えて起動できないため下げている。
+> 置換表を増やしたい場合、特に DfPn (`mate-*`) を使う場合は `setoption` で明示的に上げる。
+
+## ツールチェイン
+
+| variant | emscripten |
+|---|---|
+| `pthread-*` / `*-cfworkers` | 5.0.5 |
+| `node-*` | 3.1.43 (固定) |
+
+Node 版だけ古いバージョンに固定している。3.1.44〜3.1.73 は ESM worker で停止し、
+3.1.74 以降は `INCOMING_MODULE_JS_API` で停止するため、pthread 付きのやねうら王を
+Node で正しく動かせることを確認できている唯一のバージョンが 3.1.43 だから。
+互換性マトリクスは [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) にある。
+
+## ドキュメント
 
 | 文書 | 内容 |
 |---|---|
+| [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) | WASM パッケージの利用ガイド (最初に読む) |
 | [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike) |
-| [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) | WASM パッケージの利用ガイド |
 | [`docs/wasm_release_workflow.md`](docs/wasm_release_workflow.md) | WASM パッケージのリリース手順 |
+| [`docs/releases/`](docs/releases/README.md) | 各リリースのリリースノート (本文の生成元) |
 | [`docs/wasm_upgrade_changelog.md`](docs/wasm_upgrade_changelog.md) | emscripten / upstream 追従作業の記録 |
+| [`docs/wasm_native_divergence.md`](docs/wasm_native_divergence.md) | native と WASM で探索結果が分かれる件の調査 |
 | [`docs/nagisa_v3_diff_survey.md`](docs/nagisa_v3_diff_survey.md) | keinoda/YaneuraOu (NAGISA_V3) との差分調査 |
+| [`docs/upstream_readme.md`](docs/upstream_readme.md) | upstream の README (大会戦績・解説記事一覧・関連リンク) |
 
-以下は upstream の README。
+## ライセンス
 
-# About this project
-
-YaneuraOu is the World's Strongest Shogi engine(AI player) , WCSC29 1st winner , educational and USI compliant engine.
-
-やねうら王は、WCSC29(世界コンピュータ将棋選手権/2019年)、第4回世界将棋AI電竜戦本戦(2023年)などにおいて優勝した世界最強の将棋の思考エンジンです。教育的でUSIプロトコルに準拠しています。
-
-- [WCSC29、やねうら王優勝しました！](http://yaneuraou.yaneu.com/2019/05/06/wcsc29%E3%80%81%E3%82%84%E3%81%AD%E3%81%86%E3%82%89%E7%8E%8B%E5%84%AA%E5%8B%9D%E3%81%97%E3%81%BE%E3%81%97%E3%81%9F%EF%BC%81/)
-- [第4回世界将棋AI電竜戦本戦 優勝記](https://yaneuraou.yaneu.com/2023/12/10/won-the-4th-shogi-ai-denryu-tournament/)
-
-
-# やねうら王プロジェクトを支援する
-
-[![やねうら王プロジェクトを支援する](docs/yaneuraou-sponsors-banner.png "支援バナー")](https://github.com/sponsors/yaneurao)
-
-- GitHub Sponsors : https://github.com/sponsors/yaneurao
-- FANBOX : https://yaneurao.fanbox.cc/
-
-やねうら王プロジェクトに支援すると、開発版のやねうら王(Windows/macOS)、評価関数ファイル、最新定跡ファイルなどのダウンロードURLが書かれたニュースレターが受け取れます。
-
-
-# やねうら王エンジンの大会での戦績
-
-- 2026年 第7回電竜戦TSECノー相居飛車指定局面と先手持ち時間０戦
-  - 第1部『Ryfamate』優勝(NNUEとDL系の合議でNNUE探索部がやねうら王)
-  - 第2部『水匠』優勝(探索部やねうら王V9.60)
-- 2026年 第36回 世界コンピュータ将棋選手権(WCSC36)『水匠』4位。(探索部やねうら王V9.30改)
-- 2025年 文部科学大臣杯第6回世界将棋AI電竜戦本戦 『水匠Concerto』準優勝。(探索部やねうら王V9.10改。やねうらおはチームメンバーとして参加)
-- 2025年 第35回 世界コンピュータ将棋選手権(WCSC35)『水匠』優勝。(探索部やねうら王V8.60改)
-- 2025年 第3回世界将棋AI電竜戦ハードウェア統一戦 『水匠』優勝。(探索部やねうら王V8.60改)
-- 2024年 第34回 世界コンピュータ将棋選手権(WCSC34)『お前、CSA会員にならねーか？』優勝。(探索部やねうら王V8.20 GitHub版)
-- 2024年 第2回 マイナビニュース杯電竜戦ハードウェア統一戦 『水匠』準優勝 (探索部やねうら王V8.10開発版)
-- 2023年 第4回世界将棋AI電竜戦本戦 『水匠』優勝 (探索部やねうら王。やねうらおは、チームメンバーとして参加)
-- 2023年 第1回 マイナビニュース杯電竜戦ハードウェア統一戦 『水匠』優勝。(探索部やねうら王)
-- 2023年 第33回 世界コンピュータ将棋選手権(WCSC33)『やねうら王』準優勝。
-- 2023年 第4回世界将棋AI電竜戦TSEC4 ファイナル『やねうら王』相居飛車部門優勝。総合2位。
-- 2022年 第3回世界将棋AI電竜戦本戦 『水匠』優勝。(探索部やねうら王)
-- 2021年 第2回世界将棋AI電竜戦TSEC 『水匠』総合優勝。(探索部やねうら王)
-- 2020年 第1回 世界コンピュータ将棋オンライン大会(WCSO1) 『水匠』優勝。(探索部やねうら王)
-- 2019年 世界コンピュータ将棋選手権(WCSC29) 『やねうら王 with お多福ラボ2019』優勝。
-  - 決勝の上位8チームすべてがやねうら王の思考エンジンを採用。
-- 2018年 世界コンピュータ将棋選手権(WCSC28) 『Hefeweizen』優勝
-- 2017年 世界コンピュータ将棋選手権(WCSC27) 『elmo』優勝
-- 2017年 第5回将棋電王トーナメント(SDT5) 『平成将棋合戦ぽんぽこ』優勝
-
-# やねうら王の特徴
-
-- USIプロトコルに準拠した思考エンジンです。
-- 入玉宣言勝ち、トライルール等にも対応しています。
-- Ponder(相手番で思考する)、StochasticPonder(確率的ponder)に対応しています。
-- MultiPV(複数の候補手を出力する)に対応しています。
-- 秒読み、フィッシャールールなど様々な持時間に対応しています。
-- 256スレッドのような超並列探索に対応しています。
-- 定跡DBにやねうら王標準定跡フォーマットを採用しています。
-- 定跡DBのon the fly(メモリに丸読みしない)に対応しています。
-- 定跡DBの様々なメンテナンス用コマンドをサポートしています。
-- 置換表の上限サイズは33TB(実質的に無限)まで対応しています。
-- Windows、Ubuntu、macOS、ARMなど様々なプラットフォームをサポートしています。
-- 評価関数として、KPPT、KPP_KKPT、NNUE(各種)、SFNN(各種)に対応しています。
-
-# ふかうら王の特徴
-
-- dlshogi互換エンジンです。
-- やねうら王の思考エンジンオプションをサポートしています。
-- 定跡DBにやねうら王標準定跡フォーマットを採用しています。
-- 定跡DBのon the fly(メモリに丸読みしない)に対応しています。
-- GPU無しでも動作するDirectML版、TensorRT版を用意しています。
-
-# やねうら王の解説記事
-
-|記事内容|リンク|レベル|
-|-|-|-|
-|やねうら王のインストール手順について | [やねうら王のインストール手順](https://github.com/yaneurao/YaneuraOu/wiki/やねうら王のインストール手順)|入門|
-|ふかうら王のインストール手順について | [ふかうら王のインストール手順](https://github.com/yaneurao/YaneuraOu/wiki/ふかうら王のインストール手順)|中級|
-|やねうら王のお勧めエンジン設定について | [やねうら王のお勧めエンジン設定](https://github.com/yaneurao/YaneuraOu/wiki/やねうら王のお勧めエンジン設定)|入門|
-|ふかうら王のお勧めエンジン設定について | [ふかうら王のお勧めエンジン設定](https://github.com/yaneurao/YaneuraOu/wiki/ふかうら王のお勧めエンジン設定)|入門|
-|やねうら王/ふかうら王のエンジンオプションについて | [思考エンジンオプション](https://github.com/yaneurao/YaneuraOu/wiki/思考エンジンオプション)|入門~中級|
-|やねうら王詰将棋エンジンについて| [やねうら王詰将棋エンジン](https://github.com/yaneurao/YaneuraOu/wiki/やねうら王詰将棋エンジン)|入門~中級|
-|やねうら王のよくある質問|[よくある質問](https://github.com/yaneurao/YaneuraOu/wiki/よくある質問)|初級~中級|
-|やねうら王のソースコードのルールについて|[CONTRIBUTING.md](.github/CONTRIBUTING.md)|開発者向け|
-|やねうら王の隠し機能 | [隠し機能](https://github.com/yaneurao/YaneuraOu/wiki/隠し機能)|中級~上級|
-|やねうら王の定跡を作る | [定跡の作成](https://github.com/yaneurao/YaneuraOu/wiki/定跡の作成)|中級~上級|
-|やねうら王のUSI拡張コマンドについて | [USI拡張コマンド](https://github.com/yaneurao/YaneuraOu/wiki/USI拡張コマンド)|開発者向け|
-|やねうら王のビルド手順について | [やねうら王のビルド手順](https://github.com/yaneurao/YaneuraOu/wiki/やねうら王のビルド手順)|開発者向け|
-|ふかうら王のビルド手順について | [ふかうら王のビルド手順](https://github.com/yaneurao/YaneuraOu/wiki/ふかうら王のビルド手順)|開発者向け|
-|やねうら王のソースコード解説 |[やねうら王のソースコード解説](https://github.com/yaneurao/YaneuraOu/wiki/やねうら王のソースコード解説)|開発者向け|
-|AWSでやねうら王を動かす| [AWSでやねうら王](https://github.com/yaneurao/YaneuraOu/wiki/AWSでやねうら王)|中級~開発者|
-|大会に参加する時の設定|[大会に参加する時の設定](https://github.com/yaneurao/YaneuraOu/wiki/大会に参加する時の設定)|開発者|
-|評価関数の学習|[評価関数の学習](https://github.com/yaneurao/YaneuraOu/wiki/評価関数の学習)|開発者|
-|ふかうら王の学習|[ふかうら王の学習](https://github.com/yaneurao/YaneuraOu/wiki/ふかうら王の学習)|開発者|
-|USI対応エンジンの自己対局|[USI対応エンジンの自己対局](https://github.com/yaneurao/YaneuraOu/wiki/USI対応エンジンの自己対局)|中級～開発者|
-|パラメーター自動調整フレームワーク|[パラメーター自動調整フレームワーク](https://github.com/yaneurao/YaneuraOu/wiki/パラメーター自動調整フレームワーク)|開発者|
-|探索部の計測資料|[探索部の計測資料](https://github.com/yaneurao/YaneuraOu/wiki/探索部の計測資料)|開発者|
-|廃止したコマンド・オプションなど| [過去の資料](https://github.com/yaneurao/YaneuraOu/wiki/過去の資料)|開発者|
-|過去のサブプロジェクト|[過去のサブプロジェクト](https://github.com/yaneurao/YaneuraOu/wiki/%E9%81%8E%E5%8E%BB%E3%81%AE%E3%82%B5%E3%83%96%E3%83%97%E3%83%AD%E3%82%B8%E3%82%A7%E3%82%AF%E3%83%88)|初心者～開発者|
-|やねうら王の更新履歴|[やねうら王の更新履歴](https://github.com/yaneurao/YaneuraOu/wiki/やねうら王の更新履歴)|開発者|
-
-
-# やねうら王ニュース記事一覧
-
-やねうら王公式ブログの関連記事の見出し一覧です。
-
-各エンジンオプションの解説、定跡ファイルのダウンロード、定跡の生成手法などについての詳しい資料があります。初心者から開発者まで、知りたいことが全部詰まっています。
-
-- [やねうら王ニュース記事一覧](https://github.com/yaneurao/YaneuraOu/wiki/%E3%82%84%E3%81%AD%E3%81%86%E3%82%89%E7%8E%8B%E3%83%8B%E3%83%A5%E3%83%BC%E3%82%B9)
-
-# ライセンス
-
-やねうら王プロジェクトのソースコードはStockfishをそのまま用いている部分が多々あり、Apery/SilentMajorityを参考にしている部分もありますので、やねうら王プロジェクトは、それらのプロジェクトのライセンス(GPLv3)に従うものとします。
-
-「リゼロ評価関数ファイル」については、やねうら王プロジェクトのオリジナルですが、一切の権利は主張しませんのでご自由にお使いください。
-
-# やねうら王プロジェクト関連リンク
-
-やねうら王関連の最新情報がキャッチできる主要なサイトです。
-
-|サイト | リンク| 内容 |
-|-----|-----|-----|
-|やねうら王公式GitHub | https://github.com/yaneurao/YaneuraOu | このリポジトリ |
-|やねうら王公式ブログ | https://yaneuraou.yaneu.com | やねうら王ブログ |
-|BulletOu | https://github.com/yaneurao/BulletOu | 評価関数の高速学習器 |
-|やねうら王ScriptCollection | https://github.com/yaneurao/YaneuraOu-ScriptCollection | やねうら王スクリプト集 |
-|やねうら王 X | https://x.com/yaneuraou| やねうら王のX |
-|やねうら王ちゃんねる(YouTube) | https://www.youtube.com/c/yanechan| YouTube動画 |
-|やねうら王mini | http://yaneuraou.yaneu.com/YaneuraOu_Mini | やねうら王miniを作ってみる連載記事 |
-
-上記のやねうら王公式ブログでは、コンピュータ将棋に関する情報を大量に発信していますので、やねうら王に興味がなくとも、コンピュータ将棋の開発をしたいなら、非常に参考になると思います。
-
-# 姉妹プロジェクト
-
-BulletOu - GPUを用いたやねうら王評価関数の高速学習器<br/>
-<img src='https://github.com/yaneurao/YaneuraOu/wiki/images/BulletOu-banner-s.png'>
-
-
-
-# 質問箱
-
-やねうら王関連の質問は、以下のブログ記事のコメント欄にお願いします。
-https://yaneuraou.yaneu.com/2022/05/19/yaneuraou-question-box/
-
+GPL-3.0。upstream やねうら王および Stockfish のライセンスを継承する。
