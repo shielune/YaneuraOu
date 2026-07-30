@@ -252,14 +252,30 @@ function installWorkerPolyfill(shimUrl: URL): void {
         );
       }
 
+      // Do NOT call `this.onmessage` / `this.onerror` here.
+      //
+      // Under EM_ENVIRONMENT=node, emscripten 3.1.43 installs its *own*
+      // EventEmitter bridge on the worker:
+      //     if (ENVIRONMENT_IS_NODE) {
+      //       worker.on("message", data => worker.onmessage({data: data}));
+      //       worker.on("error",   e    => worker.onerror(e));
+      //     }
+      // Since `on()` below forwards to the underlying NodeWorker, that
+      // bridge and this handler would both fire, so `worker.onmessage`
+      // runs TWICE for every message.
+      //
+      // Most commands tolerate the duplicate, but "cleanupThread" does not:
+      // the first delivery runs PThread.returnWorkerToPool(), which does
+      // `delete PThread.pthreads[pthread_ptr]` (and frees the thread data).
+      // The second delivery then finds no entry and trips `assert(worker)`
+      // inside cleanupThread() -> Aborted(undefined).
+      //
+      // Let emscripten's bridge be the sole driver of onmessage/onerror;
+      // here we only fan out to addEventListener-style handlers.
       this._w.on("message", (msg: unknown) => {
-        if (typeof this.onmessage === "function") {
-          this.onmessage({ data: msg });
-        }
         for (const fn of this._messageHandlers) fn({ data: msg });
       });
       this._w.on("error", (err: unknown) => {
-        if (typeof this.onerror === "function") this.onerror(err);
         for (const fn of this._errorHandlers) fn(err);
       });
     }
