@@ -155,6 +155,8 @@ def _engine_short_label(engine_label: str) -> str:
         return "HalfKP256"
     if engine_label.startswith("NNUE HalfKP_768x2_16_64"):
         return "HalfKP768"
+    if engine_label.startswith("SFNN HalfKA_hm2"):
+        return "NAGISA"
     if engine_label.startswith("Material"):
         return "Material Lv1"
     if engine_label.startswith("Mobility"):
@@ -264,29 +266,32 @@ Full conditions and raw data: `docs/reports/2026-07-28_wasm_v96x_performance.md`
 
 STATIC_EVAL_SECTION = """## Required: NNUE eval file (NNUE builds only)
 
-WASM bundle には評価関数を内蔵していないので、別途 nn.bin を取得して `FS.writeFile` で MEMFS に書いて `EvalDir` USI option で読み込ませる。
+The WASM bundles do not embed an eval function. Fetch `nn.bin` separately, write it into MEMFS with `FS.writeFile`, and point the `EvalDir` USI option at it.
 
 | Eval | Engine | Size | URL |
 |---|---|---|---|
 | suisho5 nn.bin | HalfKP_256x2_32_32 | ~62 MB | https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz |
 | AobaNNUE nn.bin | HalfKP_768x2_16_64 | ~184 MB | https://github.com/yssaya/AobaNNUE/releases |
 | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
+| NAGISA_V3 nn.bin + progress.bin | SFNN HalfKA_hm2 1024x2-15-64 | ~75 MB | https://github.com/keinoda/YaneuraOu/releases/tag/nagisa-v3.1 |
 
-> suisho5 / suishopetite は embedded C++ array 形式の `.cpp.gz`。`script/eval_bin_to_cpp_literal.py` の逆変換で `.bin` に戻す。AobaNNUE は素の `nn.bin` がそのまま配布されている。
+> suisho5 / suishopetite ship as `.cpp.gz` in embedded C++ array form — convert them back to `.bin` with the inverse of `script/eval_bin_to_cpp_literal.py`. AobaNNUE is distributed as a plain `nn.bin`.
 
-> KP256 / HalfKP_256x2_32_32 / HalfKP_768x2_16_64 の eval はそれぞれ互換性なし。Mate engine は eval 不要。HalfKP eval (62 MB) は cfworkers の 128 MB heap で OOM になるため pthread variant でのみ使える。"""
+> NAGISA_V3 has no standalone eval download — `eval/nn.bin` and `eval/progress.bin` are bundled inside the platform archives on that release page (any of them will do; the eval is identical across all three). It is the only supported network that needs **two** files: pass `progress.bin` via the loader's `progressBin` option, or place it next to `nn.bin` under `EvalDir`. Without it the layer-stack bucket cannot be computed. `FV_SCALE` already defaults to 28 on these builds (16 elsewhere), matching the `eval_options.txt` shipped alongside the network — no manual setting needed.
+
+> KP256, HalfKP_256x2_32_32 and HalfKP_768x2_16_64 evals are mutually incompatible. The Mate engine needs no eval. The HalfKP eval (62 MB) OOMs the 128 MB cfworkers heap, so it only works on the pthread variants."""
 
 STATIC_BOOK_SECTION = """## Optional: opening book
 
-`BookDir` / `BookFile` USI option で読み込ませる。
+Load a book through the `BookDir` / `BookFile` USI options.
 
-| Book | 局面数 | Size | URL |
+| Book | Positions | Size | URL |
 |---|---|---|---|
 | 100T-shock | ~40,000 | 4.7 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-100T-Shock/100T-shock-book.zip |
 | 700T-shock | ~400,000 | 32 MB | https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip |
-| 新ペタショック 233万 | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
+| New petabook 2.33M | ~2,330,000 | 76 MB (.7z) | https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z |
 
-> 700T-shock (32 MB) は cfworkers の 128 MB heap だと OOM。cfworkers で book を使う場合は 100T-shock まで。petabook は pthread variant でも heap 圧迫するので注意。"""
+> 700T-shock (32 MB) OOMs the 128 MB cfworkers heap — on cfworkers, stick to 100T-shock. The petabook strains the heap even on pthread variants."""
 
 
 # ---------------------------------------------------------------------------
