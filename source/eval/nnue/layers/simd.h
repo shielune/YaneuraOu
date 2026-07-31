@@ -111,17 +111,20 @@ namespace Simd
 */
 [[maybe_unused]] static void neon_m128_add_dpbusd_epi32(int32x4_t& acc, int8x16_t a, int8x16_t b) {
 
+    // 16個の積を4個ずつ束ねて4レーンに畳む (x86 の maddubs+madd と同じ集約)。
     const uint8x16_t au = vreinterpretq_u8_s8(a);
 
-    const int16x8_t a_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(au)));
-    const int16x8_t a_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(au)));
-    const int16x8_t b_lo = vmovl_s8(vget_low_s8(b));
-    const int16x8_t b_hi = vmovl_s8(vget_high_s8(b));
+    // u8 を s16 へゼロ拡張してから符号付き乗算する。
+    const int16x8_t p0 = vmulq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(au))),
+                                   vmovl_s8(vget_low_s8(b)));
+    const int16x8_t p1 = vmulq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(au))),
+                                   vmovl_s8(vget_high_s8(b)));
 
-    acc = vaddq_s32(acc, vmull_s16(vget_low_s16(a_lo), vget_low_s16(b_lo)));
-    acc = vaddq_s32(acc, vmull_s16(vget_high_s16(a_lo), vget_high_s16(b_lo)));
-    acc = vaddq_s32(acc, vmull_s16(vget_low_s16(a_hi), vget_low_s16(b_hi)));
-    acc = vaddq_s32(acc, vmull_s16(vget_high_s16(a_hi), vget_high_s16(b_hi)));
+    // 隣接2つずつ加算 → 8個の s32。さらに隣接2つを足して4レーンにする。
+    const int32x4_t s0 = vpaddlq_s16(p0);
+    const int32x4_t s1 = vpaddlq_s16(p1);
+
+    acc = vaddq_s32(acc, vpaddq_s32(s0, s1));
 }
 
 #endif
