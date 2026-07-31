@@ -2,13 +2,10 @@
 name: Make CI (MinGW for Windows)
 
 on:
+  push:
+    tags:
+      - "win-v*"
   workflow_dispatch:
-#  push:
-#    branches:
-#      - "**"
-#  pull_request:
-#    branches:
-#      - "**"
 
 jobs:
   build-mingw:
@@ -39,6 +36,7 @@ jobs:
         # 「とりあえずこれ」の既定。SSE42 は AVX 非対応機向けの保険。
         archcpu:
           - AVX512VNNI
+          - AVXVNNI
           - AVX512
           - AVX2
           - SSE42
@@ -69,3 +67,67 @@ jobs:
         with:
           name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
           path: ./main/build/**/*
+
+  release-mingw:
+    needs: build-mingw
+    if: startsWith(github.ref, 'refs/tags/win-v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/win-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download every build artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-mingw_*
+          path: download/
+
+      # The matrix produces one artifact per (edition, archcpu) pair, each
+      # holding a single .exe. Ship one zip per edition instead, so a user
+      # picks their engine and gets every CPU target in it.
+      - name: Repack one zip per edition
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p stage dist
+          find download -name '*.exe' -print0 | while IFS= read -r -d '' exe; do
+            base="$(basename "$exe")"
+            # <FileStr>-windows-<compiler>-<target>-<archcpu>.exe
+            edition="${base%%-windows-*}"
+            mkdir -p "stage/${edition}"
+            cp "$exe" "stage/${edition}/"
+          done
+          for d in stage/*/; do
+            edition="$(basename "$d")"
+            (cd "$d" && zip -q -r "../../dist/${edition}-windows-v${VERSION}.zip" .)
+          done
+          ls -lh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "YaneuraOu Windows ${{ steps.version.outputs.version }}"
+          body: |
+            YaneuraOu shogi engine — Windows builds (MinGW, 64-bit).
+
+            One zip per engine, each containing every CPU target:
+            `AVX512VNNI`, `AVXVNNI`, `AVX512`, `AVX2`, `SSE42`, `ZEN2`, `ZEN3`.
+
+            **Pick a build**: `AVX2` runs on any Haswell-or-later Intel and most
+            AMD. Use `SSE42` on older machines, `ZEN2`/`ZEN3` on Ryzen, and the
+            `AVX512*` ones only on CPUs that actually have AVX-512 — they will
+            not start otherwise.
+
+            NNUE engines need an eval file (`nn.bin`); see the WASM release
+            notes for where each network is published.
+          files: dist/*.zip
