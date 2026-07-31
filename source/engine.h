@@ -34,10 +34,23 @@ static int    MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
 // Hash上限。32bitモードなら2GB、64bitモードなら32TB
 constexpr int MaxHashMB = Is64Bit ? 33554432 : 2048;
 #else
-// yaneuraou.wasm
-// メモリの調整
-// stockfish.wasmの数値を基本的に使用している
+/*
+	yaneuraou.wasm
+
+	📓 置換表の上限をヒープ上限から決める。
+
+	   ヒープは置換表だけのものではない。評価関数 (HalfKP768 なら 184MB)、
+	   定跡、スレッドごとのスタック、エンジン内部の作業領域が同居する。
+	   置換表に全部渡すと確保時点で落ちるので、半分を上限とする。
+
+	   固定値にすると、128MB heap の cfworkers でも 2GB が選べてしまい
+	   (確保しようとして落ちる)、逆にヒープを増やしても上限が伸びない。
+*/
+#if defined(EM_MAXIMUM_MEMORY_SIZE)
+constexpr int MaxHashMB = int((std::uint64_t(EM_MAXIMUM_MEMORY_SIZE) / 2) >> 20);
+#else
 constexpr int MaxHashMB = 2048;
+#endif
 #endif
 
 // 前方宣言

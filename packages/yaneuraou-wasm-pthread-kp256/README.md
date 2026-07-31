@@ -6,7 +6,7 @@ YaneuraOu NNUE KP256 将棋エンジンを multi-thread (pthread) で動かす�
 - エンジン: YaneuraOu NNUE KP256 (V8.50)
 - スレッド: 可変 (`Threads` USI option、最大 32)
 - WASM SIMD: 有効
-- メモリ: 128MB initial / 1GB max / 2MB stack
+- メモリ: 128MB initial / 4GB max / 2MB stack
 - **`SharedArrayBuffer` を要求 — ホストは COOP/COEP ヘッダを返す必要**
 
 ## Sibling packages
@@ -17,7 +17,7 @@ YaneuraOu NNUE KP256 将棋エンジンを multi-thread (pthread) で動かす�
 | `SharedArrayBuffer` | not used | required |
 | COOP/COEP headers | not needed | **required** |
 | Cloudflare Workers | works | not supported |
-| WASM heap | 64MB / 128MB max | 128MB / 1GB max |
+| WASM heap | 64MB / 128MB max | 128MB / 4GB max |
 | Recommended hash | 16MB | 64MB+ |
 
 ## Cross-origin isolation requirement

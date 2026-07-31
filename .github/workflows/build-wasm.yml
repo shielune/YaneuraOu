@@ -48,7 +48,7 @@ jobs:
             environment: web,worker
             pthread: 1
             initial_memory: 134217728
-            maximum_memory: 1073741824
+            maximum_memory: 4294967296
             category: pthread
             engine_label: "NNUE KP256 (Suishopetite)"
             eval_note: "external (~873 KB)"
@@ -59,7 +59,7 @@ jobs:
             environment: web,worker
             pthread: 1
             initial_memory: 134217728
-            maximum_memory: 1073741824
+            maximum_memory: 4294967296
             category: pthread
             engine_label: "Mate (DfPn)"
             eval_note: "none"
@@ -70,7 +70,7 @@ jobs:
             environment: web,worker
             pthread: 1
             initial_memory: 268435456
-            maximum_memory: 2147483648
+            maximum_memory: 4294967296
             category: pthread
             engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
             eval_note: "external (~62 MB)"
@@ -81,7 +81,7 @@ jobs:
             environment: web,worker
             pthread: 1
             initial_memory: 268435456
-            maximum_memory: 2147483648
+            maximum_memory: 4294967296
             category: pthread
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (~184 MB)"
@@ -92,7 +92,7 @@ jobs:
             environment: web,worker
             pthread: 1
             initial_memory: 268435456
-            maximum_memory: 2147483648
+            maximum_memory: 4294967296
             category: pthread
             engine_label: "SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3)"
             eval_note: "external (~75 MB + progress.bin)"
@@ -120,7 +120,7 @@ jobs:
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 134217728
-            maximum_memory: 1073741824
+            maximum_memory: 4294967296
             category: node
             engine_label: "NNUE KP256 (Suishopetite)"
             eval_note: "external (~873 KB)"
@@ -133,7 +133,7 @@ jobs:
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 134217728
-            maximum_memory: 1073741824
+            maximum_memory: 4294967296
             category: node
             engine_label: "Mate (DfPn)"
             eval_note: "none"
@@ -146,7 +146,7 @@ jobs:
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
-            maximum_memory: 2147483648
+            maximum_memory: 4294967296
             category: node
             engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
             eval_note: "external (~62 MB)"
@@ -159,7 +159,7 @@ jobs:
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
-            maximum_memory: 2147483648
+            maximum_memory: 4294967296
             category: node
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (~184 MB)"
@@ -172,7 +172,7 @@ jobs:
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
-            maximum_memory: 2147483648
+            maximum_memory: 4294967296
             category: node
             engine_label: "SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3)"
             eval_note: "external (~75 MB + progress.bin)"

@@ -5,7 +5,7 @@ YaneuraOu **mate (tsume) solver** as a multi-threaded WASM bundle for browsers.
 - DfPn 詰将棋 solver based on `YANEURAOU_MATE_ENGINE`
 - Multi-thread (`EM_PTHREAD=1`) — uses `SharedArrayBuffer`, **requires COOP/COEP**
 - Compared to `yaneuraou-wasm-mate-cfworkers`: `go mate <ms>` time limits are honored
-- 128MB initial / 1GB max memory; 1MB hash is enough for typical practical-game tsume
+- 128MB initial / 4GB max memory; 1MB hash is enough for typical practical-game tsume
 
 ## When to use which package
 

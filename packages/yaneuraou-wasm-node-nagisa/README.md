@@ -6,7 +6,7 @@ YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3 互換ネットワーク) 将�
 - エンジン: YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 / LayerStack 9 (V9.60)
 - スレッド: 可変 (`Threads` USI option、最大 32)
 - WASM SIMD: 有効
-- メモリ: **256 MB initial / 2 GB max** / 2 MB stack
+- メモリ: **256 MB initial / 4 GB max** / 2 MB stack
 - 評価関数: ~75 MB の `nn.bin` と `progress.bin` を実行時に渡す (**2 ファイル必要**)
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン

@@ -6,7 +6,7 @@ YaneuraOu NNUE HalfKP_768x2_16_64 (AobaNNUE アーキ) 将棋エンジンを
 - エンジン: YaneuraOu NNUE HalfKP_768x2_16_64 (AobaNNUE 形, V8.50)
 - スレッド: 可変 (`Threads` USI option、最大 32)
 - WASM SIMD: 有効
-- メモリ: **256 MB initial / 2 GB max** / 2 MB stack
+- メモリ: **256 MB initial / 4 GB max** / 2 MB stack
 - 評価関数: ~184 MB の `nn.bin` を実行時に渡す
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン

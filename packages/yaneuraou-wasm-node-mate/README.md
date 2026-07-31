@@ -6,7 +6,7 @@ YaneuraOu 詰将棋ソルバ (DfPn 探索エンジン) を **Node.js から** mu
 - エンジン: YaneuraOu Mate (DfPn) (V8.50)
 - スレッド: 可変 (`Threads` USI option、最大 32)
 - WASM SIMD: 有効
-- メモリ: 128 MB initial / 1 GB max / 2 MB stack
+- メモリ: 128 MB initial / 4 GB max / 2 MB stack
 - 評価関数: **不要** (DfPn は eval を使わない)
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン
@@ -19,7 +19,7 @@ YaneuraOu 詰将棋ソルバ (DfPn 探索エンジン) を **Node.js から** mu
 | Threads | 1 (固定) | 可変 (1-32) | 可変 (1-32) |
 | `SharedArrayBuffer` | not used | required | uses worker_threads natively |
 | COOP/COEP headers | not needed | required | n/a |
-| WASM heap | 64 MB / 128 MB max | 128 MB / 1 GB max | 128 MB / 1 GB max |
+| WASM heap | 64 MB / 128 MB max | 128 MB / 4 GB max | 128 MB / 4 GB max |
 | emscripten | 5.0.5 | 5.0.5 | **3.1.43** |
 
 ## Usage (Node 18+)
