@@ -35,30 +35,17 @@ jobs:
           # - i686-w64-mingw32-g++-posix
         target:
           - tournament
+        # 配布は 64bit のみ。上から順に新しい CPU 向けで、AVX2 が
+        # 「とりあえずこれ」の既定。SSE42 は AVX 非対応機向けの保険。
         archcpu:
-          # - AVX512VNNI
+          - AVX512VNNI
+          - AVX512
           - AVX2
-          - NO_SSE
-        exclude:
-          # 32bit compiler x 64bit archcpu
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "AVX512VNNI,AVX512"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "AVX2,SSE42,SSE2"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "SSE41,SSSE3,OTHER"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "ZEN1,ZEN2"
-          # 64bit compiler x 32bit archcpu
-          - compiler: x86_64-w64-mingw32-g++-posix
-            archcpu: NO_SSE
-          # Ubuntu-20.04 MinGW は archcpu ZEN3,AVXVNNI のサポートを行わない
-          # ubuntu-20.04 MinGW will not support the archcpu ZEN3,AVXVNNI
-          # `-march=cascadelake`: LLVM8, GCC9 support (AVX512VNNI)
-          # `-march=znver2`: LLVM9, GCC9 support
-          # `-march=alderlake` : LLVM12, GCC11 support (AVX-VNNI)
-          # `-march=znver3`: LLVM12 support
-          - archcpu: "ZEN3,AVXVNNI"
+          - SSE42
+          - ZEN2
+          - ZEN3
+        # 32bit (i686) は配布しないので、それ向けの除外は不要になった。
+        # AVXVNNI (-march=alderlake) は ubuntu-22.04 の MinGW では通らない。
 
     steps:
       - name: Checkout own repository
