@@ -6,7 +6,7 @@ YaneuraOu NNUE HalfKP768 将棋エンジンを multi-thread (pthread) で動か�
 - エンジン: YaneuraOu NNUE `HalfKP_768x2_16_64` (AobaNNUE 互換ネットワーク構造)
 - スレッド: 可変 (`Threads` USI option、最大 32)
 - WASM SIMD: 有効
-- メモリ: 256MB initial / 2GB max / 2MB stack
+- メモリ: 256MB initial / 4GB max / 2MB stack
 - 評価関数は同梱せず外部ロード ([AobaNNUE Release](https://github.com/yssaya/AobaNNUE/releases) の `nn.bin` を想定)
 - **`SharedArrayBuffer` を要求 — ホストは COOP/COEP ヘッダを返す必要**
 
@@ -19,7 +19,7 @@ YaneuraOu NNUE HalfKP768 将棋エンジンを multi-thread (pthread) で動か�
 | `SharedArrayBuffer` | not used | required |
 | COOP/COEP headers | not needed | **required** |
 | Cloudflare Workers | works | not supported |
-| WASM heap | 64MB / 128MB max | 256MB / 2GB max |
+| WASM heap | 64MB / 128MB max | 256MB / 4GB max |
 | Recommended hash | 16MB | 64MB+ |
 
 ## Cross-origin isolation requirement

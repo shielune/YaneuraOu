@@ -6,7 +6,7 @@ YaneuraOu NNUE KP256 将棋エンジンを **Node.js から** multi-thread (pthr
 - エンジン: YaneuraOu NNUE KP256 (V8.50)
 - スレッド: 可変 (`Threads` USI option、最大 32)
 - WASM SIMD: 有効
-- メモリ: 128 MB initial / 1 GB max / 2 MB stack
+- メモリ: 128 MB initial / 4 GB max / 2 MB stack
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン
   (3.1.44–3.1.73 は ESM worker で stall、3.1.74+ は INCOMING_MODULE_JS_API
@@ -20,7 +20,7 @@ YaneuraOu NNUE KP256 将棋エンジンを **Node.js から** multi-thread (pthr
 | Threads | 1 (固定) | 可変 (1-32) | 可変 (1-32) |
 | `SharedArrayBuffer` | not used | required | uses worker_threads natively |
 | COOP/COEP headers | not needed | required | n/a |
-| WASM heap | 64 MB / 128 MB max | 128 MB / 1 GB max | 128 MB / 1 GB max |
+| WASM heap | 64 MB / 128 MB max | 128 MB / 4 GB max | 128 MB / 4 GB max |
 | emscripten | 5.0.5 | 5.0.5 | **3.1.43** |
 
 ## Why Node-specific package?
