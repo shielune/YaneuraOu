@@ -42,6 +42,13 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p out
+          # wasm32 cannot address more than 4GiB, so the 8GiB ceiling only
+          # applies to the MEMORY64 builds.
+          if [ "${{ matrix.memory64 }}" = "1" ]; then
+            MAX_MEM=8589934592
+          else
+            MAX_MEM=4294967296
+          fi
           # Node variants need callMain to drive USI after a noInitialRun boot.
           sudo docker run --rm \
             -v "${{ github.workspace }}:/src" \
@@ -59,7 +66,7 @@ jobs:
               EM_PTHREAD=1 \
               EM_MEMORY64=${{ matrix.memory64 }} \
               EM_INITIAL_MEMORY_SIZE=268435456 \
-              EM_MAXIMUM_MEMORY_SIZE=8589934592 \
+              EM_MAXIMUM_MEMORY_SIZE=$MAX_MEM \
               EM_STACK_SIZE=2097152 \
               EM_CLOSURE=0
           ls -lh out/
