@@ -55,6 +55,7 @@
 - ⚠ ただし `halfka_hm2_1024/nagisa` は **bucket 選択が学習時と食い違っており、
   本来の強さで測れていない** (下記「NAGISA_V3 の bucket 不一致」)。
   読み込めて、それらしい値を返すが、別物として扱うこと
+  (2026-07-31 に対応済み。この表の数値は修正前のもの)
 - 評価値は cp -76 〜 +56 と 130cp の幅があるが、これは評価関数ごとの
   **スケールの違い**を多分に含む。`FV_SCALE` を揃えていない以上、
   この表から「どれが強い」は読み取れない
@@ -159,11 +160,51 @@ upstream HEAD にも進行度 bucket は入ったが、別物である。
 keinoda 側の `tanuki_progress.{cpp,h}` (約 290 行) と、`progress.bin` を
 `LS_PROGRESS_COEFF` で読ませる仕組みを移植する必要がある。
 これは [`2026-07-27_nagisa_v3_diff_survey.md`](2026-07-27_nagisa_v3_diff_survey.md)
-で「進行度SFNN」として整理した項目そのもので、**未着手**。
+で「進行度SFNN」として整理した項目そのもの。
 
 移植すれば upstream の SFNN 基盤 (LayerStack, HalfKA_hm2) の上に
 bucket 選択規則を差し替えるだけで済むはずで、V8.50 時代に必要だった
 「NNUE 基盤ごと移植」よりは大幅に小さい。
+
+> ✅ **2026-07-31 追記: 対応済み。この節の測定値は歴史的記録として残す。**
+>
+> `LS_PROGRESS_COEFF` (progress.bin の外部読み込み) と
+> `SFNN_halfkahm2_1024_15_64_progress8ek` アーキヘッダを実装し、
+> さらに `LS_BUCKET_MODE` で bucket 規則を選べるようにした。
+> 既定は本家 NAGISA_V3 と同じ `progress8kpabs`。
+>
+> 調査の過程で、当初 `progress8ek` (相入玉を9個目に振る) が本家の規則だと
+> 考えていたのが誤りだと判明した。本家の既定 `progress8kpabs` は進行度だけで
+> 0〜7 を選び、**9個目の LayerStack を使わない**。両者は相入玉局面でのみ
+> 結果が変わる (実測: `R*3h` vs `R*1h`)。
+>
+> なお bucket の**境界値**そのものは元々一致していた。こちらは 256 段階を
+> 経由するが `progress*8/256` の切り下げで境界が `logit(k/8)` に落ち、
+> 本家の閾値表と同値になる。
+>
+> 修正後の実測 (depth 16 / Threads=1 / Hash 256 / FV_SCALE 16):
+>
+> | | nodes | score | bestmove |
+> |---|---|---|---|
+> | native (aarch64) | 345,193 | cp -50 | `3d3e ponder 2i3g` |
+> | WASM (node) | 345,193 | cp -50 | `3d3e ponder 2i3g` |
+>
+> 相入玉局面を含め全ケースで native と WASM が一致した。
+>
+> **本家配布物による裏付け (2026-07-31):** `NAGISA_V3-Windows-AVX2.zip` に
+> 同梱の `eval/eval_options.txt` は以下の 2 行だった。
+>
+> ```
+> LS_BUCKET_MODE progress8kpabs
+> LS_PROGRESS_COEFF eval/progress.bin
+> ```
+>
+> 追加したオプション名・既定値がこれと一致している。同梱の nn.bin /
+> progress.bin は `assets/` のものと sha256 まで一致した。
+>
+> また keinoda 側は `SFNNwoPSQT` 定義時に `FV_SCALE` の既定値自体を 28 に
+> していた (`evaluate_nnue.cpp:62`)。こちらも同じ条件分岐を入れたので、
+> 無指定のまま本来の設定で動く (実測 197,619 nodes / cp 18、native と WASM 一致)。
 
 ### WASM 化で見つかった不具合 2 件
 
