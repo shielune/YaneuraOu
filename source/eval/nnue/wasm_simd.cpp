@@ -102,6 +102,10 @@ template void affine< 512, 32,  512>(const int8_t A[32][ 512], const uint8_t x[ 
 template void affine<  32, 32,   32>(const int8_t A[32][  32], const uint8_t x[  32], const int32_t b[32], int32_t y[32]);
 template void affine<  32,  1,   32>(const int8_t A[ 1][  32], const uint8_t x[  32], const int32_t b[ 1], int32_t y[ 1]);
 
+// HalfKP_128x2_32_32
+// 💡 L1以降は 256x2 版と同じ形なので、入力層のぶんだけ足せばよい。
+template void affine< 256, 32,  256>(const int8_t A[32][ 256], const uint8_t x[ 256], const int32_t b[32], int32_t y[32]);
+
 // HalfKP_768x2_16_64 (AobaNNUE互換)
 template void affine<1536, 16, 1536>(const int8_t A[16][1536], const uint8_t x[1536], const int32_t b[16], int32_t y[16]);
 template void affine<  16, 64,   32>(const int8_t A[64][  32], const uint8_t x[  32], const int32_t b[64], int32_t y[64]);
