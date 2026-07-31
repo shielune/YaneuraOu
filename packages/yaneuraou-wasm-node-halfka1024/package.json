@@ -1,5 +1,5 @@
 {
-	"name": "@ultemica/yaneuraou-wasm-node-nagisa",
+	"name": "@ultemica/yaneuraou-wasm-node-halfka1024",
 	"version": "8.50.0",
 	"description": "YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3) shogi engine for Node.js (Wasm, multi-threaded via node:worker_threads). Built with emscripten 3.1.43 — the only toolchain confirmed Node-compatible.",
 	"license": "GPL-3.0",

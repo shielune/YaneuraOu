@@ -1,4 +1,4 @@
-# yaneuraou-wasm-node-nagisa — internal spec for LLM consumers
+# yaneuraou-wasm-node-halfka1024 — internal spec for LLM consumers
 
 Sibling spec: `yaneuraou-wasm-node-kp256/SPEC.md` — read that for the
 shared init sequence, loader contract, and behavioral notes. This file
@@ -6,7 +6,7 @@ only documents what differs.
 
 ## Package Identity
 
-- npm scope: `@ultemica/yaneuraou-wasm-node-nagisa`
+- npm scope: `@ultemica/yaneuraou-wasm-node-halfka1024`
 - Engine: YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3) V9.60, multi-threaded
 - Runtime: Node.js 18+ (`node:worker_threads`)
 - License: GPL-3.0

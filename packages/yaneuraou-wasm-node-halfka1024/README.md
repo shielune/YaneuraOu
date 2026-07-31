@@ -1,4 +1,4 @@
-# @ultemica/yaneuraou-wasm-node-nagisa
+# @ultemica/yaneuraou-wasm-node-halfka1024
 
 YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3 互換ネットワーク) 将棋エンジンを
 **Node.js から** multi-thread (pthread) で動かすための WASM パッケージ。
@@ -16,12 +16,12 @@ YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3 互換ネットワーク) 将�
 ```ts
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
-import { createEngine } from "@ultemica/yaneuraou-wasm-node-nagisa";
-import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-nagisa/engine";
+import { createEngine } from "@ultemica/yaneuraou-wasm-node-halfka1024";
+import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-halfka1024/engine";
 
 const require = createRequire(import.meta.url);
 const wasmPath = require.resolve(
-  "@ultemica/yaneuraou-wasm-node-nagisa/wasm",
+  "@ultemica/yaneuraou-wasm-node-halfka1024/wasm",
 );
 const wasmBinary = await fs.readFile(wasmPath);
 const evalBin = await fs.readFile("./eval/nn.bin");

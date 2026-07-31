@@ -1,5 +1,5 @@
 /**
- * @ultemica/yaneuraou-wasm-node-nagisa
+ * @ultemica/yaneuraou-wasm-node-halfka1024
  *
  * YaneuraOu NNUE KP256 shogi engine for Node.js, built with
  * `EM_ENVIRONMENT=node`, `EM_PTHREAD=1`, and emscripten 3.1.43 — the only
@@ -22,15 +22,15 @@
  * ```ts
  * import fs from "node:fs/promises";
  * import { createRequire } from "node:module";
- * import { createEngine } from "@ultemica/yaneuraou-wasm-node-nagisa";
- * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-nagisa/engine";
+ * import { createEngine } from "@ultemica/yaneuraou-wasm-node-halfka1024";
+ * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-node-halfka1024/engine";
  *
  * const require = createRequire(import.meta.url);
  * const wasmPath = require.resolve(
- *   "@ultemica/yaneuraou-wasm-node-nagisa/wasm",
+ *   "@ultemica/yaneuraou-wasm-node-halfka1024/wasm",
  * );
  * const enginePath = require.resolve(
- *   "@ultemica/yaneuraou-wasm-node-nagisa/engine",
+ *   "@ultemica/yaneuraou-wasm-node-halfka1024/engine",
  * );
  * const wasmBinary = await fs.readFile(wasmPath);
  * const evalBin = await fs.readFile("./eval/nn.bin");
@@ -93,13 +93,13 @@ export interface YaneuraOuInstance {
 
 export interface CreateEngineOptions {
 	/**
-	 * The default export from `@ultemica/yaneuraou-wasm-node-nagisa/engine`.
+	 * The default export from `@ultemica/yaneuraou-wasm-node-halfka1024/engine`.
 	 * This is the Emscripten module factory.
 	 */
 	factory: YaneuraOuFactory;
 	/**
 	 * Absolute path to `yaneuraou.js` (resolved via
-	 * `require.resolve("@ultemica/yaneuraou-wasm-node-nagisa/engine")` in your
+	 * `require.resolve("@ultemica/yaneuraou-wasm-node-halfka1024/engine")` in your
 	 * app). Used as the value of `mainScriptUrlOrBlob` and as the base for
 	 * `locateFile` so emscripten resolves the sibling `yaneuraou.worker.js`
 	 * to the same directory.
@@ -369,7 +369,7 @@ export async function createEngine(opts: CreateEngineOptions): Promise<Engine> {
 	const shimPath = path.join(engineDir, "worker_shim.js");
 	if (!fs.existsSync(shimPath)) {
 		throw new Error(
-			`yaneuraou-wasm-node-nagisa: worker_shim.js not found at ${shimPath}. ` +
+			`yaneuraou-wasm-node-halfka1024: worker_shim.js not found at ${shimPath}. ` +
 				"The package must be installed via npm so dist/yaneuraou.{js,wasm,worker.js} " +
 				"and dist/worker_shim.js all live in the same directory.",
 		);
@@ -435,7 +435,7 @@ export async function createEngine(opts: CreateEngineOptions): Promise<Engine> {
 		}
 	} else {
 		throw new Error(
-			"yaneuraou-wasm-node-nagisa: engine.callMain is not exposed — the " +
+			"yaneuraou-wasm-node-halfka1024: engine.callMain is not exposed — the " +
 				"Wasm binary was not built with EXPORTED_RUNTIME_METHODS including " +
 				"'callMain'. Rebuild via .github/workflows/build-wasm.yml.",
 		);

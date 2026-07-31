@@ -1,4 +1,4 @@
-# @ultemica/yaneuraou-wasm-pthread-nagisa
+# @ultemica/yaneuraou-wasm-pthread-halfka1024
 
 YaneuraOu SFNN HalfKA_hm2 将棋エンジンを multi-thread (pthread) で動かすための
 ブラウザ向け WASM パッケージ。
@@ -12,7 +12,7 @@ YaneuraOu SFNN HalfKA_hm2 将棋エンジンを multi-thread (pthread) で動か
 
 ## Sibling packages
 
-| | `yaneuraou-wasm-cfworkers` | `yaneuraou-wasm-pthread-nagisa` (this) |
+| | `yaneuraou-wasm-cfworkers` | `yaneuraou-wasm-pthread-halfka1024` (this) |
 |---|---|---|
 | Engine | NNUE KP256 (Suisho petite) | SFNN HalfKA_hm2 (NAGISA_V3) |
 | Threads | 1 (固定) | 可変 (1-32) |
@@ -37,9 +37,9 @@ Cross-Origin-Embedder-Policy: require-corp
 ## Usage (browser)
 
 ```ts
-import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-nagisa";
-import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-nagisa/engine";
-import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-nagisa/wasm?url";
+import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-halfka1024";
+import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-halfka1024/engine";
+import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-halfka1024/wasm?url";
 
 const wasmBinary = await fetch(wasmUrl).then((r) => r.arrayBuffer());
 const evalBin = await fetch("/eval/nn.bin").then((r) => r.arrayBuffer());
