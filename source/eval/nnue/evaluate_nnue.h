@@ -103,6 +103,8 @@ namespace Progress {
 #if NNUE_SFNN_PROGRESS_ENTERING_KING
 		// 最後の1バケットを相入玉専用に割り当てる版。
 		// 💡 NAGISA_V3 の progress8ek がこれ (0〜7=進行度, 8=相入玉)。
+		//    NAGISA_V3 の既定は progress8kpabs (進行度のみ) なので、
+		//    どちらを使うかは LS_BUCKET_MODE で切り替える。
 		int BucketIndexWithEnteringKing(const Position& pos, int bucket_count) const;
 #endif
 

@@ -62,6 +62,19 @@ void add_options(OptionsMap& options, ThreadPool& threads) {
 bool        eval_loaded   = false;
 std::string last_eval_dir = "None";
 
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_ENTERING_KING
+// LS_BUCKET_MODE が progress8ek か。既定は本家 NAGISA_V3 と同じ progress8kpabs。
+bool progress_entering_king_bucket = false;
+#endif
+
+// 💡 SFNN系のネットは出力のスケールが違うので既定値を変える。
+//    NAGISA_V3 配布物の eval_options.txt もこの値を前提にしている。
+#if defined(SFNNwoPSQT)
+constexpr int kDefaultFvScale = 28;
+#else
+constexpr int kDefaultFvScale = 16;
+#endif
+
 #if defined(__EMSCRIPTEN__)
 // yaneuraou.wasm
 // 前回のOptions["EvalFile"]
@@ -91,7 +104,7 @@ void add_options_(OptionsMap& options, ThreadPool& threads) {
                 }));
 
     // NNUEのFV_SCALEの値
-    Options.add("FV_SCALE", Option(16, 1, 128, [&](const Option& o) {
+    Options.add("FV_SCALE", Option(kDefaultFvScale, 1, 128, [&](const Option& o) {
                     YaneuraOu::Eval::NNUE::FV_SCALE = int(o);
                     return std::nullopt;
                 }));
@@ -109,6 +122,23 @@ void add_options_(OptionsMap& options, ThreadPool& threads) {
                     eval_loaded = false;
                     return std::nullopt;
                 }));
+#endif
+
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+    /*
+		📓 相入玉バケットを使うかどうか。
+
+		   NAGISA_V3 は 9 個の LayerStack を持つが、既定の progress8kpabs は
+		   進行度だけで 0〜7 を選び、9 個目を使わない。
+		   progress8ek は相入玉局面を 9 個目に振り分ける。
+		   学習時と揃えないと別の重みが選ばれるので、既定は本家に合わせる。
+	*/
+    Options.add("LS_BUCKET_MODE",
+                Option(std::vector<std::string>{"progress8kpabs", "progress8ek"}, "progress8kpabs",
+                       [](const Option& o) {
+                           progress_entering_king_bucket = std::string(o) == "progress8ek";
+                           return std::nullopt;
+                       }));
 #endif
 
 #if defined(__EMSCRIPTEN__)
@@ -193,7 +223,9 @@ namespace YaneuraOu {
 namespace Eval {
 namespace NNUE {
 
-	int FV_SCALE = 16; // 水匠5では24がベストらしいのでエンジンオプション"FV_SCALE"で変更可能にした。
+	// 水匠5では24がベストらしいのでエンジンオプション"FV_SCALE"で変更可能にした。
+	// 💡 SFNN系は28が既定 (kDefaultFvScale)。
+	int FV_SCALE = kDefaultFvScale;
 
 #if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
 namespace Progress {
@@ -705,6 +737,10 @@ namespace {
 #if NNUE_SFNN_PROGRESS_BUCKETS == 1
         return 0;
 #elif NNUE_SFNN_PROGRESS_ENTERING_KING
+        // progress8kpabs のときは相入玉バケットを取り分けず、進行度だけで分類する。
+        // このとき最後の1バケットは使われない (本家 NAGISA_V3 と同じ挙動)。
+        if (!progress_entering_king_bucket)
+            return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS - 1);
         return networks().progress.BucketIndexWithEnteringKing(pos, NNUE_SFNN_PROGRESS_BUCKETS);
 #else
         return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS);
