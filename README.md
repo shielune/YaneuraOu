@@ -1,6 +1,6 @@
 [![Build wasm](https://github.com/shielune/YaneuraOu/actions/workflows/build-wasm.yml/badge.svg)](https://github.com/shielune/YaneuraOu/actions/workflows/build-wasm.yml)
 
-# YaneuraOu WASM (fork)
+# YaneuraOu WASM
 
 [yaneurao/YaneuraOu](https://github.com/yaneurao/YaneuraOu) のフォーク。将棋エンジン
 やねうら王を **WebAssembly にビルドして npm 形の配布物にする**ことを目的にしている。
