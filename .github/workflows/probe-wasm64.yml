@@ -1,0 +1,80 @@
+name: Probe wasm64 (node)
+
+# Throwaway workflow: check whether emscripten 3.1.43 — the version the node
+# packages are pinned to — can build and run a Memory64 binary at all.
+# 3.1.43 predates stable Memory64 support, and the arm64 dev box cannot run
+# the amd64-only 3.1.43 image, so this has to be answered on CI.
+# Delete once the question is settled.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emsdk: ["3.1.43", "5.0.5"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: build (emsdk ${{ matrix.emsdk }}, MEMORY64=1)
+        id: build
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          sudo docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src/source \
+            "emscripten/emsdk:${{ matrix.emsdk }}" \
+            make -j$(nproc) clean tournament \
+              COMPILER=em++ \
+              TARGET_CPU=WASM \
+              PYTHON=python3 \
+              YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE_KP256 \
+              TARGET=../out/yaneuraou.js \
+              EM_EXPORT_NAME=YaneuraOu_K_P \
+              EM_ENVIRONMENT=node \
+              "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']" \
+              EM_PTHREAD=1 \
+              EM_MEMORY64=1 \
+              EM_INITIAL_MEMORY_SIZE=268435456 \
+              EM_MAXIMUM_MEMORY_SIZE=8589934592 \
+              EM_STACK_SIZE=2097152 \
+              EM_CLOSURE=0
+          ls -lh out/
+
+      - name: report build result
+        run: |
+          echo "BUILD: ${{ steps.build.outcome }}"
+          test -f out/yaneuraou.wasm || { echo "no wasm produced"; exit 1; }
+          grep -o 'maximum[^,}]*' out/yaneuraou.js | head -2 || true
+
+      # A Memory64 binary that links but traps at startup is the failure mode
+      # worth catching, so actually boot it and drive a search.
+      - name: run engine
+        run: |
+          cat > probe.mjs <<'EOF'
+          const mod = await import("./out/yaneuraou.js");
+          const out = [];
+          const m = await mod.default({
+            noInitialRun: true,
+            print: s => { out.push(s); console.log(s); },
+            printErr: s => { out.push(s); console.log(s); },
+          });
+          m.callMain([]);
+          const send = c => m.ccall("usi_command", null, ["string"], [c]);
+          send("usi");
+          await new Promise(r => setTimeout(r, 2000));
+          const hash = out.find(l => l.startsWith("option name USI_Hash"));
+          console.log("USI_HASH_LINE:", hash ?? "(not found)");
+          if (!out.some(l => l.includes("usiok"))) {
+            console.log("RESULT: FAILED (no usiok)");
+            process.exit(1);
+          }
+          console.log("RESULT: OK");
+          EOF
+          node --version
+          node probe.mjs
