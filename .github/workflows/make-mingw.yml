@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     strategy:
+      # 1つの archcpu が落ちても残りの組み合わせは見たい
+      # (どこまで通るのかが分からなくなるため)。
+      fail-fast: false
       matrix:
         # このフォークが配布している構成に揃えている (WASM 側の
         # build-wasm.yml と同じ 6 エディション)。upstream の KPPT /
@@ -34,9 +37,11 @@ jobs:
           - tournament
         # 配布は 64bit のみ。上から順に新しい CPU 向けで、AVX2 が
         # 「とりあえずこれ」の既定。SSE42 は AVX 非対応機向けの保険。
+        # AVXVNNI は入れられない: -march=alderlake を ubuntu-22.04 の MinGW が
+        # 受け付けない ("bad value (‘alderlake’) for ‘-march=’ switch")。
+        # ZEN3 (-march=znver3) の方は通る。
         archcpu:
           - AVX512VNNI
-          - AVXVNNI
           - AVX512
           - AVX2
           - SSE42
@@ -121,7 +126,7 @@ jobs:
             YaneuraOu shogi engine — Windows builds (MinGW, 64-bit).
 
             One zip per engine, each containing every CPU target:
-            `AVX512VNNI`, `AVXVNNI`, `AVX512`, `AVX2`, `SSE42`, `ZEN2`, `ZEN3`.
+            `AVX512VNNI`, `AVX512`, `AVX2`, `SSE42`, `ZEN2`, `ZEN3`.
 
             **Pick a build**: `AVX2` runs on any Haswell-or-later Intel and most
             AMD. Use `SSE42` on older machines, `ZEN2`/`ZEN3` on Ryzen, and the
