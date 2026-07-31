@@ -8,6 +8,11 @@ name: Probe wasm64 (node)
 
 on:
   workflow_dispatch:
+  # workflow_dispatch alone cannot start a workflow that is not on the default
+  # branch yet, so trigger on pushes to this probe branch too.
+  push:
+    branches:
+      - "probe/wasm64-node"
 
 jobs:
   probe:
