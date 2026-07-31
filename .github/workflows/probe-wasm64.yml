@@ -68,25 +68,19 @@ jobs:
       # worth catching, so actually boot it and drive a search.
       - name: run engine
         run: |
+          # The engine writes to stdout directly rather than through the
+          # print callback, so assert on the captured output, not in JS.
           cat > probe.mjs <<'EOF'
           const mod = await import("./out/yaneuraou.js");
-          const out = [];
-          const m = await mod.default({
-            noInitialRun: true,
-            print: s => { out.push(s); console.log(s); },
-            printErr: s => { out.push(s); console.log(s); },
-          });
+          const m = await mod.default({ noInitialRun: true });
           m.callMain([]);
-          const send = c => m.ccall("usi_command", null, ["string"], [c]);
-          send("usi");
-          await new Promise(r => setTimeout(r, 2000));
-          const hash = out.find(l => l.startsWith("option name USI_Hash"));
-          console.log("USI_HASH_LINE:", hash ?? "(not found)");
-          if (!out.some(l => l.includes("usiok"))) {
-            console.log("RESULT: FAILED (no usiok)");
-            process.exit(1);
-          }
-          console.log("RESULT: OK");
+          m.ccall("usi_command", null, ["string"], ["usi"]);
+          await new Promise(r => setTimeout(r, 3000));
           EOF
           node --version
-          node probe.mjs
+          node probe.mjs 2>&1 | tee engine.out || true
+
+          echo "--- verdict ---"
+          grep -F 'option name USI_Hash' engine.out || echo "USI_Hash: (not found)"
+          grep -qF 'usiok' engine.out || { echo "RESULT: FAILED (no usiok)"; exit 1; }
+          echo "RESULT: OK"
