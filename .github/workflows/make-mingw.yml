@@ -2,13 +2,10 @@
 name: Make CI (MinGW for Windows)
 
 on:
+  push:
+    tags:
+      - "v[0-9]*"
   workflow_dispatch:
-#  push:
-#    branches:
-#      - "**"
-#  pull_request:
-#    branches:
-#      - "**"
 
 jobs:
   build-mingw:
@@ -18,44 +15,40 @@ jobs:
     runs-on: ubuntu-22.04
 
     strategy:
+      # 1つの archcpu が落ちても残りの組み合わせは見たい
+      # (どこまで通るのかが分からなくなるため)。
+      fail-fast: false
       matrix:
+        # このフォークが配布している構成に揃えている (WASM 側の
+        # build-wasm.yml と同じ 6 エディション)。upstream の KPPT /
+        # KPP_KKPT / MATERIAL / TANUKI_MATE / USER_ENGINE は配布物に
+        # 含めていないので、ここでもビルドしない。
         edition:
+          - YANEURAOU_ENGINE_NNUE_KP256
+          - YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
           - YANEURAOU_ENGINE_NNUE
-          - YANEURAOU_ENGINE_KPPT
-          - YANEURAOU_ENGINE_KPP_KKPT
-          - YANEURAOU_ENGINE_MATERIAL
+          - YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+          - YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
           - YANEURAOU_MATE_ENGINE
-          - TANUKI_MATE_ENGINE
-          - USER_ENGINE
         compiler:
           - x86_64-w64-mingw32-g++-posix
           # - i686-w64-mingw32-g++-posix
         target:
           - tournament
+        # 配布は 64bit のみ。上から順に新しい CPU 向けで、AVX2 が
+        # 「とりあえずこれ」の既定。SSE42 は AVX 非対応機向けの保険。
+        # AVXVNNI は入れられない: -march=alderlake を ubuntu-22.04 の MinGW が
+        # 受け付けない ("bad value (‘alderlake’) for ‘-march=’ switch")。
+        # ZEN3 (-march=znver3) の方は通る。
         archcpu:
-          # - AVX512VNNI
+          - AVX512VNNI
+          - AVX512
           - AVX2
-          - NO_SSE
-        exclude:
-          # 32bit compiler x 64bit archcpu
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "AVX512VNNI,AVX512"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "AVX2,SSE42,SSE2"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "SSE41,SSSE3,OTHER"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "ZEN1,ZEN2"
-          # 64bit compiler x 32bit archcpu
-          - compiler: x86_64-w64-mingw32-g++-posix
-            archcpu: NO_SSE
-          # Ubuntu-20.04 MinGW は archcpu ZEN3,AVXVNNI のサポートを行わない
-          # ubuntu-20.04 MinGW will not support the archcpu ZEN3,AVXVNNI
-          # `-march=cascadelake`: LLVM8, GCC9 support (AVX512VNNI)
-          # `-march=znver2`: LLVM9, GCC9 support
-          # `-march=alderlake` : LLVM12, GCC11 support (AVX-VNNI)
-          # `-march=znver3`: LLVM12 support
-          - archcpu: "ZEN3,AVXVNNI"
+          - SSE42
+          - ZEN2
+          - ZEN3
+        # 32bit (i686) は配布しないので、それ向けの除外は不要になった。
+        # AVXVNNI (-march=alderlake) は ubuntu-22.04 の MinGW では通らない。
 
     steps:
       - name: Checkout own repository
@@ -71,9 +64,65 @@ jobs:
           sudo apt install build-essential mingw-w64
 
       - name: make
-        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }}
+        # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
+        # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
+        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3"
 
-      # - uses: actions/upload-artifact@v7
-      #   with:
-      #     name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
-      #     path: ./main/build/**/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
+          path: ./main/build/**/*
+
+  release-mingw:
+    needs: build-mingw
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download every build artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-mingw_*
+          path: download/
+
+      # The matrix produces one artifact per (edition, archcpu) pair, each
+      # holding a single .exe. Ship one zip per edition instead, so a user
+      # picks their engine and gets every CPU target in it.
+      - name: Repack one zip per edition
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p stage dist
+          find download -name '*.exe' -print0 | while IFS= read -r -d '' exe; do
+            base="$(basename "$exe")"
+            # <FileStr>-windows-<compiler>-<target>-<archcpu>.exe
+            edition="${base%%-windows-*}"
+            mkdir -p "stage/${edition}"
+            cp "$exe" "stage/${edition}/"
+          done
+          for d in stage/*/; do
+            edition="$(basename "$d")"
+            (cd "$d" && zip -q -r "../../dist/${edition}-windows-v${VERSION}.zip" .)
+          done
+          ls -lh dist/
+
+      # Same tag as build-wasm.yml, so the zips land on the release that
+      # workflow creates. Only attach files here — setting name/body would
+      # clobber the generated WASM release notes, and whichever job finished
+      # last would win.
+      - name: Attach the zips to the release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: dist/*.zip

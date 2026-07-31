@@ -151,6 +151,8 @@ def _engine_short_label(engine_label: str) -> str:
     """e.g. 'NNUE HalfKP_256x2_32_32 (Suisho5)' -> 'HalfKP256'."""
     if engine_label.startswith("NNUE KP256"):
         return "KP256"
+    if engine_label.startswith("NNUE HalfKP_128x2_32_32"):
+        return "HalfKP128"
     if engine_label.startswith("NNUE HalfKP_256x2_32_32"):
         return "HalfKP256"
     if engine_label.startswith("NNUE HalfKP_768x2_16_64"):
