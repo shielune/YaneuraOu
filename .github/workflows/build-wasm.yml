@@ -3,7 +3,7 @@ name: Build wasm
 on:
   push:
     tags:
-      - "wasm-v*"
+      - "v[0-9]*"
   workflow_dispatch:
     inputs:
       emsdk_version:
@@ -63,6 +63,17 @@ jobs:
             category: pthread
             engine_label: "Mate (DfPn)"
             eval_note: "none"
+          - name: pthread-halfkp128
+            dir: yaneuraou-wasm-pthread-halfkp128
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
+            export_name: YaneuraOu_HalfKP128
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 4294967296
+            category: pthread
+            engine_label: "NNUE HalfKP_128x2_32_32"
+            eval_note: "external (~31 MB)"
           - name: pthread-halfkp256
             dir: yaneuraou-wasm-pthread-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
@@ -137,6 +148,19 @@ jobs:
             category: node
             engine_label: "Mate (DfPn)"
             eval_note: "none"
+          - name: node-halfkp128
+            dir: yaneuraou-wasm-node-halfkp128
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
+            export_name: YaneuraOu_HalfKP128
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 4294967296
+            category: node
+            engine_label: "NNUE HalfKP_128x2_32_32"
+            eval_note: "external (~31 MB)"
           - name: node-halfkp256
             dir: yaneuraou-wasm-node-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
@@ -243,7 +267,7 @@ jobs:
 
   release-wasm:
     needs: build-wasm
-    if: startsWith(github.ref, 'refs/tags/wasm-v')
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     permissions:
@@ -260,7 +284,7 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          VERSION="${GITHUB_REF#refs/tags/wasm-v}"
+          VERSION="${GITHUB_REF#refs/tags/v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
