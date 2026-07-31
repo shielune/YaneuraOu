@@ -37,7 +37,8 @@ static void affine_transform_unaligned(std::int32_t*       output,
 
 #elif defined(USE_NEON)
     constexpr IndexType kNumChunks  = CeilToMultiple<IndexType>(kInputDimensions, 16) / 16;
-    const auto          inputVector = reinterpret_cast<const int8x8_t*>(input);
+    // 入力は uint8。符号付きで読むと 128 以上が負に化けるので符号なしで持つ。
+    const auto          inputVector = reinterpret_cast<const uint8x8_t*>(input);
 #endif
 
     for (IndexType i = 0; i < kOutputDimensions; ++i)
@@ -136,15 +137,31 @@ static void affine_transform_unaligned(std::int32_t*       output,
 
 #elif defined(USE_NEON)
 
+        /*
+			📓 入力は uint8、重みは int8。
+
+			   FeatureTransformer は出力を 0〜254 にクランプする
+			   (nnue_feature_transformer.h の 127*2) ので、入力は int8 に
+			   収まらない。vmull_s8 は両辺を符号付きとして扱うため、
+			   128 以上が負に化けて評価値が壊れていた。
+			   入力をゼロ拡張・重みを符号拡張し、積は 16bit で溢れるので
+			   vmull_s16 で 32bit に広げてから足す。
+			   x86 側が unpack+kZeros と madd_epi16 でやっているのと同じ扱い。
+		*/
         int32x4_t  sum = {biases[i]};
         const auto row = reinterpret_cast<const int8x8_t*>(&weights[offset]);
         for (IndexType j = 0; j < kNumChunks; ++j)
         {
-            int16x8_t product = vmull_s8(inputVector[j * 2], row[j * 2]);
-            product           = vmlal_s8(product, inputVector[j * 2 + 1], row[j * 2 + 1]);
-            sum               = vpadalq_s16(sum, product);
+            for (IndexType h = 0; h < 2; ++h)
+            {
+                const int16x8_t in = vreinterpretq_s16_u16(vmovl_u8(inputVector[j * 2 + h]));
+                const int16x8_t w  = vmovl_s8(row[j * 2 + h]);
+
+                sum = vaddq_s32(sum, vmull_s16(vget_low_s16(in),  vget_low_s16(w)));
+                sum = vaddq_s32(sum, vmull_s16(vget_high_s16(in), vget_high_s16(w)));
+            }
         }
-		
+
         output[i] = sum[0] + sum[1] + sum[2] + sum[3];
 
 #endif

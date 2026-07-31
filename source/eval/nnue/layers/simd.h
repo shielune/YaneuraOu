@@ -101,12 +101,27 @@ namespace Simd
 #endif
 
 #if USE_NEON >= 8
+/*
+	📓 dpbusd は u8 × s8 の積和。
+
+	   a は uint8 の入力 (FeatureTransformer は 0〜254 を出す)、
+	   b は int8 の重み。vmull_s8 は両辺を符号付きとして扱うので、
+	   a が 128 以上のとき負に化けて評価値が壊れる。
+	   a をゼロ拡張・b を符号拡張してから 32bit へ広げて積和する。
+*/
 [[maybe_unused]] static void neon_m128_add_dpbusd_epi32(int32x4_t& acc, int8x16_t a, int8x16_t b) {
 
-    int16x8_t product0 = vmull_s8(vget_low_s8(a), vget_low_s8(b));
-    int16x8_t product1 = vmull_high_s8(a, b);
-    int16x8_t sum      = vpaddq_s16(product0, product1);
-    acc                = vpadalq_s16(acc, sum);
+    const uint8x16_t au = vreinterpretq_u8_s8(a);
+
+    const int16x8_t a_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(au)));
+    const int16x8_t a_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(au)));
+    const int16x8_t b_lo = vmovl_s8(vget_low_s8(b));
+    const int16x8_t b_hi = vmovl_s8(vget_high_s8(b));
+
+    acc = vaddq_s32(acc, vmull_s16(vget_low_s16(a_lo), vget_low_s16(b_lo)));
+    acc = vaddq_s32(acc, vmull_s16(vget_high_s16(a_lo), vget_high_s16(b_lo)));
+    acc = vaddq_s32(acc, vmull_s16(vget_low_s16(a_hi), vget_low_s16(b_hi)));
+    acc = vaddq_s32(acc, vmull_s16(vget_high_s16(a_hi), vget_high_s16(b_hi)));
 }
 
 #endif

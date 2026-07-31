@@ -176,7 +176,15 @@ class AffineTransformSparseInput {
 #if defined(USE_WASM_SIMD)
         // affine_transform.h の同名関数と同じ理由で、WASM では dense を強制する。
         return i;
-#elif defined(USE_SSSE3) || USE_NEON >= 8
+#elif defined(USE_SSSE3) || defined(USE_NEON_DOTPROD)
+        /*
+			⚠ ここは Propagate() が scrambled 配置を前提とする経路を通るときだけ
+			   真にすること。NEONで dotprod が無い場合 (TARGET_CPU=ARMV8 や
+			   APPLEM1 = USE_NEON のみ) は下の dense 経路
+			   (affine_transform_unaligned) にフォールバックするので、
+			   ここで scrambled にすると読み込みと計算で配置が食い違い、
+			   評価値が黙って壊れる。
+		*/
         return kOutputDimensions % 4 == 0 ? GetWeightIndexScrambled(i) : i;
 #else
         return i;
