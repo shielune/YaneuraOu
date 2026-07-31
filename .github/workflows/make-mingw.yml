@@ -19,14 +19,17 @@ jobs:
 
     strategy:
       matrix:
+        # このフォークが配布している構成に揃えている (WASM 側の
+        # build-wasm.yml と同じ 6 エディション)。upstream の KPPT /
+        # KPP_KKPT / MATERIAL / TANUKI_MATE / USER_ENGINE は配布物に
+        # 含めていないので、ここでもビルドしない。
         edition:
+          - YANEURAOU_ENGINE_NNUE_KP256
+          - YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
           - YANEURAOU_ENGINE_NNUE
-          - YANEURAOU_ENGINE_KPPT
-          - YANEURAOU_ENGINE_KPP_KKPT
-          - YANEURAOU_ENGINE_MATERIAL
+          - YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+          - YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
           - YANEURAOU_MATE_ENGINE
-          - TANUKI_MATE_ENGINE
-          - USER_ENGINE
         compiler:
           - x86_64-w64-mingw32-g++-posix
           # - i686-w64-mingw32-g++-posix
@@ -71,7 +74,9 @@ jobs:
           sudo apt install build-essential mingw-w64
 
       - name: make
-        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }}
+        # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
+        # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
+        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3"
 
       - uses: actions/upload-artifact@v7
         with:
