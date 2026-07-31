@@ -1,4 +1,4 @@
-# yaneuraou-wasm-pthread-nagisa — internal spec for LLM consumers
+# yaneuraou-wasm-pthread-halfka1024 — internal spec for LLM consumers
 
 This document describes the internal contract between the Wasm binary, the
 TypeScript loader, and the consumer code. Sibling spec:
@@ -6,7 +6,7 @@ TypeScript loader, and the consumer code. Sibling spec:
 
 ## Package Identity
 
-- npm scope: `@ultemica/yaneuraou-wasm-pthread-nagisa`
+- npm scope: `@ultemica/yaneuraou-wasm-pthread-halfka1024`
 - Engine: YaneuraOu SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3) V9.60, multi-threaded
 - Runtime: browsers with cross-origin isolation (COOP/COEP)
 - License: GPL-3.0

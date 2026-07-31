@@ -1,5 +1,5 @@
 /**
- * @ultemica/yaneuraou-wasm-pthread-nagisa
+ * @ultemica/yaneuraou-wasm-pthread-halfka1024
  *
  * YaneuraOu NNUE `HalfKP_768x2_16_64` (AobaNNUE compatible network)
  * shogi engine for browsers, built with `EM_PTHREAD=1`.
@@ -20,9 +20,9 @@
  * ## Usage (browser, with COOP/COEP enabled)
  *
  * ```ts
- * import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-nagisa";
- * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-nagisa/engine";
- * import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-nagisa/wasm?url";
+ * import { createEngine } from "@ultemica/yaneuraou-wasm-pthread-halfka1024";
+ * import YaneuraOuFactory from "@ultemica/yaneuraou-wasm-pthread-halfka1024/engine";
+ * import wasmUrl from "@ultemica/yaneuraou-wasm-pthread-halfka1024/wasm?url";
  *
  * const wasmBinary = await fetch(wasmUrl).then((r) => r.arrayBuffer());
  * const evalBin = await fetch("/eval/nn.bin").then((r) => r.arrayBuffer());
@@ -141,7 +141,7 @@ export interface Engine {
 export async function createEngine(opts: CreateEngineOptions): Promise<Engine> {
 	if (typeof SharedArrayBuffer === "undefined") {
 		throw new Error(
-			"yaneuraou-wasm-pthread-nagisa requires SharedArrayBuffer. Serve the page " +
+			"yaneuraou-wasm-pthread-halfka1024 requires SharedArrayBuffer. Serve the page " +
 				"with COOP=same-origin and COEP=require-corp headers.",
 		);
 	}
