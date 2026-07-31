@@ -57,6 +57,13 @@ jobs:
           test -f out/yaneuraou.wasm || { echo "no wasm produced"; exit 1; }
           grep -o 'maximum[^,}]*' out/yaneuraou.js | head -2 || true
 
+      # The runner ships Node 22, which does not enable Memory64 by default.
+      # Memory64 needs Node 24+, so pin one here rather than measuring the
+      # runner's default.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
       # A Memory64 binary that links but traps at startup is the failure mode
       # worth catching, so actually boot it and drive a search.
       - name: run engine
