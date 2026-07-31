@@ -85,8 +85,8 @@ jobs:
             category: pthread
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (~184 MB)"
-          - name: pthread-nagisa
-            dir: yaneuraou-wasm-pthread-nagisa
+          - name: pthread-halfka1024
+            dir: yaneuraou-wasm-pthread-halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
             export_name: YaneuraOu_Nagisa
             environment: web,worker
@@ -102,7 +102,7 @@ jobs:
           # ここに matrix エントリを戻すだけでよい。
           # 配布するのは NNUE 5 種 (KP256 / HalfKP256 / HalfKP768 / NAGISA) + Mate の
           # 実用構成のみ。
-          # NAGISA は eval 75 MB + progress.bin が要るので cfworkers variant は無い
+          # halfka1024 (NAGISA_V3) は eval 75 MB + progress.bin が要るので cfworkers variant は無い
           # (128 MB heap に収まらない)。
 
           # Node.js variants — built with EM_ENVIRONMENT=node and
@@ -163,8 +163,8 @@ jobs:
             category: node
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (~184 MB)"
-          - name: node-nagisa
-            dir: yaneuraou-wasm-node-nagisa
+          - name: node-halfka1024
+            dir: yaneuraou-wasm-node-halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
             export_name: YaneuraOu_Nagisa
             environment: node

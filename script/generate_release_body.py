@@ -156,7 +156,7 @@ def _engine_short_label(engine_label: str) -> str:
     if engine_label.startswith("NNUE HalfKP_768x2_16_64"):
         return "HalfKP768"
     if engine_label.startswith("SFNN HalfKA_hm2"):
-        return "NAGISA"
+        return "HalfKA1024"
     if engine_label.startswith("Material"):
         return "Material Lv1"
     if engine_label.startswith("Mobility"):
