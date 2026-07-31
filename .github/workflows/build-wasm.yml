@@ -85,12 +85,25 @@ jobs:
             category: pthread
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (~184 MB)"
+          - name: pthread-nagisa
+            dir: yaneuraou-wasm-pthread-nagisa
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+            export_name: YaneuraOu_Nagisa
+            environment: web,worker
+            pthread: 1
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            category: pthread
+            engine_label: "SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3)"
+            eval_note: "external (~75 MB + progress.bin)"
 
           # Material / Mobility / HumanLike (hlsl) の各 variant はビルド対象から外して
           # いる。packages/ 配下のソースは残してあるので、配布を再開したくなったら
           # ここに matrix エントリを戻すだけでよい。
-          # 配布するのは NNUE 4 種 (KP256 / HalfKP256 / HalfKP768) + Mate の
+          # 配布するのは NNUE 5 種 (KP256 / HalfKP256 / HalfKP768 / NAGISA) + Mate の
           # 実用構成のみ。
+          # NAGISA は eval 75 MB + progress.bin が要るので cfworkers variant は無い
+          # (128 MB heap に収まらない)。
 
           # Node.js variants — built with EM_ENVIRONMENT=node and
           # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
@@ -150,6 +163,19 @@ jobs:
             category: node
             engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
             eval_note: "external (~184 MB)"
+          - name: node-nagisa
+            dir: yaneuraou-wasm-node-nagisa
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+            export_name: YaneuraOu_Nagisa
+            environment: node
+            pthread: 1
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 2147483648
+            category: node
+            engine_label: "SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3)"
+            eval_note: "external (~75 MB + progress.bin)"
 
     steps:
       - uses: actions/checkout@v7
