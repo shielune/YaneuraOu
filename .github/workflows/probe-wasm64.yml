@@ -1,9 +1,18 @@
 name: Probe wasm64 (node)
 
-# Throwaway workflow: check whether emscripten 3.1.43 — the version the node
-# packages are pinned to — can build and run a Memory64 binary at all.
-# 3.1.43 predates stable Memory64 support, and the arm64 dev box cannot run
-# the amd64-only 3.1.43 image, so this has to be answered on CI.
+# Throwaway workflow answering two questions that block wasm64 node packages:
+#
+#   1. Which emsdk can build AND run a Memory64 binary under Node?
+#      (3.1.43 builds one but traps at startup; 5.0.5 works.)
+#   2. Is "emsdk >3.1.43 stalls Node pthread builds" still true?
+#      That finding is from 2026-04-14 and pins the node packages to 3.1.43,
+#      which is exactly the version Memory64 does not run on. If it no longer
+#      reproduces, the two constraints stop conflicting.
+#
+# So the matrix crosses emsdk against MEMORY64, and every case runs a real
+# multi-threaded search — a build that boots but stalls under Threads>1 is
+# the failure mode that matters here.
+#
 # Delete once the question is settled.
 
 on:
@@ -21,15 +30,19 @@ jobs:
       fail-fast: false
       matrix:
         emsdk: ["3.1.43", "5.0.5"]
+        memory64: ["0", "1"]
+
+    name: "emsdk ${{ matrix.emsdk }} / MEMORY64=${{ matrix.memory64 }}"
 
     steps:
       - uses: actions/checkout@v7
 
-      - name: build (emsdk ${{ matrix.emsdk }}, MEMORY64=1)
+      - name: build
         id: build
         continue-on-error: true
         run: |
           mkdir -p out
+          # Node variants need callMain to drive USI after a noInitialRun boot.
           sudo docker run --rm \
             -v "${{ github.workspace }}:/src" \
             -w /src/source \
@@ -38,13 +51,13 @@ jobs:
               COMPILER=em++ \
               TARGET_CPU=WASM \
               PYTHON=python3 \
-              YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE_KP256 \
+              YANEURAOU_EDITION=YANEURAOU_MATE_ENGINE \
               TARGET=../out/yaneuraou.js \
-              EM_EXPORT_NAME=YaneuraOu_K_P \
+              EM_EXPORT_NAME=YaneuraOu_MATE \
               EM_ENVIRONMENT=node \
               "EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']" \
               EM_PTHREAD=1 \
-              EM_MEMORY64=1 \
+              EM_MEMORY64=${{ matrix.memory64 }} \
               EM_INITIAL_MEMORY_SIZE=268435456 \
               EM_MAXIMUM_MEMORY_SIZE=8589934592 \
               EM_STACK_SIZE=2097152 \
@@ -55,32 +68,42 @@ jobs:
         run: |
           echo "BUILD: ${{ steps.build.outcome }}"
           test -f out/yaneuraou.wasm || { echo "no wasm produced"; exit 1; }
-          grep -o 'maximum[^,}]*' out/yaneuraou.js | head -2 || true
 
-      # The runner ships Node 22, which does not enable Memory64 by default.
-      # Memory64 needs Node 24+, so pin one here rather than measuring the
-      # runner's default.
+      # Memory64 needs Node 24+; the runner default is 22.
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
 
-      # A Memory64 binary that links but traps at startup is the failure mode
-      # worth catching, so actually boot it and drive a search.
-      - name: run engine
+      # The failure mode that matters is a build that boots fine but hangs the
+      # moment a worker thread is spawned, so search with Threads=4 and treat
+      # "no bestmove within the timeout" as a stall. The mate engine needs no
+      # eval file, which keeps this probe free of eval plumbing.
+      - name: run multi-threaded search
         run: |
-          # The engine writes to stdout directly rather than through the
-          # print callback, so assert on the captured output, not in JS.
           cat > probe.mjs <<'EOF'
           const mod = await import("./out/yaneuraou.js");
           const m = await mod.default({ noInitialRun: true });
           m.callMain([]);
-          m.ccall("usi_command", null, ["string"], ["usi"]);
-          await new Promise(r => setTimeout(r, 3000));
+          const send = c => m.ccall("usi_command", null, ["string"], [c]);
+          send("usi");
+          send("setoption name Threads value 4");
+          send("setoption name USI_Hash value 128");
+          send("isready");
+          await new Promise(r => setTimeout(r, 15000));
+          send("usinewgame");
+          // A short forced mate so the search terminates on its own.
+          send("position sfen 3sks3/9/4S4/9/9/9/9/9/9 b G2r2b3g2s4n4l18p 1");
+          send("go mate 5000");
+          await new Promise(r => setTimeout(r, 40000));
           EOF
           node --version
-          node probe.mjs 2>&1 | tee engine.out || true
+          timeout 180 node probe.mjs 2>&1 | tee engine.out || true
 
           echo "--- verdict ---"
           grep -F 'option name USI_Hash' engine.out || echo "USI_Hash: (not found)"
-          grep -qF 'usiok' engine.out || { echo "RESULT: FAILED (no usiok)"; exit 1; }
+          grep -qF 'usiok'   engine.out || { echo "RESULT: FAILED (no usiok)";   exit 1; }
+          grep -qF 'readyok' engine.out || { echo "RESULT: FAILED (no readyok)"; exit 1; }
+          # The mate engine answers with checkmate/nomate, not bestmove.
+          grep -qE 'checkmate|nomate' engine.out || { echo "RESULT: STALLED (threads>1 produced no answer)"; exit 1; }
+          grep -E 'checkmate|nomate' engine.out | tail -1
           echo "RESULT: OK"
