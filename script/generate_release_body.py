@@ -89,19 +89,15 @@ def fmt_threading(category: str, pthread: int) -> str:
     return "pthread" if pthread == 1 else "single-thread"
 
 
+# Known categories. The body no longer prints these, but an unrecognised
+# category still needs to fail loudly rather than render a silent gap.
 _TARGET_BY_CATEGORY = {
     "cfworkers":      "Cloudflare Workers, edge runtimes",
     "cfworkers-hlsl": "Cloudflare Workers, edge runtimes",
-    "pthread":        "Browser (COOP/COEP required)",
-    "pthread-hlsl":   "Browser (COOP/COEP required)",
+    "pthread":        "Browser",
+    "pthread-hlsl":   "Browser",
     "node":           "Node.js (worker_threads)",
 }
-
-
-def target_for(category: str) -> str:
-    if category not in _TARGET_BY_CATEGORY:
-        raise SystemExit(f"unknown category: {category!r} — update _TARGET_BY_CATEGORY")
-    return _TARGET_BY_CATEGORY[category]
 
 
 def npm_name(dir_: str) -> str:
@@ -114,9 +110,12 @@ def npm_name(dir_: str) -> str:
 # category) and returns a Markdown table as a string.
 # ---------------------------------------------------------------------------
 def table_default(rows: list[dict]) -> str:
+    # No Target column: the package name already says cfworkers vs pthread,
+    # and spelling out "Browser (COOP/COEP required)" on every row buried the
+    # rest of the table. The requirement is a footnote instead.
     out = [
-        "| Package | Engine | Eval data | Threading | Initial / Max memory | Target |",
-        "|---|---|---|---|---|---|",
+        "| Package | Engine | Eval data | Threading | Initial / Max memory |",
+        "|---|---|---|---|---|",
     ]
     for r in rows:
         out.append(
@@ -124,8 +123,7 @@ def table_default(rows: list[dict]) -> str:
             f"| {r['engine_label']} "
             f"| {r['eval_note']} "
             f"| {fmt_threading(r['category'], r['pthread'])} "
-            f"| {fmt_memory(r['initial_memory'], r['maximum_memory'])} "
-            f"| {target_for(r['category'])} |"
+            f"| {fmt_memory(r['initial_memory'], r['maximum_memory'])} |"
         )
     return "\n".join(out)
 
@@ -234,7 +232,9 @@ engine.dispose();
 
 STATIC_HLSL_NOTES = """> Mate engine variants are not provided in -hlsl form because humanlike options are search-time personality filters and have no effect on the DfPn mate solver."""
 
-STATIC_VARIANT_NOTES = """> Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget)."""
+STATIC_VARIANT_NOTES = """> The `pthread-*` packages run in the browser and need `SharedArrayBuffer`, so the page must be served cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp`). Where you cannot set those headers, use a `*-cfworkers` package.
+
+> Cloudflare Workers cannot host pthread builds — use the cfworkers variant there. HalfKP cfworkers variant does not exist (eval exceeds Workers memory budget)."""
 
 STATIC_PERFORMANCE_SECTION = """## Performance — how close to native?
 
