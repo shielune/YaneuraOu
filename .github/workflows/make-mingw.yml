@@ -98,22 +98,47 @@ jobs:
           path: download/
 
       # The matrix produces one artifact per (edition, archcpu) pair, each
-      # holding a single .exe. Ship one zip per edition instead, so a user
+      # holding a single .exe. Ship one zip per engine instead, so a user
       # picks their engine and gets every CPU target in it.
-      - name: Repack one zip per edition
+      #
+      # Names follow the WASM packages (yaneuraou-<platform>-<network>), not
+      # mingw_gcc.sh's YaneuraOu_NNUE_* form: side by side in the release the
+      # two styles looked unrelated, and the bare "NNUE" gave no hint that it
+      # is the halfkp256 network.
+      - name: Repack one zip per engine
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p stage dist
+
+          network_of() {
+            case "$1" in
+              YaneuraOu_NNUE_KP256)      echo kp256 ;;
+              YaneuraOu_NNUE_HalfKP128)  echo halfkp128 ;;
+              YaneuraOu_NNUE_HalfKP768)  echo halfkp768 ;;
+              YaneuraOu_SFNN_HalfKA1024) echo halfka1024 ;;
+              YaneuraOu_MATE)            echo mate ;;
+              # mingw_gcc.sh calls the standard network plain "NNUE"; it is
+              # halfkp256, so spell that out rather than shipping a nameless zip.
+              YaneuraOu_NNUE)            echo halfkp256 ;;
+              *)                         echo "UNMAPPED:$1" ;;
+            esac
+          }
+
           find download -name '*.exe' -print0 | while IFS= read -r -d '' exe; do
             base="$(basename "$exe")"
             # <FileStr>-windows-<compiler>-<target>-<archcpu>.exe
-            edition="${base%%-windows-*}"
-            mkdir -p "stage/${edition}"
-            cp "$exe" "stage/${edition}/"
+            network="$(network_of "${base%%-windows-*}")"
+            case "$network" in
+              UNMAPPED:*) echo "no network name for ${network#UNMAPPED:}" >&2; exit 1 ;;
+            esac
+            mkdir -p "stage/${network}"
+            # Inside the zip, name each binary after its CPU target only.
+            cp "$exe" "stage/${network}/yaneuraou-windows-${network}-${base##*-}"
           done
+
           for d in stage/*/; do
-            edition="$(basename "$d")"
-            (cd "$d" && zip -q -r "../../dist/${edition}-windows-v${VERSION}.zip" .)
+            network="$(basename "$d")"
+            (cd "$d" && zip -q -r "../../dist/yaneuraou-windows-${network}-v${VERSION}.zip" .)
           done
           ls -lh dist/
 

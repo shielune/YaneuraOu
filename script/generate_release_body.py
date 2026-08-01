@@ -315,16 +315,17 @@ def windows_section(mingw_workflow: Path) -> str:
     cpus = ", ".join(f"`{a}`" for a in archcpus)
     return f"""## Windows (native)
 
-Also attached: {word(len(editions))} `.zip` files, one per engine, built with
-MinGW for 64-bit Windows. Each holds the same engine compiled for every CPU
-target — {cpus} — so download the engine you want and pick the binary that
-matches your machine.
+Also attached: {word(len(editions))} `yaneuraou-windows-*.zip` files, one per
+network, built with MinGW for 64-bit Windows. Each holds that engine compiled
+for every CPU target — {cpus} — so download the network you want and pick the
+`.exe` matching your machine.
 
-**Which one**: `AVX2` covers any Haswell-or-later Intel and most AMD. Use
+**Which CPU build**: `AVX2` covers any Haswell-or-later Intel and most AMD. Use
 `SSE42` on older hardware, `ZEN2` / `ZEN3` on Ryzen, and the `AVX512*` builds
 only where AVX-512 is genuinely present — they will not start otherwise.
 
-These take the same eval files as the WASM packages; see the sections below."""
+The network names match the WASM packages above (`halfkp256` is the standard
+Suisho5-compatible network), and they take the same eval files; see below."""
 
 
 # ---------------------------------------------------------------------------
@@ -372,13 +373,14 @@ def build_body(packages: list[dict], headline: str | None = None,
         )
 
     intro = (
-        f"YaneuraOu shogi engine — WebAssembly builds.\n"
+        f"YaneuraOu shogi engine — WebAssembly packages and native Windows "
+        f"binaries.\n"
         f"\n"
         f"**What's new in this release**: {headline}\n"
         f"\n"
         f"---\n"
         f"\n"
-        f"Each archive contains the package's `package.json` (version "
+        f"Each `.tar.gz` contains the package's `package.json` (version "
         f"bumped to this release), `README.md`, `SPEC.md`, the TypeScript "
         f"loader (`dist/index.js`, `dist/index.d.ts`), and the engine "
         f"bundle (`dist/yaneuraou.js`, `dist/yaneuraou.wasm`, `.wasm.br`). "
