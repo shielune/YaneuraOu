@@ -296,6 +296,37 @@ Load a book through the `BookDir` / `BookFile` USI options.
 > 700T-shock (32 MB) OOMs the 128 MB cfworkers heap — on cfworkers, stick to 100T-shock. The petabook strains the heap even on pthread variants."""
 
 
+def windows_section(mingw_workflow: Path) -> str:
+    """Describe the .zip files make-mingw.yml attaches to this same release.
+
+    Read from that workflow's matrix so the CPU list cannot drift from what
+    is actually built.
+    """
+    if not mingw_workflow.exists():
+        return ""
+    data = yaml.safe_load(mingw_workflow.read_text(encoding="utf-8"))
+    try:
+        matrix = data["jobs"]["build-mingw"]["strategy"]["matrix"]
+        archcpus = list(matrix["archcpu"])
+        editions = list(matrix["edition"])
+    except (KeyError, TypeError):
+        return ""
+
+    cpus = ", ".join(f"`{a}`" for a in archcpus)
+    return f"""## Windows (native)
+
+Also attached: {word(len(editions))} `.zip` files, one per engine, built with
+MinGW for 64-bit Windows. Each holds the same engine compiled for every CPU
+target — {cpus} — so download the engine you want and pick the binary that
+matches your machine.
+
+**Which one**: `AVX2` covers any Haswell-or-later Intel and most AMD. Use
+`SSE42` on older hardware, `ZEN2` / `ZEN3` on Ryzen, and the `AVX512*` builds
+only where AVX-512 is genuinely present — they will not start otherwise.
+
+These take the same eval files as the WASM packages; see the sections below."""
+
+
 # ---------------------------------------------------------------------------
 # Top-level assembly
 # ---------------------------------------------------------------------------
@@ -312,7 +343,8 @@ def load_headline(version: str, notes_dir: Path) -> str | None:
     return text or None
 
 
-def build_body(packages: list[dict], headline: str | None = None) -> str:
+def build_body(packages: list[dict], headline: str | None = None,
+               mingw_workflow: Path | None = None) -> str:
     by_cat: dict[str, list[dict]] = {}
     for p in packages:
         cat = p.get("category")
@@ -389,6 +421,10 @@ def build_body(packages: list[dict], headline: str | None = None) -> str:
     if node_rows:
         sections.append(table_node(node_rows))
     sections.append(STATIC_NODE_QUICKSTART)
+    if mingw_workflow:
+        win = windows_section(mingw_workflow)
+        if win:
+            sections.append(win)
     sections.append(STATIC_PERFORMANCE_SECTION)
     sections.append(STATIC_EVAL_SECTION)
     sections.append(STATIC_BOOK_SECTION)
@@ -433,7 +469,8 @@ def main() -> int:
             f"using the generic package-count headline.",
             file=sys.stderr,
         )
-    body = build_body(packages, headline)
+    body = build_body(packages, headline,
+                      mingw_workflow=args.workflow.parent / "make-mingw.yml")
     args.output.write_text(body)
     print(f"wrote {args.output} ({len(body)} bytes, {body.count(chr(10))} lines)", file=sys.stderr)
     return 0
