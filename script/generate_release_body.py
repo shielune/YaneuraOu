@@ -297,7 +297,7 @@ Load a book through the `BookDir` / `BookFile` USI options.
 
 
 def windows_section(mingw_workflow: Path) -> str:
-    """Describe the .zip files make-mingw.yml attaches to this same release.
+    """Describe the tarballs make-mingw.yml attaches to this same release.
 
     Read from that workflow's matrix so the CPU list cannot drift from what
     is actually built.
@@ -315,7 +315,7 @@ def windows_section(mingw_workflow: Path) -> str:
     cpus = ", ".join(f"`{a}`" for a in archcpus)
     return f"""## Windows (native)
 
-Also attached: {word(len(editions))} `yaneuraou-windows-*.zip` files, one per
+Also attached: {word(len(editions))} `yaneuraou-windows-*.tar.gz` files, one per
 network, built with MinGW for 64-bit Windows. Each holds that engine compiled
 for every CPU target — {cpus} — so download the network you want and pick the
 `.exe` matching your machine.
