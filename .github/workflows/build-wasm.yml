@@ -28,7 +28,7 @@ jobs:
             initial_memory: 67108864
             maximum_memory: 134217728
             category: cfworkers
-            engine_label: "NNUE KP256 (Suishopetite)"
+            engine_label: "NNUE KP256"
             eval_note: "external (~873 KB)"
           - name: mate-cfworkers
             dir: yaneuraou-wasm-mate-cfworkers
@@ -50,7 +50,7 @@ jobs:
             initial_memory: 134217728
             maximum_memory: 4294967296
             category: pthread
-            engine_label: "NNUE KP256 (Suishopetite)"
+            engine_label: "NNUE KP256"
             eval_note: "external (~873 KB)"
           - name: mate-pthread
             dir: yaneuraou-wasm-mate-pthread
@@ -83,7 +83,7 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
-            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            engine_label: "NNUE HalfKP_256x2_32_32"
             eval_note: "external (~62 MB)"
           - name: pthread-halfkp768
             dir: yaneuraou-wasm-pthread-halfkp768
@@ -94,7 +94,7 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
-            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            engine_label: "NNUE HalfKP_768x2_16_64"
             eval_note: "external (~184 MB)"
           - name: pthread-halfka1024
             dir: yaneuraou-wasm-pthread-halfka1024
@@ -105,7 +105,7 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
-            engine_label: "SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3)"
+            engine_label: "SFNN HalfKA_hm2 1024x2-15-64"
             eval_note: "external (~75 MB + progress.bin)"
 
           # Material / Mobility / HumanLike (hlsl) の各 variant はビルド対象から外して
@@ -133,7 +133,7 @@ jobs:
             initial_memory: 134217728
             maximum_memory: 4294967296
             category: node
-            engine_label: "NNUE KP256 (Suishopetite)"
+            engine_label: "NNUE KP256"
             eval_note: "external (~873 KB)"
           - name: node-mate
             dir: yaneuraou-wasm-node-mate
@@ -172,7 +172,7 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: node
-            engine_label: "NNUE HalfKP_256x2_32_32 (Suisho5)"
+            engine_label: "NNUE HalfKP_256x2_32_32"
             eval_note: "external (~62 MB)"
           - name: node-halfkp768
             dir: yaneuraou-wasm-node-halfkp768
@@ -185,7 +185,7 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: node
-            engine_label: "NNUE HalfKP_768x2_16_64 (AobaNNUE)"
+            engine_label: "NNUE HalfKP_768x2_16_64"
             eval_note: "external (~184 MB)"
           - name: node-halfka1024
             dir: yaneuraou-wasm-node-halfka1024
@@ -198,7 +198,7 @@ jobs:
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: node
-            engine_label: "SFNN HalfKA_hm2 1024x2-15-64 (NAGISA_V3)"
+            engine_label: "SFNN HalfKA_hm2 1024x2-15-64"
             eval_note: "external (~75 MB + progress.bin)"
 
     steps:
@@ -373,7 +373,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "yaneuraou-wasm ${{ steps.version.outputs.version }}"
+          name: "YaneuraOu ${{ steps.version.outputs.version }}"
           body_path: release_body.md
           # Glob across the matrix-generated tar.gz set — covers however
           # many packages the matrix produces, no per-name listing needed.
