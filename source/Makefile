@@ -240,6 +240,19 @@ else
 		# (edge variant 向け, V8 Isolate 系ランタイムでは Worker / SharedArrayBuffer
 		# が使えないため) かを切り替える。
 		EM_PTHREAD ?= 1
+		# 起動時に先行生成しておく pthread worker の数。
+		#
+		# これは同時に走れるスレッド数の上限ではない。プールが尽きると Emscripten の
+		# getNewWorker() がその場で worker を作って足すので、Threads にプールより
+		# 大きい値を指定しても動く (PTHREAD_POOL_SIZE_STRICT を使うと上限になるが、
+		# 意図的に無効のままにしてある)。プールはあくまで「起動直後の即応性」で、
+		# 増やすと最初の go が速くなり、減らすと起動時のメモリと worker 生成コストが減る。
+		#
+		# ⚠ 大きすぎるとモバイル (特に iOS Safari) で問題になる。worker はそれぞれ
+		#   wasm モジュールのインスタンスを持つため、プール数だけ実体が増える。評価関数を
+		#   読み込む前の時点でタブのメモリ上限に近づき、大きい eval を開いた瞬間に
+		#   タブごと落ちる。
+		EM_PTHREAD_POOL_SIZE ?= 8
 		# wasm64 (Memory64) でビルドするか。
 		# 1 にするとポインタが64bitになり、4GBのヒープ上限を超えられる。
 		# ⚠ 実行側の要件が上がる: Node 24+ / Chrome 133+ など Memory64 対応ランタイムが要る。
@@ -267,8 +280,10 @@ else
 		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
 		ifeq ($(EM_PTHREAD),1)
 			LDFLAGS += -pthread
-			LDFLAGS += -s PTHREAD_POOL_SIZE=32
-			# -s PTHREAD_POOL_SIZE_STRICT=32
+			LDFLAGS += -s PTHREAD_POOL_SIZE=$(EM_PTHREAD_POOL_SIZE)
+			# PTHREAD_POOL_SIZE_STRICT は付けない。付けるとプールを超えた spawn が
+			# 失敗するようになり、Threads にプールより大きい値を入れられなくなる。
+			# -s PTHREAD_POOL_SIZE_STRICT=$(EM_PTHREAD_POOL_SIZE)
 		endif
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
 		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=$(EM_MAXIMUM_MEMORY_SIZE)
