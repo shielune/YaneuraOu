@@ -47,6 +47,7 @@ jobs:
             export_name: YaneuraOu_K_P
             environment: web,worker
             pthread: 1
+            pthread_pool_size: 8
             initial_memory: 134217728
             maximum_memory: 4294967296
             category: pthread
@@ -58,6 +59,7 @@ jobs:
             export_name: YaneuraOu_MATE
             environment: web,worker
             pthread: 1
+            pthread_pool_size: 8
             initial_memory: 134217728
             maximum_memory: 4294967296
             category: pthread
@@ -69,6 +71,7 @@ jobs:
             export_name: YaneuraOu_HalfKP128
             environment: web,worker
             pthread: 1
+            pthread_pool_size: 8
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
@@ -80,6 +83,7 @@ jobs:
             export_name: YaneuraOu_HalfKP256
             environment: web,worker
             pthread: 1
+            pthread_pool_size: 8
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
@@ -91,6 +95,7 @@ jobs:
             export_name: YaneuraOu_HalfKP768
             environment: web,worker
             pthread: 1
+            pthread_pool_size: 8
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
@@ -102,6 +107,7 @@ jobs:
             export_name: YaneuraOu_Nagisa
             environment: web,worker
             pthread: 1
+            pthread_pool_size: 8
             initial_memory: 268435456
             maximum_memory: 4294967296
             category: pthread
@@ -128,6 +134,7 @@ jobs:
             export_name: YaneuraOu_K_P
             environment: node
             pthread: 1
+            pthread_pool_size: 32
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 134217728
@@ -141,6 +148,7 @@ jobs:
             export_name: YaneuraOu_MATE
             environment: node
             pthread: 1
+            pthread_pool_size: 32
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 134217728
@@ -154,6 +162,7 @@ jobs:
             export_name: YaneuraOu_HalfKP128
             environment: node
             pthread: 1
+            pthread_pool_size: 32
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
@@ -167,6 +176,7 @@ jobs:
             export_name: YaneuraOu_HalfKP256
             environment: node
             pthread: 1
+            pthread_pool_size: 32
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
@@ -180,6 +190,7 @@ jobs:
             export_name: YaneuraOu_HalfKP768
             environment: node
             pthread: 1
+            pthread_pool_size: 32
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
@@ -193,6 +204,7 @@ jobs:
             export_name: YaneuraOu_Nagisa
             environment: node
             pthread: 1
+            pthread_pool_size: 32
             exported_runtime_methods: "['FS','ccall','callMain']"
             emsdk_version: "3.1.43"
             initial_memory: 268435456
@@ -237,6 +249,7 @@ jobs:
               EM_ENVIRONMENT=${{ matrix.package.environment }} \
               "EM_EXPORTED_RUNTIME_METHODS=${EXPORTED_RUNTIME_METHODS}" \
               EM_PTHREAD=${{ matrix.package.pthread }} \
+              EM_PTHREAD_POOL_SIZE=${{ matrix.package.pthread_pool_size || 8 }} \
               EM_INITIAL_MEMORY_SIZE=${{ matrix.package.initial_memory }} \
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
               EM_STACK_SIZE=2097152 \
