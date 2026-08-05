@@ -1,8 +1,8 @@
 ﻿// Input features and network structure used in NNUE evaluation function
 // NNUE評価関数で用いる入力特徴量とネットワーク構造
 
-#ifndef NNUE_ARCHITECTURE_H_INCLUDED
-#define NNUE_ARCHITECTURE_H_INCLUDED
+#ifndef CLASSIC_NNUE_ARCHITECTURE_H_INCLUDED
+#define CLASSIC_NNUE_ARCHITECTURE_H_INCLUDED
 
 #include "../../config.h"
 
@@ -47,6 +47,10 @@
 // halfkp_1024x2-8-64型
 #include "architectures/halfkp_1024x2-8-64.h"
 
+#elif defined(YANEURAOU_ENGINE_SFNN1536)
+
+// SFNN without Psqt 1536型
+#include "architectures/sfnn-1536.h"
 
 #elif defined(EVAL_NNUE_HALFKP_VM_256X2_32_32)
 
@@ -60,6 +64,17 @@
 
 #endif
 
+// 📝 進行度バケットの最後を相入玉専用にするか。
+//    アーキヘッダ (nnue_arch_gen.py が生成) が定義するが、
+//    それ以前に生成された古いヘッダには無いので既定値を置く。
+#if !defined(NNUE_SFNN_PROGRESS_ENTERING_KING)
+	#define NNUE_SFNN_PROGRESS_ENTERING_KING 0
+#endif
+#if !defined(NNUE_SFNN_PROGRESS_EXTERNAL)
+	#define NNUE_SFNN_PROGRESS_EXTERNAL 0
+#endif
+
+namespace YaneuraOu {
 namespace Eval::NNUE {
 
 	static_assert(kTransformedFeatureDimensions % kMaxSimdWidth == 0, "");
@@ -70,7 +85,8 @@ namespace Eval::NNUE {
 	// 差分計算の代わりに全計算を行うタイミングのリスト
 	constexpr auto kRefreshTriggers = RawFeatures::kRefreshTriggers;
 
-}  // namespace Eval::NNUE
+} // namespace Eval::NNUE
+} // namespace YaneuraOu
 
 #endif  // defined(EVAL_NNUE)
 

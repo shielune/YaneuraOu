@@ -4,8 +4,18 @@
 
 #if defined(EVAL_NNUE)
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <fstream>
+#include <limits>
+#include <sstream>
+#include <vector>
 
+#define INCBIN_SILENCE_BITCODE_WARNING
+#include "../../incbin/incbin.h"
+
+#include "../../types.h"
 #include "../../evaluate.h"
 #include "../../position.h"
 #include "../../memory.h"
@@ -16,352 +26,989 @@
 #endif
 
 #include "evaluate_nnue.h"
+#include "nnue_common.h"
 
+namespace YaneuraOu::Eval::NNUE {
+extern int FV_SCALE;
+}
+ 
+// ============================================================
+//              旧評価関数のためのヘルパー
+// ============================================================
+
+#if defined(USE_CLASSIC_EVAL)
+using namespace YaneuraOu;
+void add_options_(OptionsMap& options, ThreadPool& threads);
+
+namespace {
+YaneuraOu::OptionsMap* options_ptr;
+YaneuraOu::ThreadPool* threads_ptr;
+}
+
+// 📌 旧Options、旧Threadsとの互換性のための共通のマクロ 📌
+#define Options (*options_ptr)
+#define Threads (*threads_ptr)
+
+namespace YaneuraOu::Eval {
+void add_options(OptionsMap& options, ThreadPool& threads) {
+    options_ptr = &options;
+    threads_ptr = &threads;
+    add_options_(options, threads);
+}
+}
+// ============================================================
+
+// 評価関数を読み込み済みであるか
+bool        eval_loaded   = false;
+std::string last_eval_dir = "None";
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_ENTERING_KING
+// LS_BUCKET_MODE が progress8ek か。既定は本家 NAGISA_V3 と同じ progress8kpabs。
+bool progress_entering_king_bucket = false;
+#endif
+
+// 💡 SFNN系のネットは出力のスケールが違うので既定値を変える。
+//    NAGISA_V3 配布物の eval_options.txt もこの値を前提にしている。
+#if defined(SFNNwoPSQT)
+constexpr int kDefaultFvScale = 28;
+#else
+constexpr int kDefaultFvScale = 16;
+#endif
+
+#if defined(__EMSCRIPTEN__)
+// yaneuraou.wasm
+// 前回のOptions["EvalFile"]
+// 📝 wasmでは評価関数ファイルをMEMFSへ実行時に流し込むので、
+//     ファイル名を固定にできずエンジンオプションで受け取る。
+std::string last_eval_file = "None";
+#endif
+
+// 📌 この評価関数で追加したいエンジンオプションはここで追加する。
+void add_options_(OptionsMap& options, ThreadPool& threads) {
+
+#if defined(NNUE_EMBEDDING_OFF)
+    const char* default_eval_dir = "eval";
+#else
+	// メモリから読み込む。
+    const char* default_eval_dir = "<internal>";
+#endif
+    Options.add("EvalDir", Option(default_eval_dir, [](const Option& o) {
+                    std::string eval_dir = std::string(o);
+                    if (last_eval_dir != eval_dir)
+                    {
+                        // 評価関数フォルダ名の変更に際して、評価関数ファイルの読み込みフラグをクリアする。
+                        last_eval_dir = eval_dir;
+                        eval_loaded   = false;
+                    }
+                    return std::nullopt;
+                }));
+
+    // NNUEのFV_SCALEの値
+    Options.add("FV_SCALE", Option(kDefaultFvScale, 1, 128, [&](const Option& o) {
+                    YaneuraOu::Eval::NNUE::FV_SCALE = int(o);
+                    return std::nullopt;
+                }));
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+    /*
+		📓 進行度係数を外部ファイルから読む場合のファイル名。
+
+		   既定は空 = nn.bin に埋め込まれた係数を使う。
+		   NAGISA_V3 のように係数を別ファイルで配布している評価関数では
+		   "progress.bin" のように指定する。EvalDir 基準で解決される。
+	*/
+    Options.add("LS_PROGRESS_COEFF", Option("", [](const Option&) {
+                    // 次の isready で読み直させる。
+                    eval_loaded = false;
+                    return std::nullopt;
+                }));
+#endif
+
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+    /*
+		📓 相入玉バケットを使うかどうか。
+
+		   NAGISA_V3 は 9 個の LayerStack を持つが、既定の progress8kpabs は
+		   進行度だけで 0〜7 を選び、9 個目を使わない。
+		   progress8ek は相入玉局面を 9 個目に振り分ける。
+		   学習時と揃えないと別の重みが選ばれるので、既定は本家に合わせる。
+	*/
+    Options.add("LS_BUCKET_MODE",
+                Option(std::vector<std::string>{"progress8kpabs", "progress8ek"}, "progress8kpabs",
+                       [](const Option& o) {
+                           progress_entering_king_bucket = std::string(o) == "progress8ek";
+                           return std::nullopt;
+                       }));
+#endif
+
+#if defined(__EMSCRIPTEN__)
+    // yaneuraou.wasm
+    // 評価関数ファイル名。load_eval()がOptions["EvalFile"]を読むので、
+    // ここで生やしておかないと"isready"で落ちる。
+    const char* default_eval_file = "nn.bin";
+    last_eval_file                = default_eval_file;
+    Options.add("EvalFile", Option(default_eval_file, [](const Option& o) {
+                    std::string eval_file = std::string(o);
+                    if (last_eval_file != eval_file)
+                    {
+                        // 評価関数ファイル名の変更に際して、読み込みフラグをクリアする。
+                        last_eval_file = eval_file;
+                        eval_loaded    = false;
+                    }
+                    return std::nullopt;
+                }));
+#endif
+
+}
+#endif
+
+// Macro to embed the default efficiently updatable neural network (NNUE) file
+// data in the engine binary (using incbin.h, by Dale Weiler).
+// This macro invocation will declare the following three variables
+//     const unsigned char        gEmbeddedNNUEData[];  // a pointer to the embedded data
+//     const unsigned char *const gEmbeddedNNUEEnd;     // a marker to the end
+//     const unsigned int         gEmbeddedNNUESize;    // the size of the embedded file
+// Note that this does not work in Microsoft Visual Studio.
+
+// デフォルトの効率的に更新可能なニューラルネットワーク（NNUE）ファイルの
+// データをエンジンのバイナリに埋め込むためのマクロ
+// （Dale Weiler 氏の incbin.h を使用）。
+// このマクロを使うことで、以下の3つの変数が宣言されます：
+//     const unsigned char        gEmbeddedNNUEData[];  // 埋め込まれたデータへのポインタ
+//     const unsigned char *const gEmbeddedNNUEEnd;     // データの終端を示すマーカー
+//     const unsigned int         gEmbeddedNNUESize;    // 埋め込まれたファイルのサイズ
+// なお、この方法は Microsoft Visual Studio では動作しません。
+
+#if !defined(_MSC_VER) && !defined(NNUE_EMBEDDING_OFF)
+INCBIN(EmbeddedNNUE, EvalFileDefaultName);
+#else
+const unsigned char        gEmbeddedNNUEData[1] = { 0x0 };
+const unsigned char* const gEmbeddedNNUEEnd = &gEmbeddedNNUEData[1];
+const unsigned int         gEmbeddedNNUESize = 1;
+#endif
+
+// NNUEの埋め込みデータ型
+
+namespace {
+
+	struct EmbeddedNNUE {
+		EmbeddedNNUE(const unsigned char* embeddedData,
+			const unsigned char* embeddedEnd,
+			const unsigned int   embeddedSize) :
+			data(embeddedData),
+			end(embeddedEnd),
+			size(embeddedSize) {
+		}
+		const unsigned char* data;
+		const unsigned char* end;
+		const unsigned int   size;
+	};
+
+	//EmbeddedNNUE get_embedded(EmbeddedNNUEType type) {
+	//	if (type == EmbeddedNNUEType::BIG)
+	//		return EmbeddedNNUE(gEmbeddedNNUEBigData, gEmbeddedNNUEBigEnd, gEmbeddedNNUEBigSize);
+	//	else
+	//		return EmbeddedNNUE(gEmbeddedNNUESmallData, gEmbeddedNNUESmallEnd, gEmbeddedNNUESmallSize);
+	//}
+
+	// ⇨  StockfishはNNUEとして大きなnetworkと小さなnetworkがある。
+
+	EmbeddedNNUE get_embedded() {
+		return EmbeddedNNUE(gEmbeddedNNUEData, gEmbeddedNNUEEnd, gEmbeddedNNUESize);
+	}
+}
+
+
+namespace YaneuraOu {
 namespace Eval {
+namespace NNUE {
 
-    namespace NNUE {
+	// 水匠5では24がベストらしいのでエンジンオプション"FV_SCALE"で変更可能にした。
+	// 💡 SFNN系は28が既定 (kDefaultFvScale)。
+	int FV_SCALE = kDefaultFvScale;
 
-		int FV_SCALE = 16; // 水匠5では24がベストらしいのでエンジンオプション"FV_SCALE"で変更可能にした。
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+namespace Progress {
+namespace {
 
-        // 入力特徴量変換器
-		LargePagePtr<FeatureTransformer> feature_transformer;
+	constexpr double kQ16Scale = 65536.0;
+	constexpr int kProgressThresholdCount = Parameters::kProgressValueCount - 1;
 
-        // 評価関数
-        AlignedPtr<Network> network;
+	std::array<std::int64_t, kProgressThresholdCount> make_thresholds_q16() {
+		std::array<std::int64_t, kProgressThresholdCount> thresholds{};
+		for (int i = 1; i < Parameters::kProgressValueCount; ++i) {
+			const double p = double(i) / double(Parameters::kProgressValueCount);
+			const double scaled = std::round(std::log(p / (1.0 - p)) * kQ16Scale);
+			const double clamped = std::clamp(
+			    scaled,
+			    double((std::numeric_limits<std::int64_t>::min)()),
+			    double((std::numeric_limits<std::int64_t>::max)()));
+			thresholds[i - 1] = std::int64_t(clamped);
+		}
+		return thresholds;
+	}
 
-        // 評価関数ファイル名
-        const char* const kFileName = "nn.bin";
+	const std::array<std::int64_t, kProgressThresholdCount>& thresholds_q16() {
+		static const auto thresholds = make_thresholds_q16();
+		return thresholds;
+	}
 
-        // 評価関数の構造を表す文字列を取得する
-        std::string GetArchitectureString() {
-            return "Features=" + FeatureTransformer::GetStructureString() +
-				",Network=" + Network::GetStructureString();
+	int progress_0_to_255_from_sum_q16(std::int64_t sum_q16) {
+		const auto& thresholds = thresholds_q16();
+		const auto it = std::upper_bound(thresholds.begin(), thresholds.end(), sum_q16);
+		return int(it - thresholds.begin());
+	}
+
+} // namespace
+
+Tools::Result Parameters::ReadParameters(std::istream& stream) {
+	bias_q16_ = read_little_endian<std::int32_t>(stream);
+	read_little_endian<std::int32_t>(stream, &weights_q16_[0][0], kWeightCount);
+	return !stream.fail() ? Tools::ResultCode::Ok : Tools::ResultCode::FileReadError;
+}
+
+bool Parameters::WriteParameters(std::ostream& stream) const {
+	stream.write(reinterpret_cast<const char*>(&bias_q16_), sizeof(bias_q16_));
+	stream.write(reinterpret_cast<const char*>(&weights_q16_[0][0]), sizeof(weights_q16_));
+	return !stream.fail();
+}
+
+int Parameters::Value0To255(const Position& pos) const {
+	const auto sq_bk = pos.square<KING>(BLACK);
+	const auto sq_wk = Inv(pos.square<KING>(WHITE));
+
+	auto* st = pos.state();
+	std::int64_t sum_q16 = 0;
+	if (st->nnue_progress_valid
+	    && st->nnue_progress_key == pos.key()
+	    && st->nnue_progress_sq_bk == sq_bk
+	    && st->nnue_progress_sq_wk == sq_wk) {
+		sum_q16 = st->nnue_progress_sum;
+	} else {
+		const auto& list0 = pos.eval_list()->piece_list_fb();
+		const auto& list1 = pos.eval_list()->piece_list_fw();
+
+		sum_q16 = bias_q16_;
+		for (int i = 0; i < PIECE_NUMBER_KING; ++i) {
+			sum_q16 += weights_q16_[sq_bk][list0[i]];
+			sum_q16 += weights_q16_[sq_wk][list1[i]];
+		}
+
+		st->nnue_progress_key = pos.key();
+		st->nnue_progress_sum = sum_q16;
+		st->nnue_progress_sq_bk = sq_bk;
+		st->nnue_progress_sq_wk = sq_wk;
+		st->nnue_progress_valid = true;
+	}
+
+	return progress_0_to_255_from_sum_q16(sum_q16);
+}
+
+int Parameters::BucketIndex(const Position& pos, int bucket_count) const {
+	if (bucket_count <= 1)
+		return 0;
+
+	const int progress = Value0To255(pos);
+	const int bucket = progress * bucket_count / kProgressValueCount;
+	return std::clamp(bucket, 0, bucket_count - 1);
+}
+
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+/*
+	📓 相入玉バケット
+
+	   進行度バケットの最後の1つを、相入玉局面専用に取り分ける方式。
+	   相入玉は駒割も進行度も通常の局面と傾向が違うので、
+	   進行度で分類せず独立したLayerStackに割り当てる。
+
+	   bucket_count が 9 なら、0〜7 が進行度、8 が相入玉。
+*/
+bool IsMutualEnteringKing(const Position& pos) {
+	// 双方の玉が敵陣(を含む中段より先)へ入っている状態。
+	const auto black_king_rank = rank_of(pos.square<KING>(BLACK));
+	const auto white_king_rank = rank_of(pos.square<KING>(WHITE));
+	return black_king_rank <= RANK_5 && white_king_rank >= RANK_5;
+}
+
+int Parameters::BucketIndexWithEnteringKing(const Position& pos, int bucket_count) const {
+	if (bucket_count <= 1)
+		return 0;
+
+	// 最後の1つは相入玉専用なので、進行度側はそれを除いた個数で分類する。
+	if (IsMutualEnteringKing(pos))
+		return bucket_count - 1;
+
+	return BucketIndex(pos, bucket_count - 1);
+}
+#endif
+
+// 外部ファイル(progress.bin)から進行度の重みを読み込む。
+/*
+	📓 なぜ外部ファイルが要るのか
+
+	   upstream の進行度バケットは、係数を nn.bin の中に持つ
+	   (ReadParameters が同じ stream から読む)。
+	   一方 NAGISA_V3 の評価関数は係数を別ファイル progress.bin に持ち、
+	   しかも double 配列で保存されている。
+	   同じ nn.bin を使いつつ係数だけ差し替えられるようにするため、
+	   外部ファイルからの読み込みを用意する。
+
+	   ファイル形式: double[SQ_NB][fe_end] (bias無し)
+	   💡 内部の Q16 固定小数点へ変換して格納する。
+*/
+bool Parameters::ReadExternalCoefficients(std::istream& stream) {
+	constexpr std::size_t count = std::size_t(SQ_NB) * std::size_t(Eval::fe_end);
+	static_assert(count == kWeightCount, "progress coefficient count mismatch");
+
+	std::vector<double> raw(count);
+	stream.read(reinterpret_cast<char*>(raw.data()), std::streamsize(count * sizeof(double)));
+	if (!stream)
+		return false;
+
+	bias_q16_ = 0;
+	auto* dst = &weights_q16_[0][0];
+	for (std::size_t i = 0; i < count; ++i)
+	{
+		const double scaled = std::round(raw[i] * 65536.0);
+		dst[i] = std::int32_t(std::clamp(scaled,
+			double(std::numeric_limits<std::int32_t>::min()),
+			double(std::numeric_limits<std::int32_t>::max())));
+	}
+	return true;
+}
+
+} // namespace Progress
+#endif
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+    // LS_PROGRESS_COEFF が指定されていれば、進行度係数をそのファイルで差し替える。
+    // 指定が無ければ何もせず true を返す (nn.bin 内の係数をそのまま使う)。
+    static bool load_external_progress_coefficients(NnueNetworks& nets) {
+        if (!Options.count("LS_PROGRESS_COEFF"))
+            return !NNUE_SFNN_PROGRESS_EXTERNAL;
+
+        std::string coeff = Options["LS_PROGRESS_COEFF"];
+#if NNUE_SFNN_PROGRESS_EXTERNAL
+        // このeditionは係数を nn.bin に持たないので、外部ファイルが必須。
+        // 未指定なら既定名で探しにいく。
+        if (coeff.empty() || coeff == "<internal>")
+            coeff = "progress.bin";
+#else
+        if (coeff.empty() || coeff == "<internal>")
+            return true;
+#endif
+
+        // ディレクトリを含まない指定なら EvalDir 基準で解決する。
+        const std::string dir_name = Options["EvalDir"];
+        const std::string file_path =
+            coeff.find('/') != std::string::npos || coeff.find('\\') != std::string::npos
+            ? coeff
+            : Path::Combine(Path::Combine(Directory::GetBinaryFolder(),
+                                          dir_name == "<internal>" ? std::string("eval") : dir_name),
+                            coeff);
+
+        std::ifstream stream(file_path, std::ios::binary);
+        sync_cout << "info string loading progress file : " << file_path << sync_endl;
+        if (!stream.is_open()) {
+            sync_cout << "info string Error! : failed to open " << file_path << sync_endl;
+            return false;
         }
-
-        namespace {
-
-            namespace Detail {
-
-                // 評価関数パラメータを初期化する
-                template <typename T>
-                void Initialize(AlignedPtr<T>& pointer) {
-					pointer = make_unique_aligned<T>();
-                }
-
-				template <typename T>
-				void Initialize(LargePagePtr<T>& pointer) {
-					// →　メモリはLarge Pageから確保することで高速化する。
-					pointer = make_unique_large_page<T>();
-				}
-
-                // 評価関数パラメータを読み込む
-                template <typename T>
-                Tools::Result ReadParameters(std::istream& stream, const AlignedPtr<T>& pointer) {
-                    std::uint32_t header;
-                    stream.read(reinterpret_cast<char*>(&header), sizeof(header));
-					if (!stream)                     return Tools::ResultCode::FileReadError;
-					if (header != T::GetHashValue()) return Tools::ResultCode::FileMismatch;
-                    return pointer->ReadParameters(stream);
-                }
-
-				// 評価関数パラメータを読み込む
-				template <typename T>
-				Tools::Result ReadParameters(std::istream& stream, const LargePagePtr<T>& pointer) {
-					std::uint32_t header;
-					stream.read(reinterpret_cast<char*>(&header), sizeof(header));
-					if (!stream)                     return Tools::ResultCode::FileReadError;
-					if (header != T::GetHashValue()) return Tools::ResultCode::FileMismatch;
-					return pointer->ReadParameters(stream);
-				}
-
-				// 評価関数パラメータを書き込む
-                template <typename T>
-                bool WriteParameters(std::ostream& stream, const AlignedPtr<T>& pointer) {
-                    constexpr std::uint32_t header = T::GetHashValue();
-                    stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
-                    return pointer->WriteParameters(stream);
-                }
-
-				// 評価関数パラメータを書き込む
-				template <typename T>
-				bool WriteParameters(std::ostream& stream, const LargePagePtr<T>& pointer) {
-					constexpr std::uint32_t header = T::GetHashValue();
-					stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
-					return pointer->WriteParameters(stream);
-				}
-
-
-            }  // namespace Detail
-
-            // 評価関数パラメータを初期化する
-            void Initialize() {
-                Detail::Initialize<FeatureTransformer>(feature_transformer);
-                Detail::Initialize<Network>(network);
-            }
-
-        }  // namespace
-
-        // ヘッダを読み込む
-        Tools::Result ReadHeader(std::istream& stream,
-            std::uint32_t* hash_value, std::string* architecture) {
-            std::uint32_t version, size;
-            stream.read(reinterpret_cast<char*>(&version), sizeof(version));
-            stream.read(reinterpret_cast<char*>(hash_value), sizeof(*hash_value));
-            stream.read(reinterpret_cast<char*>(&size), sizeof(size));
-			if (!stream || version != kVersion) return Tools::ResultCode::FileMismatch;
-            architecture->resize(size);
-            stream.read(&(*architecture)[0], size);
-			return !stream.fail() ? Tools::ResultCode::Ok : Tools::ResultCode::FileReadError;
+        if (!nets.progress.ReadExternalCoefficients(stream)) {
+            sync_cout << "info string Error! : failed to read " << file_path << sync_endl;
+            return false;
         }
+        return true;
+    }
+#endif
 
-        // ヘッダを書き込む
-        bool WriteHeader(std::ostream& stream,
-            std::uint32_t hash_value, const std::string& architecture) {
-            stream.write(reinterpret_cast<const char*>(&kVersion), sizeof(kVersion));
-            stream.write(reinterpret_cast<const char*>(&hash_value), sizeof(hash_value));
-            const std::uint32_t size = static_cast<std::uint32_t>(architecture.size());
-            stream.write(reinterpret_cast<const char*>(&size), sizeof(size));
-            stream.write(architecture.data(), size);
-            return !stream.fail();
+    // NNUE評価関数パラメーター（共有メモリまたはローカルメモリ上に配置）
+    SystemWideSharedConstant<NnueNetworks> shared_networks;
+
+    // 評価関数ファイル名
+    const char* const kFileName = EvalFileDefaultName;
+
+    // 評価関数の構造を表す文字列を取得する
+    std::string GetArchitectureString() {
+        const std::string base = "Features=" + FeatureTransformer::GetStructureString() +
+			",Network=" + Network::GetStructureString();
+#if defined(SFNNwoPSQT)
+		return "ModelType=SFNNWithoutPsqt;" + base + "{LayerStack=" + std::to_string(kLayerStacks) + "}";
+#else
+		return base;
+#endif
+    }
+
+namespace {
+	namespace Detail {
+
+		// 評価関数パラメータを読み込む（参照版）
+		template <typename T>
+		Tools::Result ReadParameters(std::istream& stream, T& obj) {
+			std::uint32_t header;
+			stream.read(reinterpret_cast<char*>(&header), sizeof(header));
+			if (!stream) return Tools::ResultCode::FileReadError;
+			// hash値、古い評価関数ファイルに対して一致するとは限らないので、警告に変更する。
+			if (header != T::GetHashValue())
+				sync_cout << "info string Warning : nn.bin hash mismatch." << sync_endl;
+			return obj.ReadParameters(stream);
+		}
+
+		// 評価関数パラメータを書き込む（参照版）
+		template <typename T>
+		bool WriteParameters(std::ostream& stream, const T& obj) {
+			constexpr std::uint32_t header = T::GetHashValue();
+			stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+			return obj.WriteParameters(stream);
+		}
+
+	}  // namespace Detail
+
+	// テンポラリにパラメータを読み込み、共有メモリに配置する。
+	// 同じパラメータを持つ他プロセスが既に共有メモリを作成済みなら、そちらを参照する。
+	Tools::Result LoadAndShare(std::istream& stream) {
+		// テンポラリ領域にパラメータを読み込む
+		auto tmp = make_unique_large_page<NnueNetworks>();
+
+		std::uint32_t hash_value;
+		std::string architecture;
+		Tools::Result result = ReadHeader(stream, &hash_value, &architecture, nullptr);
+		if (result.is_not_ok()) return result;
+		if (hash_value != kHashValue) {
+			sync_cout << "info string Warning: NNUE hash mismatch: expected " << kHashValue
+				<< " got " << hash_value
+				<< " arch_in_file=" << architecture
+				<< " arch_expected=" << GetArchitectureString()
+				<< sync_endl;
+		}
+
+		result = Detail::ReadParameters<FeatureTransformer>(stream, tmp->feature_transformer);
+		if (result.is_not_ok()) {
+			sync_cout << "info string NNUE feature params read failed: " << result.to_string() << sync_endl;
+			return result;
+		}
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1 && !NNUE_SFNN_PROGRESS_EXTERNAL
+		result = Detail::ReadParameters<Progress::Parameters>(stream, tmp->progress);
+		if (result.is_not_ok()) {
+			sync_cout << "info string NNUE progress params read failed: " << result.to_string() << sync_endl;
+			return result;
+		}
+#endif
+		for (int i = 0; i < kLayerStacks; ++i) {
+			result = Detail::ReadParameters<Network>(stream, tmp->network[i]);
+			if (result.is_not_ok()) {
+				sync_cout << "info string NNUE network params read failed at stack " << i << ": " << result.to_string() << sync_endl;
+				return result;
+			}
+		}
+
+		if (!stream || stream.peek() != std::ios::traits_type::eof())
+			return Tools::ResultCode::FileCloseError;
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+		/*
+			📓 進行度係数を外部ファイルで差し替える
+
+			   既定では係数は nn.bin の中にある (上で読んだ Progress::Parameters)。
+			   LS_PROGRESS_COEFF が指定されていれば、その内容で上書きする。
+
+			   NAGISA_V3 のように、係数を progress.bin として nn.bin とは
+			   別に配布している評価関数のためのもの。
+			   ⚠ 共有メモリへ publish する前に差し替えること。publish 後は
+			     const 参照しか取れない。
+		*/
+		if (!load_external_progress_coefficients(*tmp))
+			return Tools::ResultCode::FileReadError;
+#endif
+
+		// 共有メモリに配置（同一ハッシュの共有メモリが既に存在すればそちらを参照）
+		shared_networks = SystemWideSharedConstant<NnueNetworks>(*tmp);
+
+		return Tools::ResultCode::Ok;
+	}
+
+	}  // namespace
+    // ヘッダを読み込む
+    Tools::Result ReadHeader(std::istream& stream,
+        std::uint32_t* hash_value, std::string* architecture, std::uint32_t* version_out) {
+        std::uint32_t version = 0, size = 0;
+        stream.read(reinterpret_cast<char*>(&version), sizeof(version));
+        stream.read(reinterpret_cast<char*>(hash_value), sizeof(*hash_value));
+        stream.read(reinterpret_cast<char*>(&size), sizeof(size));
+		if (!stream) return Tools::ResultCode::FileReadError;
+		if (version_out)
+			*version_out = version;
+        if (version != kVersion)
+			sync_cout << "info string NNUE header version mismatch: expected " << kVersion
+				<< " got " << version << " (continuing anyway)" << sync_endl;
+        architecture->resize(size);
+        stream.read(&(*architecture)[0], size);
+		return !stream.fail() ? Tools::ResultCode::Ok : Tools::ResultCode::FileReadError;
+    }
+
+    // ヘッダを書き込む
+    bool WriteHeader(std::ostream& stream,
+        std::uint32_t hash_value, const std::string& architecture) {
+        stream.write(reinterpret_cast<const char*>(&kVersion), sizeof(kVersion));
+        stream.write(reinterpret_cast<const char*>(&hash_value), sizeof(hash_value));
+        const std::uint32_t size = static_cast<std::uint32_t>(architecture.size());
+        stream.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        stream.write(architecture.data(), size);
+        return !stream.fail();
+    }
+
+    	// 評価関数パラメータを読み込む
+    	Tools::Result ReadParameters(std::istream& stream) {
+    		return LoadAndShare(stream);
+    	}
+    // 評価関数パラメータを書き込む
+    bool WriteParameters(std::ostream& stream) {
+        if (!WriteHeader(stream, kHashValue, GetArchitectureString())) return false;
+        if (!Detail::WriteParameters<FeatureTransformer>(stream, networks().feature_transformer)) return false;
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+        if (!Detail::WriteParameters<Progress::Parameters>(stream, networks().progress)) return false;
+#endif
+        for (int i = 0; i < kLayerStacks; ++i) {
+            if (!Detail::WriteParameters<Network>(stream, networks().network[i])) return false;
         }
+        return !stream.fail();
+    }
 
-        // 評価関数パラメータを読み込む
-        Tools::Result ReadParameters(std::istream& stream) {
-            std::uint32_t hash_value;
-            std::string architecture;
-			Tools::Result result = ReadHeader(stream, &hash_value, &architecture);
-            if (result.is_not_ok()) return result;
-            if (hash_value != kHashValue) return Tools::ResultCode::FileMismatch;
-			result = Detail::ReadParameters<FeatureTransformer>(stream, feature_transformer); if (result.is_not_ok()) return result;
-			result = Detail::ReadParameters<Network>(stream, network);             if (result.is_not_ok()) return result;
-            return (stream && stream.peek() == std::ios::traits_type::eof()) ? Tools::ResultCode::Ok : Tools::ResultCode::FileCloseError;
-        }
+    // 差分計算ができるなら進める
+    static void UpdateAccumulatorIfPossible(const Position& pos) {
+        networks().feature_transformer.UpdateAccumulatorIfPossible(pos);
+    }
 
-        // 評価関数パラメータを書き込む
-        bool WriteParameters(std::ostream& stream) {
-            if (!WriteHeader(stream, kHashValue, GetArchitectureString())) return false;
-            if (!Detail::WriteParameters<FeatureTransformer>(stream, feature_transformer)) return false;
-            if (!Detail::WriteParameters<Network>(stream, network)) return false;
-            return !stream.fail();
-        }
+#if defined(SFNNwoPSQT)
+    static_assert(NNUE_SFNN_HAND_BUCKETS == 1 || NNUE_SFNN_HAND_BUCKETS == 64
+        || NNUE_SFNN_HAND_BUCKETS == 256 || NNUE_SFNN_HAND_BUCKETS == 1024,
+        "unsupported NNUE_SFNN_HAND_BUCKETS");
+    static_assert(NNUE_SFNN_KING_BUCKETS == 1 || NNUE_SFNN_KING_BUCKETS == 9
+        || NNUE_SFNN_KING_BUCKETS == 81 || NNUE_SFNN_KING_BUCKETS == 441
+        || NNUE_SFNN_KING_BUCKETS == 841,
+        "unsupported NNUE_SFNN_KING_BUCKETS");
+    // 💡 相入玉バケット付き(progressNek)のときは、進行度N個 + 相入玉1個 なので
+    //    NNUE_SFNN_PROGRESS_BUCKETS は N+1 になる。判定はそれを差し引いて行う。
+    static constexpr int kProgressBucketsWithoutEk =
+        NNUE_SFNN_PROGRESS_BUCKETS - NNUE_SFNN_PROGRESS_ENTERING_KING;
+    static_assert(kProgressBucketsWithoutEk == 1 || kProgressBucketsWithoutEk == 2
+        || kProgressBucketsWithoutEk == 3 || kProgressBucketsWithoutEk == 4
+        || kProgressBucketsWithoutEk == 8 || kProgressBucketsWithoutEk == 16
+        || kProgressBucketsWithoutEk == 32,
+        "unsupported NNUE_SFNN_PROGRESS_BUCKETS");
+    static_assert(kLayerStacks == NNUE_SFNN_HAND_BUCKETS * NNUE_SFNN_KING_BUCKETS * NNUE_SFNN_PROGRESS_BUCKETS,
+        "LayerStacks must match the SFNN bucket product");
 
-        // 差分計算ができるなら進める
-        static void UpdateAccumulatorIfPossible(const Position& pos) {
-            feature_transformer->UpdateAccumulatorIfPossible(pos);
-        }
+    // レイヤースタックの選択。双方の玉の段に応じて9通りに分岐させる。
+    static int king3_by_king3_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        int f_rank = int(pos.square<KING>(stm)) % 9;
+        int e_rank = int(pos.square<KING>(~stm)) % 9;
 
-        // 評価値を計算する
-        static Value ComputeScore(const Position& pos, bool refresh = false) {
-            auto& accumulator = pos.state()->accumulator;
-            if (!refresh && accumulator.computed_score) {
-                return accumulator.score;
-            }
+        if (stm == BLACK)
+            e_rank = 8 - e_rank;
+        else
+            f_rank = 8 - f_rank;
 
-            alignas(kCacheLineSize) TransformedFeatureType
-                transformed_features[FeatureTransformer::kBufferSize];
-            feature_transformer->Transform(pos, transformed_features, refresh);
-            alignas(kCacheLineSize) char buffer[Network::kBufferSize];
-            const auto output = network->Propagate(transformed_features, buffer);
+        return (f_rank / 3) * 3 + e_rank / 3;
+    }
 
-            // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
-            // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。
+    // レイヤースタックの選択。双方の玉の段に応じて81通りに分岐させる。
+    static int king9_by_king9_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        const auto f_king = pos.square<KING>(stm);
+        const auto e_king = pos.square<KING>(~stm);
+        int f_rank = int(stm == BLACK ? rank_of(f_king) : rank_of(Inv(f_king)));
+        int e_rank = int(stm == BLACK ? rank_of(Inv(e_king)) : rank_of(e_king));
+        if (f_rank < 0) f_rank = 0;
+        if (f_rank > 8) f_rank = 8;
+        if (e_rank < 0) e_rank = 0;
+        if (e_rank > 8) e_rank = 8;
+        return f_rank * 9 + e_rank;
+    }
 
-            // この現象が起きても、対局時に秒固定などだとそこで探索が打ち切られるので、
-            // 1つ前のiterationのときの最善手がbestmoveとして指されるので見かけ上、
-            // 問題ない。このVALUE_MAX_EVALが返ってくるような状況は、ほぼ詰みの局面であり、
-            // そのような詰みの局面が出現するのは終盤で形勢に大差がついていることが多いので
-            // 勝敗にはあまり影響しない。
+    static int king21_single_bucket(Square sq) {
+        int rank = int(rank_of(sq));
+        int file = int(file_of(sq));
+        if (rank < 0) rank = 0;
+        if (rank > 8) rank = 8;
+        if (file < 0) file = 0;
+        if (file > 8) file = 8;
 
-            // しかし、教師生成時などdepth固定で探索するときに探索から戻ってこなくなるので
-            // そのスレッドの計算時間を無駄にする。またdepth固定対局でtime-outするようになる。
+        if (rank < 3) return 0;
+        if (rank < 6) return 1;
+        if (rank == 6) return 2;
+        return 3 + (rank - 7) * 9 + file;
+    }
 
-            auto score = static_cast<Value>(output[0] / FV_SCALE);
+    // レイヤースタックの選択。玉1つを21通りに分け、双方の玉で441通りに分岐させる。
+    static int king21_by_king21_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        const auto f_king = pos.square<KING>(stm);
+        const auto e_king = pos.square<KING>(~stm);
+        const auto f_sq = stm == BLACK ? f_king : Inv(f_king);
+        const auto e_sq = stm == BLACK ? Inv(e_king) : e_king;
+        return king21_single_bucket(f_sq) * 21 + king21_single_bucket(e_sq);
+    }
 
-            // 1) ここ、下手にclipすると学習時には影響があるような気もするが…。
-            // 2) accumulator.scoreは、差分計算の時に用いないので書き換えて問題ない。
-            score = Math::clamp(score, -VALUE_MAX_EVAL, VALUE_MAX_EVAL);
+    static int king29_single_bucket(Square sq) {
+        int rank = int(rank_of(sq));
+        int file = int(file_of(sq));
+        if (rank < 0) rank = 0;
+        if (rank > 8) rank = 8;
+        if (file < 0) file = 0;
+        if (file > 8) file = 8;
 
-            accumulator.score = score;
-            accumulator.computed_score = true;
+        if (rank < 3) return 0;
+        if (rank < 6) return 1;
+        return 2 + (rank - 6) * 9 + file;
+    }
+
+    // レイヤースタックの選択。玉1つを29通りに分け、双方の玉で841通りに分岐させる。
+    static int king29_by_king29_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        const auto f_king = pos.square<KING>(stm);
+        const auto e_king = pos.square<KING>(~stm);
+        const auto f_sq = stm == BLACK ? f_king : Inv(f_king);
+        const auto e_sq = stm == BLACK ? Inv(e_king) : e_king;
+        return king29_single_bucket(f_sq) * 29 + king29_single_bucket(e_sq);
+    }
+
+    static int hand64_single_bucket(Hand hand) {
+        const int score =
+              hand_count(hand, PAWN)
+            + (hand_count(hand, LANCE) + hand_count(hand, KNIGHT)) * 2
+            + (hand_count(hand, SILVER) + hand_count(hand, GOLD)) * 3
+            + (hand_count(hand, BISHOP) + hand_count(hand, ROOK)) * 5;
+
+        int bucket = (score + 3) / 4;
+        if (bucket < 0) bucket = 0;
+        if (bucket > 7) bucket = 7;
+        return bucket;
+    }
+
+    static int hand256_single_bucket(Hand hand) {
+        int bucket = 0;
+        if (hand_count(hand, PAWN) + hand_count(hand, LANCE) + hand_count(hand, KNIGHT) > 0)
+            bucket |= 1;
+        if (hand_count(hand, SILVER) + hand_count(hand, GOLD) > 0)
+            bucket |= 2;
+        if (hand_count(hand, BISHOP) > 0)
+            bucket |= 4;
+        if (hand_count(hand, ROOK) > 0)
+            bucket |= 8;
+        return bucket;
+    }
+
+    static int hand1024_single_bucket(Hand hand) {
+        int bucket = 0;
+        if (hand_count(hand, PAWN) > 0)
+            bucket |= 1;
+        if (hand_count(hand, LANCE) + hand_count(hand, KNIGHT) > 0)
+            bucket |= 2;
+        if (hand_count(hand, SILVER) + hand_count(hand, GOLD) > 0)
+            bucket |= 4;
+        if (hand_count(hand, BISHOP) > 0)
+            bucket |= 8;
+        if (hand_count(hand, ROOK) > 0)
+            bucket |= 16;
+        return bucket;
+    }
+
+    // 手番側/非手番側の手駒点を8段階ずつに分け、64通りに分岐させる。
+    static int hand64_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        return hand64_single_bucket(pos.hand_of(stm)) * 8
+            + hand64_single_bucket(pos.hand_of(~stm));
+    }
+
+    static int hand256_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        return hand256_single_bucket(pos.hand_of(stm)) * 16
+            + hand256_single_bucket(pos.hand_of(~stm));
+    }
+
+    static int hand1024_bucket(const Position& pos) {
+        const auto stm = pos.side_to_move();
+        return hand1024_single_bucket(pos.hand_of(stm)) * 32
+            + hand1024_single_bucket(pos.hand_of(~stm));
+    }
+
+    static int progress_bucket(const Position& pos) {
+#if NNUE_SFNN_PROGRESS_BUCKETS == 1
+        return 0;
+#elif NNUE_SFNN_PROGRESS_ENTERING_KING
+        // progress8kpabs のときは相入玉バケットを取り分けず、進行度だけで分類する。
+        // このとき最後の1バケットは使われない (本家 NAGISA_V3 と同じ挙動)。
+        if (!progress_entering_king_bucket)
+            return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS - 1);
+        return networks().progress.BucketIndexWithEnteringKing(pos, NNUE_SFNN_PROGRESS_BUCKETS);
+#else
+        return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS);
+#endif
+    }
+
+    static int stack_index_for_nnue(const Position& pos) {
+#if NNUE_SFNN_HAND_BUCKETS == 1 && NNUE_SFNN_KING_BUCKETS == 9 && NNUE_SFNN_PROGRESS_BUCKETS == 1
+        return king3_by_king3_bucket(pos);
+#else
+        int idx = 0;
+
+#if NNUE_SFNN_HAND_BUCKETS == 64
+        idx = hand64_bucket(pos);
+#elif NNUE_SFNN_HAND_BUCKETS == 256
+        idx = hand256_bucket(pos);
+#elif NNUE_SFNN_HAND_BUCKETS == 1024
+        idx = hand1024_bucket(pos);
+#endif
+
+#if NNUE_SFNN_KING_BUCKETS == 9
+        idx = idx * 9 + king3_by_king3_bucket(pos);
+#elif NNUE_SFNN_KING_BUCKETS == 81
+        idx = idx * 81 + king9_by_king9_bucket(pos);
+#elif NNUE_SFNN_KING_BUCKETS == 441
+        idx = idx * 441 + king21_by_king21_bucket(pos);
+#elif NNUE_SFNN_KING_BUCKETS == 841
+        idx = idx * 841 + king29_by_king29_bucket(pos);
+#endif
+
+#if NNUE_SFNN_PROGRESS_BUCKETS != 1
+        idx = idx * NNUE_SFNN_PROGRESS_BUCKETS + progress_bucket(pos);
+#endif
+
+        if (idx < 0) idx = 0;
+        if (idx >= kLayerStacks) idx = kLayerStacks - 1;
+        return idx;
+#endif
+    }
+#endif
+
+    // 評価値を計算する
+    static Value ComputeScore(const Position& pos, bool refresh = false) {
+        auto& accumulator = pos.state()->accumulator;
+        if (!refresh && accumulator.computed_score) {
             return accumulator.score;
         }
 
-    }  // namespace NNUE
+        alignas(kCacheLineSize) char buffer[Network::kBufferSize];
+#if defined(SFNNwoPSQT)
+        const auto bucket = stack_index_for_nnue(pos);
+#if defined(USE_AVX512) && defined(NNUE_HAS_SFNN_ACCUMULATOR_PROPAGATE)
+        networks().feature_transformer.EnsureAccumulator(pos, refresh);
+        const auto output = networks().network[bucket].PropagateFromAccumulator(
+            accumulator.accumulation, pos.side_to_move(), buffer);
+#else
+        alignas(kCacheLineSize) TransformedFeatureType
+            transformed_features[FeatureTransformer::kBufferSize];
+        networks().feature_transformer.Transform(pos, transformed_features, refresh);
+        const auto output = networks().network[bucket].Propagate(transformed_features, buffer);
+#endif
+#else
+        alignas(kCacheLineSize) TransformedFeatureType
+            transformed_features[FeatureTransformer::kBufferSize];
+        networks().feature_transformer.Transform(pos, transformed_features, refresh);
+        const auto output = networks().network[0].Propagate(transformed_features, buffer);
+#endif
+
+        // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
+        // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。
+
+        // この現象が起きても、対局時に秒固定などだとそこで探索が打ち切られるので、
+        // 1つ前のiterationのときの最善手がbestmoveとして指されるので見かけ上、
+        // 問題ない。このVALUE_MAX_EVALが返ってくるような状況は、ほぼ詰みの局面であり、
+        // そのような詰みの局面が出現するのは終盤で形勢に大差がついていることが多いので
+        // 勝敗にはあまり影響しない。
+
+        // しかし、教師生成時などdepth固定で探索するときに探索から戻ってこなくなるので
+        // そのスレッドの計算時間を無駄にする。またdepth固定対局でtime-outするようになる。
+
+        auto score = static_cast<Value>(output[0] / FV_SCALE);
+
+        // 1) ここ、下手にclipすると学習時には影響があるような気もするが…。
+        // 2) accumulator.scoreは、差分計算の時に用いないので書き換えて問題ない。
+        score = Math::clamp(score, -VALUE_MAX_EVAL, VALUE_MAX_EVAL);
+
+        accumulator.score = score;
+        accumulator.computed_score = true;
+        return accumulator.score;
+    }
+
+}  // namespace NNUE
 
 #if defined(USE_EVAL_HASH)
 
 // HashTableに評価値を保存するために利用するクラス
-    struct alignas(16) ScoreKeyValue {
+struct alignas(16) ScoreKeyValue {
 #if defined(USE_SSE2)
-        ScoreKeyValue() = default;
-        ScoreKeyValue(const ScoreKeyValue & other) {
-            static_assert(sizeof(ScoreKeyValue) == sizeof(__m128i),
-                "sizeof(ScoreKeyValue) should be equal to sizeof(__m128i)");
-            _mm_store_si128(&as_m128i, other.as_m128i);
-        }
-        ScoreKeyValue& operator=(const ScoreKeyValue & other) {
-            _mm_store_si128(&as_m128i, other.as_m128i);
-            return *this;
-        }
+    ScoreKeyValue() = default;
+    ScoreKeyValue(const ScoreKeyValue & other) {
+        static_assert(sizeof(ScoreKeyValue) == sizeof(__m128i),
+            "sizeof(ScoreKeyValue) should be equal to sizeof(__m128i)");
+        _mm_store_si128(&as_m128i, other.as_m128i);
+    }
+    ScoreKeyValue& operator=(const ScoreKeyValue & other) {
+        _mm_store_si128(&as_m128i, other.as_m128i);
+        return *this;
+    }
 #endif
 
-        // evaluate hashでatomicに操作できる必要があるのでそのための操作子
-        void encode() {
+    // evaluate hashでatomicに操作できる必要があるのでそのための操作子
+    void encode() {
 #if defined(USE_SSE2)
-            // ScoreKeyValue は atomic にコピーされるので key が合っていればデータも合っている。
+        // ScoreKeyValue は atomic にコピーされるので key が合っていればデータも合っている。
 #else
-            key ^= score;
+        key ^= score;
 #endif
-        }
-        // decode()はencode()の逆変換だが、xorなので逆変換も同じ変換。
-        void decode() { encode(); }
+    }
+    // decode()はencode()の逆変換だが、xorなので逆変換も同じ変換。
+    void decode() { encode(); }
 
-        union {
-            struct {
-                std::uint64_t key;
-                std::uint64_t score;
-            };
-#if defined(USE_SSE2)
-            __m128i as_m128i;
-#endif
+    union {
+        struct {
+            std::uint64_t key;
+            std::uint64_t score;
         };
+#if defined(USE_SSE2)
+        __m128i as_m128i;
+#endif
     };
+};
 
-    // evaluateしたものを保存しておくHashTable(俗にいうehash)
+// evaluateしたものを保存しておくHashTable(俗にいうehash)
 
-    struct EvaluateHashTable : HashTable<ScoreKeyValue> {};
+struct EvaluateHashTable : HashTable<ScoreKeyValue> {};
 
-    EvaluateHashTable g_evalTable;
-    void EvalHash_Resize(size_t mbSize) { g_evalTable.resize(mbSize); }
-    void EvalHash_Clear() { g_evalTable.clear(); };
+EvaluateHashTable g_evalTable;
+void EvalHash_Resize(size_t mbSize) { g_evalTable.resize(mbSize); }
+void EvalHash_Clear() { g_evalTable.clear(); };
 
-    // prefetchする関数も用意しておく。
-    void prefetch_evalhash(const Key key) {
-        constexpr auto mask = ~((u64)0x1f);
-        prefetch((void*)((u64)g_evalTable[key] & mask));
-    }
+// prefetchする関数も用意しておく。
+void prefetch_evalhash(const Key key) {
+    constexpr auto mask = ~((u64)0x1f);
+    prefetch((void*)((u64)g_evalTable[key] & mask));
+}
 #endif
 
-    // 評価関数ファイルを読み込む
-    // benchコマンドなどでOptionsを保存して復元するのでこのときEvalDirが変更されたことになって、
-    // 評価関数の再読込の必要があるというフラグを立てるため、この関数は2度呼び出されることがある。
-    void load_eval() {
-        NNUE::Initialize();
+// 評価関数ファイルを読み込む
+void load_eval() {
+    // 評価関数パラメーターを読み込み済みであるなら帰る。
+    if (eval_loaded)
+        return;
 
-#if defined(EVAL_LEARN)
-        if (!Options["SkipLoadingEval"])
-#endif
-        {
-            const std::string dir_name = Options["EvalDir"];
-#if !defined(__EMSCRIPTEN__)
-			const std::string file_name = NNUE::kFileName;
+    {
+        const std::string dir_name = Options["EvalDir"];
+    #if !defined(__EMSCRIPTEN__)
+		const std::string file_name = NNUE::kFileName;
 #else
-			// WASM
-			const std::string file_name = Options["EvalFile"];
-#endif
-            const Tools::Result result = [&] {
-                if (dir_name != "<internal>") {
-                    auto full_dir_name = Path::Combine(Directory::GetCurrentFolder(), dir_name);
-                    sync_cout << "info string EvalDirectory = " << full_dir_name << sync_endl;
+		// WASM
+        const std::string file_name = Options["EvalFile"];
+    #endif
+        const Tools::Result result = [&] {
+            if (dir_name != "<internal>") {
+                auto abs_eval_path = Path::Combine(Directory::GetBinaryFolder(), dir_name);
+                const std::string file_path = Path::Combine(abs_eval_path, file_name);
+                std::ifstream stream(file_path, std::ios::binary);
+                sync_cout << "info string loading eval file : " << file_path << sync_endl;
+				if (!stream.is_open())
+					return Tools::Result(Tools::ResultCode::FileNotFound);
 
-                    const std::string file_path = Path::Combine(dir_name, file_name);
-                    std::ifstream stream(file_path, std::ios::binary);
-                    sync_cout << "info string loading eval file : " << file_path << sync_endl;
-					if (!stream.is_open())
-						return Tools::Result(Tools::ResultCode::FileNotFound);
-
-                    return NNUE::ReadParameters(stream);
-                }
-                else {
-                    // C++ way to prepare a buffer for a memory stream
-                    class MemoryBuffer : public std::basic_streambuf<char> {
-                        public: MemoryBuffer(char* p, size_t n) {
-                            std::streambuf::setg(p, p, p + n);
-                            std::streambuf::setp(p, p + n);
-                        }
-                    };
-
-                    MemoryBuffer buffer(const_cast<char*>(reinterpret_cast<const char*>(gEmbeddedNNUEData)),
-                        size_t(gEmbeddedNNUESize));
-
-                    std::istream stream(&buffer);
-                    sync_cout << "info string loading eval file : <internal>" << sync_endl;
-
-                    return NNUE::ReadParameters(stream);
-                }
-            }();
-
-            //      ASSERT(result);
-
-            if (result.is_not_ok())
-            {
-                // 読み込みエラーのとき終了してくれないと困る。
-                sync_cout << "Error! : failed to read " << file_name << " : " << result.to_string() << sync_endl;
-                Tools::exit();
+                return NNUE::ReadParameters(stream);
             }
+            else {
+                // C++ way to prepare a buffer for a memory stream
+                class MemoryBuffer : public std::basic_streambuf<char> {
+                    public: MemoryBuffer(char* p, size_t n) {
+                        std::streambuf::setg(p, p, p + n);
+                        std::streambuf::setp(p, p + n);
+                    }
+                };
+
+			    const auto embedded = get_embedded(/* embeddedType */);
+
+                MemoryBuffer buffer(
+                              const_cast<char*>(reinterpret_cast<const char*>(embedded.data)),
+                              size_t(embedded.size));
+
+                std::istream stream(&buffer);
+                sync_cout << "info string loading eval file : <internal>" << sync_endl;
+
+                return NNUE::ReadParameters(stream);
+            }
+        }();
+
+        //      ASSERT(result);
+
+        if (result.is_not_ok())
+        {
+            // 読み込みエラーのとき終了してくれないと困る。
+            sync_cout << "Error! : failed to read " << file_name << " : " << result.to_string() << sync_endl;
+            Tools::exit();
         }
+
+		// 評価関数ファイルの読み込みが完了した。
+		eval_loaded = true;
     }
 
-    // 初期化
-    void init() {}
+}
 
-    // 評価関数。差分計算ではなく全計算する。
-    // Position::set()で一度だけ呼び出される。(以降は差分計算)
-    // 手番側から見た評価値を返すので注意。(他の評価関数とは設計がこの点において異なる)
-    // なので、この関数の最適化は頑張らない。
-    Value compute_eval(const Position& pos) {
-        return NNUE::ComputeScore(pos, true);
+
+// 評価関数。差分計算ではなく全計算する。
+// Position::set()で一度だけ呼び出される。(以降は差分計算)
+// 手番側から見た評価値を返すので注意。(他の評価関数とは設計がこの点において異なる)
+// なので、この関数の最適化は頑張らない。
+Value compute_eval(const Position& pos) {
+    return NNUE::ComputeScore(pos, true);
+}
+
+// 評価関数
+Value evaluate(const Position& pos) {
+    const auto& accumulator = pos.state()->accumulator;
+    if (accumulator.computed_score) {
+        return accumulator.score;
     }
-
-    // 評価関数
-    Value evaluate(const Position& pos) {
-        const auto& accumulator = pos.state()->accumulator;
-        if (accumulator.computed_score) {
-            return accumulator.score;
-        }
 
 #if defined(USE_GLOBAL_OPTIONS)
-        // GlobalOptionsでeval hashを用いない設定になっているなら
-        // eval hashへの照会をskipする。
-        if (!GlobalOptions.use_eval_hash) {
-            ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
-            return NNUE::ComputeScore(pos);
-        }
+    // GlobalOptionsでeval hashを用いない設定になっているなら
+    // eval hashへの照会をskipする。
+    if (!GlobalOptions.use_eval_hash) {
+        ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
+        return NNUE::ComputeScore(pos);
+    }
 #endif
 
 #if defined(USE_EVAL_HASH)
-        // evaluate hash tableにはあるかも。
-        const Key key = pos.state()->key();
-        ScoreKeyValue entry = *g_evalTable[key];
-        entry.decode();
-        if (entry.key == key) {
-            // あった！
-            return Value(entry.score);
-        }
+    // evaluate hash tableにはあるかも。
+    const Key key = pos.state()->key();
+    ScoreKeyValue entry = *g_evalTable[key];
+    entry.decode();
+    if (entry.key == key) {
+        // あった！
+        return Value(entry.score);
+    }
 #endif
 
-        Value score = NNUE::ComputeScore(pos);
+    Value score = NNUE::ComputeScore(pos);
 #if defined(USE_EVAL_HASH)
-        // せっかく計算したのでevaluate hash tableに保存しておく。
-        entry.key = key;
-        entry.score = score;
-        entry.encode();
-        *g_evalTable[key] = entry;
+    // せっかく計算したのでevaluate hash tableに保存しておく。
+    entry.key = key;
+    entry.score = score;
+    entry.encode();
+    *g_evalTable[key] = entry;
 #endif
 
-        return score;
-    }
+    return score;
+}
 
-    // 差分計算ができるなら進める
-    void evaluate_with_no_return(const Position& pos) {
-        NNUE::UpdateAccumulatorIfPossible(pos);
-    }
+// 差分計算ができるなら進める
+void evaluate_with_no_return(const Position& pos) {
+    NNUE::UpdateAccumulatorIfPossible(pos);
+}
 
-    // 現在の局面の評価値の内訳を表示する
-    void print_eval_stat(Position& /*pos*/) {
-        std::cout << "--- EVAL STAT: not implemented" << std::endl;
-    }
+// 現在の局面の評価値の内訳を表示する
+void print_eval_stat(Position& /*pos*/) {
+    std::cout << "--- EVAL STAT: not implemented" << std::endl;
+}
 
-}  // namespace Eval
+} // namespace Eval
+} // namespace YaneuraOu
 
 #endif  // defined(EVAL_NNUE)

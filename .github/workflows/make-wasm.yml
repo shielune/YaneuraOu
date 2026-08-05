@@ -3,37 +3,37 @@ name: Make CI (for WebAssembly)
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches:
-  #     - "**"
-  # pull_request:
-  #   branches:
-  #     - "**"
+#  push:
+#    branches:
+#      - "**"
+#  pull_request:
+#    branches:
+#      - "**"
 
 jobs:
   build-wasm:
-    # ubuntu-latest = ubuntu-20.04
+    # ubuntu-latest = ubuntu-22.04
     # https://docs.github.com/ja/actions/using-github-hosted-runners/about-github-hosted-runners
     # https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
         edition:
-          - halfkp
+          # - halfkp
           - halfkp.noeval
-          # - halfkpe9.noeval
-          # - halfkpvm.noeval
-          - k-p
+          - halfkpe9.noeval
+          - halfkpvm.noeval
+          # - k-p
           - k-p.noeval
-          # - material
-          # - material9
+          - material
+          - material9
           - yaneuraou-mate
           - tanuki-mate
 
     steps:
       - name: Checkout own repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
         with:
           path: main
 
@@ -45,7 +45,7 @@ jobs:
         run: |
           docker run --rm -v ${PWD}/main:/src emscripten/emsdk:3.1.43 node script/wasm_build.js ${{ matrix.edition }}
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: build-wasm_${{ github.run_number }}_${{ matrix.edition }}_${{ github.sha }}
-          path: ./main/build/**/**/*
+      # - uses: actions/upload-artifact@v7
+      #   with:
+      #     name: build-wasm_${{ github.run_number }}_${{ matrix.edition }}_${{ github.sha }}
+      #     path: ./main/build/**/**/*

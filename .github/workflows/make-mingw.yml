@@ -2,86 +2,57 @@
 name: Make CI (MinGW for Windows)
 
 on:
+  push:
+    tags:
+      - "v[0-9]*"
   workflow_dispatch:
-  # push:
-  #   branches:
-  #     - "**"
-  # pull_request:
-  #   branches:
-  #     - "**"
 
 jobs:
   build-mingw:
-    # ubuntu-latest = ubuntu-20.04
+    # ubuntu-latest = ubuntu-22.04
     # https://docs.github.com/ja/actions/using-github-hosted-runners/about-github-hosted-runners
     # https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     strategy:
+      # 1つの archcpu が落ちても残りの組み合わせは見たい
+      # (どこまで通るのかが分からなくなるため)。
+      fail-fast: false
       matrix:
+        # このフォークが配布している構成に揃えている (WASM 側の
+        # build-wasm.yml と同じ 6 エディション)。upstream の KPPT /
+        # KPP_KKPT / MATERIAL / TANUKI_MATE / USER_ENGINE は配布物に
+        # 含めていないので、ここでもビルドしない。
         edition:
+          - YANEURAOU_ENGINE_NNUE_KP256
+          - YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
           - YANEURAOU_ENGINE_NNUE
-          - YANEURAOU_ENGINE_KPPT
-          - YANEURAOU_ENGINE_KPP_KKPT
-          - YANEURAOU_ENGINE_MATERIAL
+          - YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+          - YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
           - YANEURAOU_MATE_ENGINE
-          - TANUKI_MATE_ENGINE
-          - USER_ENGINE
         compiler:
           - x86_64-w64-mingw32-g++-posix
-          - i686-w64-mingw32-g++-posix
+          # - i686-w64-mingw32-g++-posix
         target:
-          - "normal,tournament"
-          - evallearn
+          - tournament
+        # 配布は 64bit のみ。上から順に新しい CPU 向けで、AVX2 が
+        # 「とりあえずこれ」の既定。SSE42 は AVX 非対応機向けの保険。
+        # AVXVNNI は入れられない: -march=alderlake を ubuntu-22.04 の MinGW が
+        # 受け付けない ("bad value (‘alderlake’) for ‘-march=’ switch")。
+        # ZEN3 (-march=znver3) の方は通る。
         archcpu:
-          - "AVX512VNNI,AVX512"
-          - "AVX2,SSE42,SSE2"
-          - "SSE41,SSSE3,OTHER"
-          - "ZEN1,ZEN2"
-          - "ZEN3,AVXVNNI"
-          - "NO_SSE"
-        exclude:
-          # NNUEの教師生成/機械学習ビルドにはBLASが必要だが、現状はUbuntuのMinGWでOpenBLASを扱えない
-          # NNUE's machine learning build requires BLAS, but currently Ubuntu's MinGW cannot handle OpenBLAS
-          - edition: YANEURAOU_ENGINE_NNUE
-            target: evallearn
-          - edition: YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32
-            target: evallearn
-          - edition: YANEURAOU_ENGINE_NNUE_HALFKPE9
-            target: evallearn
-          - edition: YANEURAOU_ENGINE_NNUE_KP256
-            target: evallearn
-          # 以下のエディションには機械学習の実装が存在しない
-          # There is no machine learning implementation for the following editions
-          - edition: YANEURAOU_MATE_ENGINE
-            target: evallearn
-          - edition: TANUKI_MATE_ENGINE
-            target: evallearn
-          - edition: USER_ENGINE
-            target: evallearn
-          # 32bit compiler x 64bit archcpu
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "AVX512VNNI,AVX512"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "AVX2,SSE42,SSE2"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "SSE41,SSSE3,OTHER"
-          - compiler: i686-w64-mingw32-g++-posix
-            archcpu: "ZEN1,ZEN2"
-          # 64bit compiler x 32bit archcpu
-          - compiler: x86_64-w64-mingw32-g++-posix
-            archcpu: NO_SSE
-          # Ubuntu-20.04 MinGW は archcpu ZEN3,AVXVNNI のサポートを行わない
-          # ubuntu-20.04 MinGW will not support the archcpu ZEN3,AVXVNNI
-          # `-march=cascadelake`: LLVM8, GCC9 support (AVX512VNNI)
-          # `-march=znver2`: LLVM9, GCC9 support
-          # `-march=alderlake` : LLVM12, GCC11 support (AVX-VNNI)
-          # `-march=znver3`: LLVM12 support
-          - archcpu: "ZEN3,AVXVNNI"
+          - AVX512VNNI
+          - AVX512
+          - AVX2
+          - SSE42
+          - ZEN2
+          - ZEN3
+        # 32bit (i686) は配布しないので、それ向けの除外は不要になった。
+        # AVXVNNI (-march=alderlake) は ubuntu-22.04 の MinGW では通らない。
 
     steps:
       - name: Checkout own repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
         with:
           path: main
 
@@ -93,9 +64,93 @@ jobs:
           sudo apt install build-essential mingw-w64
 
       - name: make
-        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }}
+        # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
+        # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
+        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3"
 
-      # - uses: actions/upload-artifact@v4
-      #   with:
-      #     name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
-      #     path: ./main/build/**/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
+          path: ./main/build/**/*
+
+  release-mingw:
+    needs: build-mingw
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download every build artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-mingw_*
+          path: download/
+
+      # The matrix produces one artifact per (edition, archcpu) pair, each
+      # holding a single .exe. Ship one tarball per engine instead, so a user
+      # picks their engine and gets every CPU target in it.
+      #
+      # Names follow the WASM packages (yaneuraou-<platform>-<network>), not
+      # mingw_gcc.sh's YaneuraOu_NNUE_* form: side by side in the release the
+      # two styles looked unrelated, and the bare "NNUE" gave no hint that it
+      # is the halfkp256 network.
+      - name: Repack one tarball per engine
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p stage dist
+
+          network_of() {
+            case "$1" in
+              YaneuraOu_NNUE_KP256)      echo kp256 ;;
+              YaneuraOu_NNUE_HalfKP128)  echo halfkp128 ;;
+              YaneuraOu_NNUE_HalfKP768)  echo halfkp768 ;;
+              YaneuraOu_SFNN_HalfKA1024) echo halfka1024 ;;
+              YaneuraOu_MATE)            echo mate ;;
+              # mingw_gcc.sh calls the standard network plain "NNUE"; it is
+              # halfkp256, so spell that out rather than shipping a nameless archive.
+              YaneuraOu_NNUE)            echo halfkp256 ;;
+              *)                         echo "UNMAPPED:$1" ;;
+            esac
+          }
+
+          find download -name '*.exe' -print0 | while IFS= read -r -d '' exe; do
+            base="$(basename "$exe")"
+            # <FileStr>-windows-<compiler>-<target>-<archcpu>.exe
+            network="$(network_of "${base%%-windows-*}")"
+            case "$network" in
+              UNMAPPED:*) echo "no network name for ${network#UNMAPPED:}" >&2; exit 1 ;;
+            esac
+            mkdir -p "stage/${network}"
+            # Inside the archive, name each binary after its CPU target only.
+            cp "$exe" "stage/${network}/yaneuraou-windows-${network}-${base##*-}"
+          done
+
+          # .tar.gz rather than .zip, to match the WASM packages in the same
+          # release. Windows 11 unpacks these natively; older Windows needs
+          # 7-Zip or similar.
+          for d in stage/*/; do
+            network="$(basename "$d")"
+            tar czf "dist/yaneuraou-windows-${network}-v${VERSION}.tar.gz" -C "$d" .
+          done
+          ls -lh dist/
+
+      # Same tag as build-wasm.yml, so these land on the release that
+      # workflow creates. Only attach files here — setting name/body would
+      # clobber the generated WASM release notes, and whichever job finished
+      # last would win.
+      - name: Attach the tarballs to the release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: dist/*.tar.gz

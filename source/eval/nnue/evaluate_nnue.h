@@ -1,8 +1,8 @@
 ﻿// header used in NNUE evaluation function
 // NNUE評価関数で用いるheader
 
-#ifndef NNUE_EVALUATE_NNUE_H_INCLUDED
-#define NNUE_EVALUATE_NNUE_H_INCLUDED
+#ifndef CLASSIC_NNUE_EVALUATE_NNUE_H_INCLUDED
+#define CLASSIC_NNUE_EVALUATE_NNUE_H_INCLUDED
 
 #include "../../config.h"
 
@@ -10,31 +10,160 @@
 
 #include "nnue_feature_transformer.h"
 #include "nnue_architecture.h"
-//#include "../../misc.h"
+#include "../../misc.h"
 #include "../../memory.h"
+#include "../../shm.h"
 
-// 評価関数のソースコードへの埋め込みをする時は、EVAL_EMBEDDINGをdefineして、
-// ⇓この2つのシンボルを正しく定義するembedded_nnue.cppを書けば良い。
-#if defined(EVAL_EMBEDDING)
-	extern const char*  gEmbeddedNNUEData;
-	extern const size_t gEmbeddedNNUESize;
-#else
-	const char   gEmbeddedNNUEData[1] = {0x0};
-	const size_t gEmbeddedNNUESize = 1;
+#if defined(SFNNwoPSQT)
+#define NNUE_SFNN_KING_BUCKET_TYPE_NONE 0
+#define NNUE_SFNN_KING_BUCKET_TYPE_K3K3 1
+#define NNUE_SFNN_KING_BUCKET_TYPE_K9K9 2
+#define NNUE_SFNN_KING_BUCKET_TYPE_K21K21 3
+#define NNUE_SFNN_KING_BUCKET_TYPE_K29K29 4
+#define NNUE_SFNN_KING_BUCKET_TYPE_K9K9Z 5
+#define NNUE_SFNN_KING_BUCKET_TYPE_K13K13Z 6
+
+#define NNUE_SFNN_HAND_BUCKET_TYPE_NONE 0
+#define NNUE_SFNN_HAND_BUCKET_TYPE_HAND4 1
+#define NNUE_SFNN_HAND_BUCKET_TYPE_HAND16 2
+#define NNUE_SFNN_HAND_BUCKET_TYPE_HAND64 3
+#define NNUE_SFNN_HAND_BUCKET_TYPE_HAND64Z 4
+#define NNUE_SFNN_HAND_BUCKET_TYPE_HAND256 5
+#define NNUE_SFNN_HAND_BUCKET_TYPE_HAND1024 6
+
+#ifndef NNUE_SFNN_HAND_BUCKETS
+#define NNUE_SFNN_HAND_BUCKETS 1
 #endif
+#ifndef NNUE_SFNN_HAND_BUCKET_TYPE
+#if NNUE_SFNN_HAND_BUCKETS == 1
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_NONE
+#elif NNUE_SFNN_HAND_BUCKETS == 4
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_HAND4
+#elif NNUE_SFNN_HAND_BUCKETS == 16
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_HAND16
+#elif NNUE_SFNN_HAND_BUCKETS == 64
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_HAND64
+#elif NNUE_SFNN_HAND_BUCKETS == 256
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_HAND256
+#elif NNUE_SFNN_HAND_BUCKETS == 1024
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_HAND1024
+#else
+#define NNUE_SFNN_HAND_BUCKET_TYPE NNUE_SFNN_HAND_BUCKET_TYPE_NONE
+#endif
+#endif
+#ifndef NNUE_SFNN_KING_BUCKETS
+#define NNUE_SFNN_KING_BUCKETS 9
+#endif
+#ifndef NNUE_SFNN_KING_BUCKET_TYPE
+#if NNUE_SFNN_KING_BUCKETS == 9
+#define NNUE_SFNN_KING_BUCKET_TYPE NNUE_SFNN_KING_BUCKET_TYPE_K3K3
+#elif NNUE_SFNN_KING_BUCKETS == 81
+#define NNUE_SFNN_KING_BUCKET_TYPE NNUE_SFNN_KING_BUCKET_TYPE_K9K9
+#elif NNUE_SFNN_KING_BUCKETS == 169
+#define NNUE_SFNN_KING_BUCKET_TYPE NNUE_SFNN_KING_BUCKET_TYPE_K13K13Z
+#elif NNUE_SFNN_KING_BUCKETS == 441
+#define NNUE_SFNN_KING_BUCKET_TYPE NNUE_SFNN_KING_BUCKET_TYPE_K21K21
+#elif NNUE_SFNN_KING_BUCKETS == 841
+#define NNUE_SFNN_KING_BUCKET_TYPE NNUE_SFNN_KING_BUCKET_TYPE_K29K29
+#else
+#define NNUE_SFNN_KING_BUCKET_TYPE NNUE_SFNN_KING_BUCKET_TYPE_NONE
+#endif
+#endif
+#ifndef NNUE_SFNN_PROGRESS_BUCKETS
+#define NNUE_SFNN_PROGRESS_BUCKETS 1
+#endif
+#endif
+
+namespace YaneuraOu {
+class Position;
 
 namespace Eval::NNUE {
 
+	#define EvalFileDefaultName "nn.bin"
+
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+namespace Progress {
+
+	// SFNNのLayerStack選択に使う進行度計算パラメーター。
+	// nn.bin内ではFeatureTransformerの直後にこのセクションを置く。
+	struct Parameters {
+		static constexpr int kProgressValueCount = 256;
+		static constexpr int kWeightCount = int(SQ_NB) * int(Eval::fe_end);
+
+		static constexpr std::uint32_t GetHashValue() {
+			return 0x6f50524fu; // "oPRO" : NNUE progress parameter section
+		}
+
+		Tools::Result ReadParameters(std::istream& stream);
+		bool WriteParameters(std::ostream& stream) const;
+
+		int Value0To255(const Position& pos) const;
+		int BucketIndex(const Position& pos, int bucket_count) const;
+
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+		// 最後の1バケットを相入玉専用に割り当てる版。
+		// 💡 NAGISA_V3 の progress8ek がこれ (0〜7=進行度, 8=相入玉)。
+		//    NAGISA_V3 の既定は progress8kpabs (進行度のみ) なので、
+		//    どちらを使うかは LS_BUCKET_MODE で切り替える。
+		int BucketIndexWithEnteringKing(const Position& pos, int bucket_count) const;
+#endif
+
+		// 進行度係数を外部ファイル(progress.bin)から読み込む。
+		// 💡 形式は double[SQ_NB][fe_end] で bias を持たない。
+		//     nn.bin に埋め込まれた係数を上書きする形で使う。
+		bool ReadExternalCoefficients(std::istream& stream);
+
+		std::int32_t bias_q16_ = 0;
+		std::int32_t weights_q16_[SQ_NB][Eval::fe_end] = {};
+	};
+
+#if NNUE_SFNN_PROGRESS_ENTERING_KING
+	// 双方の玉が入玉している(に近い)局面か。
+	bool IsMutualEnteringKing(const Position& pos);
+#endif
+
+} // namespace Progress
+#endif
+
 	// Hash value of evaluation function structure
 	// 評価関数の構造のハッシュ値
+#if defined(SFNNwoPSQT)
+	constexpr std::uint32_t kSfnnBaseHashValue = 0x3c203b32u;
+#if NNUE_SFNN_PROGRESS_BUCKETS != 1 && !NNUE_SFNN_PROGRESS_EXTERNAL
+	// 💡 nn.bin 内に進行度セクションを持つ場合だけ、hashにそれを混ぜる。
+	//    外部ファイルから読む場合の nn.bin は進行度セクションを持たないので混ぜない。
+	constexpr std::uint32_t kHashValue =
+	    kSfnnBaseHashValue ^ Progress::Parameters::GetHashValue();
+#else
+	constexpr std::uint32_t kHashValue = kSfnnBaseHashValue;
+#endif
+	constexpr int kLayerStacks = LayerStacks;
+#else
 	constexpr std::uint32_t kHashValue =
 	    FeatureTransformer::GetHashValue() ^ Network::GetHashValue();
+	constexpr int kLayerStacks = 1;
+#endif
 
-	// 入力特徴量変換器
-	extern LargePagePtr<FeatureTransformer> feature_transformer;
+	// NNUE評価関数パラメーターを格納する統合構造体。
+	// 全メンバーが生配列で構成されており trivially copyable であるため、
+	// プロセス間共有メモリに直接配置できる。
+	struct NnueNetworks {
+		FeatureTransformer feature_transformer;
+#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+		Progress::Parameters progress;
+#endif
+		Network network[kLayerStacks];
+	};
+	static_assert(std::is_trivially_copyable_v<NnueNetworks>,
+		"NnueNetworks must be trivially copyable for shared memory support");
 
-	// 評価関数
-	extern AlignedPtr<Network> network;
+	// NNUE評価関数パラメーター（共有メモリまたはローカルメモリ上に配置）
+	extern SystemWideSharedConstant<NnueNetworks> shared_networks;
+
+	// 共有メモリ上のNnueNetworksへのconst参照を返すヘルパー。
+	// 評価関数の呼び出しで毎回使われるので、インライン化する。
+	inline const NnueNetworks& networks() { return *shared_networks; }
+
 
 	// 評価関数ファイル名
 	extern const char* const kFileName;
@@ -44,7 +173,7 @@ namespace Eval::NNUE {
 
 	// ヘッダを読み込む
 	Tools::Result ReadHeader(std::istream& stream,
-	    std::uint32_t* hash_value, std::string* architecture);
+	    std::uint32_t* hash_value, std::string* architecture, std::uint32_t* version_out = nullptr);
 
 	// ヘッダを書き込む
 	bool WriteHeader(std::ostream& stream,
@@ -56,7 +185,18 @@ namespace Eval::NNUE {
 	// 評価関数パラメータを書き込む
 	bool WriteParameters(std::ostream& stream);
 
-}  // namespace Eval::NNUE
+} // namespace Eval::NNUE
+} // namespace YaneuraOu
+
+// NnueNetworks のコンテンツハッシュ。共有メモリの名前に使われる。
+// 同一の評価関数パラメーターを持つプロセス同士で自動的にメモリが共有される。
+template<>
+struct std::hash<YaneuraOu::Eval::NNUE::NnueNetworks> {
+	std::size_t operator()(const YaneuraOu::Eval::NNUE::NnueNetworks& n) const noexcept {
+		return static_cast<std::size_t>(
+			YaneuraOu::hash_bytes(reinterpret_cast<const char*>(&n), sizeof(n)));
+	}
+};
 
 #endif  // defined(EVAL_NNUE)
 

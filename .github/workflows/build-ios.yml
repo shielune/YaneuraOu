@@ -30,7 +30,7 @@ jobs:
             name: iossim-arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build static library (${{ matrix.engine.name }}, ${{ matrix.slice.name }})
         run: |
@@ -48,7 +48,7 @@ jobs:
           ls -lh libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
           lipo -info libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}
           path: source/libyaneuraou-${{ matrix.engine.name }}-${{ matrix.slice.name }}.a
@@ -64,13 +64,13 @@ jobs:
 
     steps:
       - name: Download device slice
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: libyaneuraou-${{ matrix.engine }}-ios-arm64
           path: ios-arm64/
 
       - name: Download simulator slice
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: libyaneuraou-${{ matrix.engine }}-iossim-arm64
           path: iossim-arm64/
@@ -83,7 +83,7 @@ jobs:
             -output yaneuraou-${{ matrix.engine }}.xcframework
           ls -la yaneuraou-${{ matrix.engine }}.xcframework/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: yaneuraou-${{ matrix.engine }}-xcframework
           path: yaneuraou-${{ matrix.engine }}.xcframework/**
@@ -97,7 +97,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Extract version from tag
         id: version
@@ -107,13 +107,13 @@ jobs:
           echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Download all .a slices
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: libyaneuraou-*-ios*-arm64
           path: download-slices/
 
       - name: Download all xcframeworks
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: yaneuraou-*-xcframework
           path: download-xcframeworks/
@@ -133,7 +133,7 @@ jobs:
           tar czf "yaneuraou-ios-v${{ steps.version.outputs.version }}.tar.gz" -C stage .
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "yaneuraou-ios ${{ steps.version.outputs.version }}"
