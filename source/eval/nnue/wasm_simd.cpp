@@ -86,10 +86,35 @@ void affine(const int8_t A[m][n_stride], const uint8_t x[n], const int32_t b[m],
   }
 }
 
-// Explicit instantiation
+/*
+	📓 明示的インスタンス化
+
+	   この関数は template だが定義がこの .cpp にしか無いので、
+	   使う層のサイズの組を here で実体化しておかないとリンクが通らない。
+	   エディションを増やしたときに
+	     undefined symbol: emscripten_wasm_simd::affine<n, m, stride>
+	   で落ちたら、そのサイズをここに足すこと。
+	   (通常のNNUEは 入力→L1→L2→出力 の3層ぶんが要る)
+*/
+
+// HalfKP_256x2_32_32 (標準NNUE / 水匠5, hao)
 template void affine< 512, 32,  512>(const int8_t A[32][ 512], const uint8_t x[ 512], const int32_t b[32], int32_t y[32]);
 template void affine<  32, 32,   32>(const int8_t A[32][  32], const uint8_t x[  32], const int32_t b[32], int32_t y[32]);
 template void affine<  32,  1,   32>(const int8_t A[ 1][  32], const uint8_t x[  32], const int32_t b[ 1], int32_t y[ 1]);
+
+// HalfKP_128x2_32_32
+// 💡 L1以降は 256x2 版と同じ形なので、入力層のぶんだけ足せばよい。
+template void affine< 256, 32,  256>(const int8_t A[32][ 256], const uint8_t x[ 256], const int32_t b[32], int32_t y[32]);
+
+// HalfKP_768x2_16_64 (AobaNNUE互換)
+template void affine<1536, 16, 1536>(const int8_t A[16][1536], const uint8_t x[1536], const int32_t b[16], int32_t y[16]);
+template void affine<  16, 64,   32>(const int8_t A[64][  32], const uint8_t x[  32], const int32_t b[64], int32_t y[64]);
+template void affine<  64,  1,   64>(const int8_t A[ 1][  64], const uint8_t x[  64], const int32_t b[ 1], int32_t y[ 1]);
+
+// SFNN HalfKA_hm2_1024x2_15_64 (NAGISA_V3互換)
+// 💡 L1は 15 ではなく 16 で実体化される (padding後のサイズ)。
+template void affine<1024, 16, 1024>(const int8_t A[16][1024], const uint8_t x[1024], const int32_t b[16], int32_t y[16]);
+template void affine<  30, 64,   32>(const int8_t A[64][  32], const uint8_t x[  32], const int32_t b[64], int32_t y[64]);
 
 } // namespace emscripten_wasm_simd
 #endif

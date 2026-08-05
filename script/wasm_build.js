@@ -10,10 +10,17 @@ const arch = execSync('uname -m').toString().trim();
 const version = execSync('em++ --version').toString().match(/(\d+\.\d+\.\d+)/)[1]
 const pkgobjs = [
   {
-    name: "halfkp",
+    name: "halfkp256",
     edition: "YANEURAOU_ENGINE_NNUE",
-    exportname: "YaneuraOu_HalfKP",
+    exportname: "YaneuraOu_HalfKP256",
     extra: "ENGINE_NAME=Suisho5+YaneuraOu EVAL_EMBEDDING=ON EM_INITIAL_MEMORY_SIZE=167772160 EXTRA_CPPFLAGS='-DENGINE_OPTIONS=\\\"\"option=name=FV_SCALE=type=spin=default=24=min=1=max=128\\\"\"'",
+    evalfile: true,
+  },
+  {
+    name: "halfkp768.noeval",
+    edition: "YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64",
+    exportname: "YaneuraOu_HalfKP768_noeval",
+    extra: "EM_INITIAL_MEMORY_SIZE=268435456",
     evalfile: true,
   },
   {
@@ -24,9 +31,9 @@ const pkgobjs = [
     evalfile: true,
   },
   {
-    name: "halfkp.noeval",
+    name: "halfkp256.noeval",
     edition: "YANEURAOU_ENGINE_NNUE",
-    exportname: "YaneuraOu_HalfKP_noeval",
+    exportname: "YaneuraOu_HalfKP256_noeval",
     extra: "EM_INITIAL_MEMORY_SIZE=167772160",
     evalfile: true,
   },
@@ -63,6 +70,15 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_MATERIAL",
     exportname: "YaneuraOu_Material9",
     extra: "MATERIAL_LEVEL=9 EM_INITIAL_MEMORY_SIZE=402653184",
+    evalfile: false,
+  },
+  {
+    name: "mobility",
+    // KIKI edition embeds the 164-dim learned linear weights via
+    // source/eval/kiki/mobility_weights_embedded.cpp — no external nn.bin.
+    edition: "YANEURAOU_ENGINE_KIKI",
+    exportname: "YaneuraOu_Mobility",
+    extra: "EM_INITIAL_MEMORY_SIZE=92274688",
     evalfile: false,
   },
   {
@@ -201,7 +217,7 @@ for(const pkgobj of pkglist) {
   // embedded_nnue setup (shared between variants — only touches
   // source/eval/nnue/embedded_nnue.cpp which is the same for both builds)
   switch(pkgobj.name) {
-    case "halfkp":
+    case "halfkp256":
       if (!fs.existsSync(".dl/suisho5_20211123.halfkp.nnue.cpp.gz")) {
         execSync("curl --create-dirs -RLo .dl/suisho5_20211123.halfkp.nnue.cpp.gz https://github.com/mizar/YaneuraOu/releases/download/resource/suisho5_20211123.halfkp.nnue.cpp.gz");
       }

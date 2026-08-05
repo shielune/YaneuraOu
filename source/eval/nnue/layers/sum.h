@@ -1,7 +1,7 @@
 ﻿// NNUE評価関数の層Sumの定義
 
-#ifndef _NNUE_LAYERS_SUM_H_
-#define _NNUE_LAYERS_SUM_H_
+#ifndef CLASSIC_NNUE_LAYERS_SUM_H
+#define CLASSIC_NNUE_LAYERS_SUM_H
 
 #include "../../../config.h"
 
@@ -9,11 +9,8 @@
 
 #include "../nnue_common.h"
 
-namespace Eval {
-
-namespace NNUE {
-
-namespace Layers {
+namespace YaneuraOu {
+namespace Eval::NNUE::Layers {
 
 // 複数の層の出力の和を取る層
 template <typename FirstPreviousLayer, typename... RemainingPreviousLayers>
@@ -89,9 +86,6 @@ class Sum : public Sum<RemainingPreviousLayers...> {
     return Head::GetStructureString() + "," + Tail::GetSummandsString();
   }
 
-  // 学習用クラスをfriendにする
-  friend class Trainer<Sum>;
-
   // この層の直前の層
   FirstPreviousLayer previous_layer_;
 };
@@ -148,18 +142,12 @@ class Sum<PreviousLayer> {
     return PreviousLayer::GetStructureString();
   }
 
-  // 学習用クラスをfriendにする
-  friend class Trainer<Sum>;
-
   // この層の直前の層
   PreviousLayer previous_layer_;
 };
 
-}  // namespace Layers
-
-}  // namespace NNUE
-
-}  // namespace Eval
+} // namespace Layers::NNUE::Eval
+} // namespace YaneuraOu
 
 #endif  // defined(EVAL_NNUE)
 

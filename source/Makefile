@@ -2,7 +2,6 @@
 # === ビルドターゲット (build target) ===
 
 # normal     : 通常使用版(配布用の実行ファイルはこちら)
-# evallearn  : 教師局面からの学習用
 # tournament : 大会で使う用(通常版よりややEloが高いが使える機能に制限がある)
 
 # === ビルドオプション (build options) ===
@@ -15,10 +14,11 @@
 # YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32 : NNUE型評価関数(halfkp_1024x2-8-32)
 # YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_64 : NNUE型評価関数(halfkp_1024x2-8-64)
 # YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32 : NNUE型評価関数(halfkp_vm_256x2-32-32)
+# YANEURAOU_ENGINE_SFNN1536 : SFNN without PSQT 1536 (== YANEURAOU_ENGINE_SFNN_halfkahm2_1536_15_32_k3k3)
 # // ⇨ 上記以外のアーキテクチャのNNUE評価関数用のやねうら王をビルドしたい時は、
 # //   やねうら王のビルド手順 - やねうら王 Wiki
 # //   https://github.com/yaneurao/YaneuraOu/wiki/%E3%82%84%E3%81%AD%E3%81%86%E3%82%89%E7%8E%8B%E3%81%AE%E3%83%93%E3%83%AB%E3%83%89%E6%89%8B%E9%A0%86
-# // の「NNUEの任意アーキテクチャのビルドについて」をご覧ください。
+# // の「NNUEの任意アーキテクチャのビルドについて」と「SFNNの任意アーキテクチャのビルドについて」をご覧ください。
 # YANEURAOU_ENGINE_KPPT          : KPPT型評価関数
 # YANEURAOU_ENGINE_KPP_KKPT      : KPP_KKPT型評価関数
 # YANEURAOU_ENGINE_MATERIAL      : 駒得のみの評価関数(複数変種あり。MATERIAL_LEVELで選択できる)
@@ -37,6 +37,8 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_64
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_SFNN1536
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_SFNN_halfkahm2_1536_15_32_k3k3
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPP_KKPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIAL
@@ -45,11 +47,6 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_MATE_ENGINE
 #YANEURAOU_EDITION = USER_ENGINE
 
-# やねうら王のcluster機能を使いたいなら、これもdefineする。(define if you want to use YO-cluster)
-YO_CLUSTER = OFF
-#YO_CLUSTER = ON
-
-
 # ターゲットCPU (target cpu)
 
 # 利用できるCPU拡張命令を指定する。
@@ -57,7 +54,9 @@ YO_CLUSTER = OFF
 # AMDのRyzen(Zen/Zen2)はZEN1/ZEN2を選択するとBMI2命令が使わずに速くなる。(10%程度高速化)
 # Ryzen Zen3シリーズはZEN3を選択。(clang/llvm 13.0.0以降、gcc 11.2以降)
 #
-# ARM系はGraviton2ならGRAVITON2、これ以外ならOTHERを指定する。
+# ARM系は汎用ARMv8ならARMV8、dot product対応ならARMV8_DOTPRODを指定する。
+# Windows ARM64の汎用targetとしてWINARM64も指定できる。WINARM64はARMV8と同等。
+# AWS Graviton2ならGRAVITON2を指定する。
 # Windows x86(32bit環境)用はNO_SSEを指定する。
 #
 # AVX-512対応(サーバー向けSkylake以降)ならAVX512を指定する。
@@ -81,8 +80,12 @@ TARGET_CPU = AVX2
 #TARGET_CPU = ZEN1
 #TARGET_CPU = ZEN2
 #TARGET_CPU = ZEN3
+#TARGET_CPU = ZEN3AVX512VNNI
 # -- ARMとか
 #TARGET_CPU = OTHER
+#TARGET_CPU = WINARM64
+#TARGET_CPU = ARMV8
+#TARGET_CPU = ARMV8_DOTPROD
 #TARGET_CPU = GRAVITON2
 #TARGET_CPU = WASM
 # -- macOS for Intel
@@ -106,6 +109,19 @@ COMPILER = clang++
 # Python
 # ※ NNUEの未知なarchitectureの時にarchitecture headerを動的に生成するのに用いる。
 PYTHON = python
+
+# YANEURAOU_ENGINE_ 以降を architecture 名として扱う。
+# NNUE_ prefix は任意で、SFNN_* もNNUE系のarchitectureとして解釈する。
+ENGINE_ARCH       := $(patsubst YANEURAOU_ENGINE_%,%,$(YANEURAOU_EDITION))
+ENGINE_ARCH_UPPER := $(shell printf '%s' '$(ENGINE_ARCH)' | tr '[:lower:]' '[:upper:]')
+NNUE_ARCH         := $(shell printf '%s' '$(ENGINE_ARCH)' | sed -E 's/^[Nn][Nn][Uu][Ee]_//')
+NNUE_ARCH_UPPER   := $(shell printf '%s' '$(NNUE_ARCH)' | tr '[:lower:]' '[:upper:]')
+IS_NNUE_EDITION   := $(filter NNUE NNUE_% SFNN%,$(ENGINE_ARCH_UPPER))
+INVALID_ENGINE_ARCH := $(strip $(findstring SFNNWOP,$(ENGINE_ARCH_UPPER)) $(findstring LS9,$(ENGINE_ARCH_UPPER)))
+
+ifneq (,$(INVALID_ENGINE_ARCH))
+$(error Unsupported YANEURAOU_EDITION '$(YANEURAOU_EDITION)'. Use SFNN1536, SFNN_... without suffix, or SFNN_..._hand4/16/64/64z/256/1024 / SFNN_..._k3k3 / SFNN_..._k9k9 / SFNN_..._k9k9z / SFNN_..._k13k13z / SFNN_..._k21k21 / SFNN_..._k29k29 / SFNN_..._progress2/3/4/8/16/32)
+endif
 
 # エンジンの表示名 (engine displayname)
 # ("usi"コマンドに対して出力される)
@@ -132,6 +148,7 @@ EXTRA_LDFLAGS  =
 
 CPPFLAGS += $(EXTRA_CPPFLAGS)
 LDFLAGS  += $(EXTRA_LDFLAGS)
+COMPILER_MACHINE := $(shell $(COMPILER) -dumpmachine 2>/dev/null)
 
 # YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIALのときに指定できる、評価関数の通し番号
 #  1 : 普通の駒得のみの評価関数
@@ -139,11 +156,7 @@ LDFLAGS  += $(EXTRA_LDFLAGS)
 # cf.【連載】評価関数を作ってみよう！その1 : http://yaneuraou.yaneu.com/2020/11/17/make-evaluate-function/
 MATERIAL_LEVEL = 1
 
-# evallearnで使用するBLASの種類を指定する。
-BLAS = OPENBLAS
-# BLAS = BLIS
-
-# NNUE評価関数を実行ファイルに内蔵する。 `eval/nnue/embedded_nnue.cpp` が別途必要。
+# NNUE評価関数を実行ファイルに内蔵する。 ビルドするときにsourceフォルダ直下に"nn.bin"を配置する。
 EVAL_EMBEDDING = OFF
 # EVAL_EMBEDDING = ON
 
@@ -164,7 +177,7 @@ EVAL_EMBEDDING = OFF
 ifneq (,$(findstring em++,$(COMPILER)))
 	CPPFLAGS += -O2
 else
-	CPPFLAGS += -Ofast
+	CPPFLAGS += -O3 -ffast-math
 endif
 
 # デバッガーを使わないなら、NDEBUGをdefineする。
@@ -227,11 +240,34 @@ else
 		# (edge variant 向け, V8 Isolate 系ランタイムでは Worker / SharedArrayBuffer
 		# が使えないため) かを切り替える。
 		EM_PTHREAD ?= 1
+		# 起動時に先行生成しておく pthread worker の数。
+		#
+		# これは同時に走れるスレッド数の上限ではない。プールが尽きると Emscripten の
+		# getNewWorker() がその場で worker を作って足すので、Threads にプールより
+		# 大きい値を指定しても動く (PTHREAD_POOL_SIZE_STRICT を使うと上限になるが、
+		# 意図的に無効のままにしてある)。プールはあくまで「起動直後の即応性」で、
+		# 増やすと最初の go が速くなり、減らすと起動時のメモリと worker 生成コストが減る。
+		#
+		# ⚠ 大きすぎるとモバイル (特に iOS Safari) で問題になる。worker はそれぞれ
+		#   wasm モジュールのインスタンスを持つため、プール数だけ実体が増える。評価関数を
+		#   読み込む前の時点でタブのメモリ上限に近づき、大きい eval を開いた瞬間に
+		#   タブごと落ちる。
+		EM_PTHREAD_POOL_SIZE ?= 8
+		# wasm64 (Memory64) でビルドするか。
+		# 1 にするとポインタが64bitになり、4GBのヒープ上限を超えられる。
+		# ⚠ 実行側の要件が上がる: Node 24+ / Chrome 133+ など Memory64 対応ランタイムが要る。
+		#   Cloudflare Workers など未対応の環境向けには 0 のままにすること。
+		# 💡 バイナリは1割ほど大きくなり、速度はおおむね同等。
+		EM_MEMORY64 ?= 0
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
 		ifeq ($(EM_PTHREAD),1)
 			CPPFLAGS += -pthread
+		endif
+		ifeq ($(EM_MEMORY64),1)
+			CPPFLAGS += -sMEMORY64=1
+			LDFLAGS  += -sMEMORY64=1
 		endif
 		CPPFLAGS += -s STRICT=1
 		LDFLAGS += --pre-js wasm_pre.js
@@ -244,11 +280,15 @@ else
 		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,preRun,onAbort,onExit,onRuntimeInitialized,wasmBinary,locateFile,instantiateWasm,mainScriptUrlOrBlob,noInitialRun,noExitRuntime,arguments
 		ifeq ($(EM_PTHREAD),1)
 			LDFLAGS += -pthread
-			LDFLAGS += -s PTHREAD_POOL_SIZE=32
-			# -s PTHREAD_POOL_SIZE_STRICT=32
+			LDFLAGS += -s PTHREAD_POOL_SIZE=$(EM_PTHREAD_POOL_SIZE)
+			# PTHREAD_POOL_SIZE_STRICT は付けない。付けるとプールを超えた spawn が
+			# 失敗するようになり、Threads にプールより大きい値を入れられなくなる。
+			# -s PTHREAD_POOL_SIZE_STRICT=$(EM_PTHREAD_POOL_SIZE)
 		endif
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=$(EM_EXPORTED_RUNTIME_METHODS)"
 		LDFLAGS += -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=$(EM_INITIAL_MEMORY_SIZE) -s MAXIMUM_MEMORY=$(EM_MAXIMUM_MEMORY_SIZE)
+		# USI_Hashの上限をヒープ上限から決めるので、C++側にも同じ値を渡す。
+		CPPFLAGS += -DEM_MAXIMUM_MEMORY_SIZE=$(EM_MAXIMUM_MEMORY_SIZE)
 		LDFLAGS += -s STACK_SIZE=$(EM_STACK_SIZE)
 		# LDFLAGS += -s PROXY_TO_PTHREAD
 		# LDFLAGS += -s ALLOW_UNIMPLEMENTED_SYSCALLS
@@ -264,6 +304,12 @@ else
 	ifeq ($(OS),Windows_NT)
 		CPPFLAGS += $(WCPPFLAGS)
 		LDFLAGS += -static -Wl,--stack,25000000
+		# 32bit Windows版はworker/history/TT/NNUEで仮想アドレス空間を多く使う。
+		# 64bit Windows上で2GB制限に当たらないよう large-address-aware を付ける。
+		# 64bitビルドでは不要で、古いMSYS2/GCCのldでは未対応なので付けない。
+		ifneq (,$(findstring i686,$(COMPILER_MACHINE) $(COMPILER)))
+			LDFLAGS += -Wl,--large-address-aware
+		endif
 		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc.exe
 	else
 		CPPFLAGS += -D_LINUX
@@ -294,52 +340,6 @@ endif
 # デバッグ情報を付加
 # CPPFLAGS  += -g3 -ggdb
 
-# OpenMPを使うときにCPPFLAGSとして指定するオプション
-# ※ 学習部ではOpenMpを用いるので、学習用のビルドではこのオプションを指定する。
-# clangでOPENMPを有効にしてビルドする方法については、解説.txtを参照のこと。
-
-
-ifneq (,$(findstring g++,$(COMPILER)))
-	OPENMP   = -fopenmp
-	OPENMP_LDFLAGS =
-endif
-ifneq (,$(findstring clang++,$(COMPILER)))
-		ifeq ($(MSYSTEM),MINGW64)
-		# MSYS2 MINGW64 env
-		# libgompを指定した場合、ビルドは通るがOpenMPは無効化される？
-		OPENMP = -fopenmp=libgomp
-		OPENMP_LDFLAGS =
-	else
-		ifneq (,$(findstring w64-mingw32,$(COMPILER)))
-			# Ubuntu mingw-w64 clang++ env (experimental)
-			OPENMP = -fopenmp=libgomp
-			OPENMP_LDFLAGS =
-		else
-			# Other (normal clang++/libomp env)
-			OPENMP = -fopenmp
-			OPENMP_LDFLAGS = -lomp
-		endif
-	endif
-endif
-
-# NNUE評価関数 学習バイナリ用 OpenBLAS
-ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
-	ifeq ($(BLAS),OPENBLAS)
-		BLAS_CPPFLAGS = -DUSE_BLAS
-		BLAS_LDFLAGS = -lopenblas
-		ifeq ($(MSYSTEM),MINGW64)
-			BLAS_CPPFLAGS += -I$(shell cygpath -aw /mingw64/include/OpenBLAS)
-		endif
-	endif
-
-	ifeq ($(BLAS),BLIS)
-		BLAS_CPPFLAGS = -DUSE_BLAS
-		BLAS_CPPFLAGS += -I$(shell cygpath -aw /usr/local/include/blis)
-		BLAS_LDFLAGS = -lblis.dll
-		BLAS_LDFLAGS += -L$(shell cygpath -aw /usr/local/lib)
-	endif
-endif
-
 CPPFLAGS += -DNO_EXCEPTIONS
 LDFLAGS += -lpthread
 LDFLAGS += -v
@@ -358,19 +358,23 @@ SOURCES  = \
 	movegen.cpp                                                                \
 	position.cpp                                                               \
 	usi.cpp                                                                    \
-	usi_option.cpp                                                             \
+	usioption.cpp                                                              \
 	thread.cpp                                                                 \
 	tt.cpp                                                                     \
 	movepick.cpp                                                               \
 	timeman.cpp                                                                \
 	memory.cpp                                                                 \
+	engine.cpp                                                                 \
+	search.cpp                                                                 \
+	score.cpp                                                                  \
+	benchmark.cpp                                                              \
+	tune.cpp                                                                   \
 	book/book.cpp                                                              \
 	book/apery_book.cpp                                                        \
 	book/policybook.cpp                                                        \
 	extra/bitop.cpp                                                            \
 	extra/long_effect.cpp                                                      \
 	extra/sfen_packer.cpp                                                      \
-	extra/super_sort.cpp                                                       \
 	mate/mate.cpp                                                              \
 	mate/mate1ply_without_effect.cpp                                           \
 	mate/mate1ply_with_effect.cpp                                              \
@@ -382,33 +386,21 @@ SOURCES  = \
 	eval/material/evaluate_material.cpp                                        \
 	testcmd/unit_test.cpp                                                      \
 	testcmd/mate_test_cmd.cpp                                                  \
-	testcmd/normal_test_cmd.cpp                                                \
-	testcmd/benchmark.cpp
+	testcmd/normal_test_cmd.cpp                                                
 
 CUDA_SOURCES =
 
 OBJC_SOURCES =
 
-#ifneq (,$(findstring evallearn,$@))
-# →これこの時点で$@を取得できないのか…。なんぞこれ。
-
-# 仕方ないので無条件で追加しておく。cppファイルのほうで、
-#  if!defined(EVAL_LEARN)..とか書いてあるのでとりあえずいいや。
-
 ifeq (,)
 	SOURCES  +=                                                                \
 		book/makebook.cpp                                                      \
-		book/makebook2015.cpp                                                  \
-		book/makebook2023.cpp                                                  \
-		learn/learner.cpp                                                      \
-		learn/learning_tools.cpp                                               \
-		learn/multi_think.cpp
+		book/makebook2025.cpp
 endif
 
 ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KPPT)
 	SOURCES  +=                                                                \
 		eval/kppt/evaluate_kppt.cpp                                            \
-		eval/kppt/evaluate_kppt_learner.cpp                                    \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
 endif
 
@@ -416,7 +408,6 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KPP_KKPT)
 	SOURCES  +=                                                                \
 		eval/kppt/evaluate_kppt.cpp                                            \
 		eval/kpp_kkpt/evaluate_kpp_kkpt.cpp                                    \
-		eval/kpp_kkpt/evaluate_kpp_kkpt_learner.cpp                            \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
 endif
 
@@ -456,10 +447,6 @@ ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 			CPPFLAGS += -DONNXRUNTIME -DORT_NO_EXCEPTIONS -DORT_DML
 			LDFLAGS += -lonnxruntime
 
-		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_ORT_TRT)
-			CPPFLAGS += -DONNXRUNTIME -DORT_NO_EXCEPTIONS -DORT_TRT
-			LDFLAGS += -lonnxruntime
-
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP_COREML)
 			CPPFLAGS += -DCOREML
 			LDFLAGS += -framework Foundation -framework CoreML
@@ -480,47 +467,64 @@ ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 		engine/dlshogi-engine/UctSearch.cpp                             \
 		engine/dlshogi-engine/Node.cpp                                  \
 		engine/dlshogi-engine/PvMateSearch.cpp                          \
-		engine/dlshogi-engine/YaneuraOu_dlshogi_bridge.cpp
+		engine/dlshogi-engine/FukauraOuEngine.cpp                       \
+		engine/dlshogi-engine/SearchOptions.cpp
+
 endif
 
-ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
-	ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE)
+ifneq (,$(IS_NNUE_EDITION))
+	ifeq ($(ENGINE_ARCH_UPPER),NNUE)
 	else
-		# YANEURAOU_EDITIONがYANEURAOU_ENGINE_NNUEの後ろに文字が入っている名前なら、これは
-		# 標準NNUE型の亜種なので、とりあえず"YANEURAOU_ENGINE_NNUE"というシンボルを定義してやる。
+		# NNUE_* または SFNN_* は標準NNUE型の亜種なので、とりあえず
+		# "YANEURAOU_ENGINE_NNUE"というシンボルを定義してやる。
 		CPPFLAGS += -DYANEURAOU_ENGINE_NNUE
 
-		ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_KP256)
+		ifeq ($(ENGINE_ARCH_UPPER),NNUE_KP256)
 			CPPFLAGS += -DEVAL_NNUE_KP256
 
-		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKPE9)
+		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKPE9)
 			CPPFLAGS += -DEVAL_NNUE_HALFKPE9
 
-		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32)
+		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKP_512X2_16_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_512X2_16_32
 
-		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32)
+		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKP_1024X2_8_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_1024X2_8_32
 
-		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32)
+		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKP_1024X2_8_64)
+			CPPFLAGS += -DEVAL_NNUE_HALFKP_1024X2_8_64
+
+		else ifeq ($(ENGINE_ARCH_UPPER),NNUE_HALFKP_VM_256X2_32_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_VM_256X2_32_32
 
+		else ifeq ($(ENGINE_ARCH_UPPER),SFNN1536)
+			CPPFLAGS += -DYANEURAOU_ENGINE_SFNN1536
+			CPPFLAGS += -DSFNNwoPSQT
 		else
 			# 知らないNNUEのarchitectureなので、architecture headerを動的に生成する。
-			ARCH_HEADER_FILE = \"architectures/$(subst YANEURAOU_ENGINE_NNUE_,,$(YANEURAOU_EDITION)).h\"
+			ARCH_HEADER_FILE = \"architectures/$(NNUE_ARCH).h\"
 			CPPFLAGS += -DNNUE_ARCHITECTURE_HEADER=$(ARCH_HEADER_FILE)
-			ARCH_GEN_SCRIPT = $(PYTHON) eval/nnue/architectures/nnue_arch_gen.py $(YANEURAOU_EDITION) eval/nnue/architectures
+			ARCH_GEN_SCRIPT = $(PYTHON) eval/nnue/architectures/nnue_arch_gen.py $(NNUE_ARCH) eval/nnue/architectures
+
+			# SFNN_* はPSQTなしSFNNなので、シンボル SFNNwoPSQT 定義しておく。
+			ifneq (,$(filter SFNN%,$(NNUE_ARCH_UPPER)))
+				CPPFLAGS += -DSFNNwoPSQT
+			endif
 		endif
 	endif
 
 	# 大して大きなファイルではないので全部してしまう。
 	SOURCES += \
 		eval/nnue/evaluate_nnue.cpp                                     \
-		eval/nnue/evaluate_nnue_learner.cpp                             \
 		eval/nnue/nnue_test_command.cpp                                 \
 		eval/nnue/features/k.cpp                                        \
 		eval/nnue/features/p.cpp                                        \
+		eval/nnue/features/a2.cpp                                       \
 		eval/nnue/features/half_kp.cpp                                  \
+		eval/nnue/features/half_ka1.cpp                                 \
+		eval/nnue/features/half_ka_hm1.cpp                              \
+		eval/nnue/features/half_ka2.cpp                                 \
+		eval/nnue/features/half_ka_hm2.cpp                              \
 		eval/nnue/features/half_kp_vm.cpp                               \
 		eval/nnue/features/half_relative_kp.cpp                         \
 		eval/nnue/features/half_kpe9.cpp                                \
@@ -532,9 +536,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 			eval/nnue/wasm_simd.cpp
 	endif
 	ifeq ($(EVAL_EMBEDDING),ON)
-		SOURCES += \
-			eval/nnue/embedded_nnue.cpp
-		CPPFLAGS += -DEVAL_EMBEDDING
+		CPPFLAGS += -DNNUE_EMBEDDING
 	endif
 endif
 
@@ -560,16 +562,6 @@ ifneq ($(ENGINE_NAME),)
 	CPPFLAGS += -DENGINE_NAME_FROM_MAKEFILE=$(ENGINE_NAME)
 endif
 
-ifeq ($(YO_CLUSTER),ON)
-	SOURCES += \
-		engine/yo-cluster/ClusterCommon.cpp       \
-		engine/yo-cluster/ProcessNegotiator.cpp   \
-		engine/yo-cluster/EngineNegotiator.cpp    \
-		engine/yo-cluster/ClusterObserver.cpp     \
-		engine/yo-cluster/ClusterStrategy.cpp
-	CPPFLAGS += -DUSE_YO_CLUSTER
-endif
-
 
 # 開発用branch
 ifneq (,$(findstring dev,$(ENGINE_BRANCH)))
@@ -579,7 +571,7 @@ endif
 
 # abe
 ifneq (,$(findstring abe,$(ENGINE_BRANCH)))
-	CPPFLAGS += -DPV_OUTPUT_DRAW_ONLY -DFORCE_BIND_THIS_THREAD
+	CPPFLAGS += -DPV_OUTPUT_DRAW_ONLY
 endif
 
 
@@ -603,6 +595,9 @@ else ifeq ($(TARGET_CPU),ZEN2)
 
 else ifeq ($(TARGET_CPU),ZEN3)
 	CPPFLAGS += -DUSE_AVX2 -DUSE_BMI2 -mbmi -mbmi2 -mavx2 -march=znver3
+
+else ifeq ($(TARGET_CPU),ZEN3AVX512VNNI)
+	CPPFLAGS += -DUSE_AVX512 -DUSE_BMI2 -DUSE_VNNI -march=znver3 -mbmi -mbmi2 -mavx512f -mavx512bw -mavx512vl -mavx512dq -mavx512vnni -mprefer-vector-width=512
 
 # それ以外は、AVX512,AVX2,SSE4.2,SSE4.1,SSE2のように利用できるCPU拡張命令で振り分ける。
 # AVX2より上位のCPUなら普通は(Intel系なら)BMI2命令を使ったほうが速いので"USE_BMI2"を指定しておく。
@@ -651,17 +646,21 @@ else ifeq ($(TARGET_CPU),GRAVITON2)
 	# for Amazon Web Servece EC2, the Graviton2 CPU [M6g/M6gd, C6g/C6gd/C6gn, R6g/R6gd, T4g, X2gd] instances
 	# https://github.com/aws/aws-graviton-getting-started/blob/main/c-c++.md
 	CPPFLAGS += -DIS_64BIT -DUSE_NEON=8 -march=armv8.2-a+fp16+rcpc+dotprod+crypto
+else ifeq ($(TARGET_CPU),WINARM64)
+	# Windows ARM64 baseline. Stockfishのarmv8相当。
+	CPPFLAGS += -DIS_64BIT -DUSE_NEON=8
+else ifeq ($(TARGET_CPU),ARMV8)
+	# Generic AArch64 baseline. Stockfishのarmv8相当。
+	CPPFLAGS += -DIS_64BIT -DUSE_NEON=8
+else ifeq ($(TARGET_CPU),ARMV8_DOTPROD)
+	# ARMv8 + Int8 dot product. Stockfishのarmv8-dotprod相当。
+	CPPFLAGS += -DIS_64BIT -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod
 else ifeq ($(TARGET_CPU),APPLEAVX2)
 	CPPFLAGS += -DIS_64BIT -DUSE_AVX2 -DUSE_BMI2 -target x86_64-apple-macos11 -mbmi -mbmi2 -mavx2 -mpopcnt
 else ifeq ($(TARGET_CPU),APPLESSE42)
 	CPPFLAGS += -DIS_64BIT -DUSE_SSE42 -target x86_64-apple-macos11
 else ifeq ($(TARGET_CPU),APPLEM1)
 	CPPFLAGS += -DIS_64BIT -DUSE_NEON -target arm64-apple-macos11
-else ifeq ($(TARGET_CPU),APPLEIOS_ARM64)
-	# iOS / iPadOS arm64 (device or simulator). The workflow appends
-	# `-target arm64-apple-ios... -isysroot $(xcrun --show-sdk-path)`
-	# via EXTRA_CPPFLAGS / EXTRA_LDFLAGS.
-	CPPFLAGS += -DIS_64BIT -DUSE_NEON
 else ifeq ($(TARGET_CPU),WASM)
 
 else ifeq ($(TARGET_CPU),OTHER)
@@ -679,7 +678,7 @@ OBJC_OBJECTS = $(addprefix $(OBJDIR)/, $(OBJC_SOURCES:.mm=.o))
 DEPENDS  = $(OBJECTS:.o=.d)
 
 all: clean $(TARGET)
-.PHONY : all normal evallearn tournament prof profgen profuse pgo clean
+.PHONY : all normal tournament prof profgen profuse pgo clean
 
 $(TARGET): $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS)
 	$(COMPILER) -o $@ $^ $(LDFLAGS) $(CPPFLAGS) $(LIBS)
@@ -710,10 +709,6 @@ endif
 normal: run_python_script
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS)' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
 
-# 学習用。openmp , openblasなどを有効にする。
-evallearn: run_python_script
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) $(OPENMP) $(BLAS_CPPFLAGS) -DEVAL_LEARN' LDFLAGS='$(LDFLAGS) $(OPENMP_LDFLAGS) $(BLAS_LDFLAGS) $(LTOFLAGS)' $(TARGET)
-
 # トーナメント用
 tournament: run_python_script
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
@@ -733,40 +728,6 @@ pgo:
 	@./$(TARGET) EvalDir ../build/eval , bench , quit
 	@touch $(SOURCES)
 	$(MAKE) profuse
-
-# --- FFI ライブラリビルド (iOS / Android / Linux ネイティブ向け) ---
-# main.cpp の代わりに yaneuraou_ffi.cpp を含めて lib を出す。
-# OBJDIR を分離して通常ビルドと干渉しない。
-
-FFI_SOURCES = $(filter-out main.cpp, $(SOURCES)) yaneuraou_ffi.cpp
-FFI_OBJDIR  = ../obj/ffi
-FFI_OBJECTS = $(addprefix $(FFI_OBJDIR)/, $(FFI_SOURCES:.cpp=.o))
-FFI_LIB_A   = libyaneuraou.a
-FFI_LIB_SO  = libyaneuraou.so
-AR ?= ar
-
-ffi-static:
-	$(MAKE) OBJDIR=$(FFI_OBJDIR) CPPFLAGS='$(CPPFLAGS) -DYANEURAOU_FFI -fPIC' _ffi_static_build
-
-ffi-shared:
-	$(MAKE) OBJDIR=$(FFI_OBJDIR) CPPFLAGS='$(CPPFLAGS) -DYANEURAOU_FFI -fPIC' _ffi_shared_build
-
-ffi-test:
-	$(MAKE) OBJDIR=$(FFI_OBJDIR) CPPFLAGS='$(CPPFLAGS) -DYANEURAOU_FFI' _ffi_test_build
-
-_ffi_static_build: $(FFI_OBJECTS)
-	$(AR) rcs $(FFI_LIB_A) $(FFI_OBJECTS)
-
-_ffi_shared_build: $(FFI_OBJECTS)
-	$(COMPILER) -shared -o $(FFI_LIB_SO) $(FFI_OBJECTS) $(LDFLAGS)
-
-_ffi_test_build: $(FFI_OBJECTS) $(FFI_OBJDIR)/ffi_test_main.o
-	$(COMPILER) -o yaneuraou_ffi_test $(FFI_OBJECTS) $(FFI_OBJDIR)/ffi_test_main.o $(LDFLAGS)
-
-clean-ffi:
-	rm -rf $(FFI_OBJDIR) $(FFI_LIB_A) $(FFI_LIB_SO) yaneuraou_ffi_test
-
-.PHONY: ffi-static ffi-shared ffi-test _ffi_static_build _ffi_shared_build _ffi_test_build clean-ffi
 
 clean:
 	rm -f $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS) $(DEPENDS) $(TARGET) ${OBJECTS:.o=.gcda}
