@@ -55,9 +55,9 @@
         "bierner.github-markdown-preview",
         "bierner.markdown-preview-github-styles",
         "eamodio.gitlens",
+        "ms-vscode.cmake-tools",
         "ms-vscode.cpptools",
         "ms-vscode.cpptools-extension-pack",
-        "ms-vscode.cmake-tools",
         "ms-vscode.makefile-tools",
         "tamasfe.even-better-toml"
       ]
