@@ -29,6 +29,7 @@ jobs:
           - YANEURAOU_ENGINE_NNUE
           - YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
           - YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+          - YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
           - YANEURAOU_MATE_ENGINE
         compiler:
           - x86_64-w64-mingw32-g++-posix
@@ -116,6 +117,7 @@ jobs:
               YaneuraOu_NNUE_HalfKP128)  echo halfkp128 ;;
               YaneuraOu_NNUE_HalfKP768)  echo halfkp768 ;;
               YaneuraOu_SFNN_HalfKA1024) echo halfka1024 ;;
+              YaneuraOu_SFNN_HalfKA2304) echo halfka2304 ;;
               YaneuraOu_MATE)            echo mate ;;
               # mingw_gcc.sh calls the standard network plain "NNUE"; it is
               # halfkp256, so spell that out rather than shipping a nameless archive.

@@ -113,6 +113,18 @@ jobs:
             category: pthread
             engine_label: "SFNN HalfKA_hm2 1024x2-15-64"
             eval_note: "external (~75 MB + progress.bin)"
+          - name: pthread-halfka2304
+            dir: yaneuraou-wasm-pthread-halfka2304
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
+            export_name: YaneuraOu_Nagisa4
+            environment: web,worker
+            pthread: 1
+            pthread_pool_size: 8
+            initial_memory: 536870912
+            maximum_memory: 4294967296
+            category: pthread
+            engine_label: "SFNN HalfKA_hm2 2304x2-15-64"
+            eval_note: "external (~172 MB + progress.bin)"
 
           # Material / Mobility / HumanLike (hlsl) の各 variant はビルド対象から外して
           # いる。packages/ 配下のソースは残してあるので、配布を再開したくなったら
@@ -121,6 +133,8 @@ jobs:
           # 実用構成のみ。
           # halfka1024 (NAGISA_V3) は eval 75 MB + progress.bin が要るので cfworkers variant は無い
           # (128 MB heap に収まらない)。
+          # halfka2304 (NAGISA_V4) は eval 172 MB とさらに大きいので同様に cfworkers variant は無い。
+          # initial_memory は eval が載る 512 MB にしてある (V3 の倍)。
 
           # Node.js variants — built with EM_ENVIRONMENT=node and
           # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
@@ -212,6 +226,20 @@ jobs:
             category: node
             engine_label: "SFNN HalfKA_hm2 1024x2-15-64"
             eval_note: "external (~75 MB + progress.bin)"
+          - name: node-halfka2304
+            dir: yaneuraou-wasm-node-halfka2304
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
+            export_name: YaneuraOu_Nagisa4
+            environment: node
+            pthread: 1
+            pthread_pool_size: 32
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 536870912
+            maximum_memory: 4294967296
+            category: node
+            engine_label: "SFNN HalfKA_hm2 2304x2-15-64"
+            eval_note: "external (~172 MB + progress.bin)"
 
     steps:
       - uses: actions/checkout@v7
