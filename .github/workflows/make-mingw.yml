@@ -6,6 +6,15 @@ on:
     tags:
       - "v[0-9]*"
   workflow_dispatch:
+    inputs:
+      editions:
+        description: "Editions to build, comma separated (empty = all)"
+        required: false
+        default: ""
+      release_tag:
+        description: "Attach the built binaries to this existing tag's release (e.g. v9.60.1). Empty = build only"
+        required: false
+        default: ""
 
 jobs:
   build-mingw:
@@ -52,12 +61,29 @@ jobs:
         # AVXVNNI (-march=alderlake) は ubuntu-22.04 の MinGW では通らない。
 
     steps:
+      # A subset dispatch skips the steps instead of shrinking the matrix, so
+      # generate_release_body.py keeps seeing the full edition list here.
+      - name: Select or skip this edition
+        id: gate
+        env:
+          WANTED: ${{ inputs.editions }}
+          EDITION: ${{ matrix.edition }}
+        run: |
+          if [ -z "${WANTED}" ] || printf '%s' "${WANTED}" | tr ',' '\n' | tr -d ' ' | grep -qx "${EDITION}"; then
+            echo "selected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "selected=false" >> "$GITHUB_OUTPUT"
+            echo "${EDITION} is not in '${WANTED}' — skipping"
+          fi
+
       - name: Checkout own repository
+        if: steps.gate.outputs.selected == 'true'
         uses: actions/checkout@v7
         with:
           path: main
 
       - name: install mingw
+        if: steps.gate.outputs.selected == 'true'
         run: |
           sudo cat /etc/apt/sources.list
           sudo ls -R /etc/apt/sources.list.d
@@ -65,18 +91,25 @@ jobs:
           sudo apt install build-essential mingw-w64
 
       - name: make
+        if: steps.gate.outputs.selected == 'true'
         # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
         # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
         run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3"
 
       - uses: actions/upload-artifact@v7
+        if: steps.gate.outputs.selected == 'true'
         with:
           name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
           path: ./main/build/**/*
 
   release-mingw:
     needs: build-mingw
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Tag push attaches to the release that build-wasm.yml creates; a dispatch
+    # with release_tag attaches to a release that already exists. `inputs` is
+    # null on push, so the event has to be checked before reading it.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-latest
 
     permissions:
@@ -85,12 +118,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Resolve version from tag
+      - name: Resolve the release tag
         id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          if [ -n "${RELEASE_TAG}" ]; then
+            TAG="${RELEASE_TAG}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Download every build artifact
         uses: actions/download-artifact@v8
