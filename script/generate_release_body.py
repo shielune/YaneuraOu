@@ -276,10 +276,13 @@ The WASM bundles do not embed an eval function. Fetch `nn.bin` separately, write
 | AobaNNUE nn.bin | HalfKP_768x2_16_64 | ~184 MB | https://github.com/yssaya/AobaNNUE/releases |
 | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
 | NAGISA_V3 nn.bin + progress.bin | SFNN HalfKA_hm2 1024x2-15-64 | ~75 MB | https://github.com/keinoda/YaneuraOu/releases/tag/nagisa-v3.1 |
+| NAGISA_V4 nn.bin + progress.bin | SFNN HalfKA_hm2 2304x2-15-64 | ~172 MB | bundled in the NAGISA_V4 distribution archive (no public mirror) |
 
 > suisho5 / suishopetite ship as `.cpp.gz` in embedded C++ array form — convert them back to `.bin` with the inverse of `script/eval_bin_to_cpp_literal.py`. AobaNNUE is distributed as a plain `nn.bin`.
 
 > NAGISA_V3 has no standalone eval download — `eval/nn.bin` and `eval/progress.bin` are bundled inside the platform archives on that release page (any of them will do; the eval is identical across all three). It is the only supported network that needs **two** files: pass `progress.bin` via the loader's `progressBin` option, or place it next to `nn.bin` under `EvalDir`. Without it the layer-stack bucket cannot be computed. `FV_SCALE` already defaults to 28 on these builds (16 elsewhere), matching the `eval_options.txt` shipped alongside the network — no manual setting needed.
+
+> NAGISA_V4 takes the same two-file treatment as V3, but defaults to a different layer-stack bucket: `LS_BUCKET_MODE progress8ek` against V3's `progress8kpabs`, matching the `eval_options.txt` each network ships with. Both modes pass the eval hash check, so pointing a V4 build at the V3 mode (or the reverse) silently selects different weights instead of erroring — leave the default alone unless the network's own `eval_options.txt` says otherwise.
 
 > KP256, HalfKP_256x2_32_32 and HalfKP_768x2_16_64 evals are mutually incompatible. The Mate engine needs no eval. The HalfKP eval (62 MB) OOMs the 128 MB cfworkers heap, so it only works on the pthread variants."""
 

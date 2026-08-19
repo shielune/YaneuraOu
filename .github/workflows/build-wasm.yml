@@ -10,6 +10,14 @@ on:
         description: "emscripten/emsdk Docker tag"
         required: false
         default: "5.0.5"
+      packages:
+        description: "Matrix package names to build, comma separated (empty = all)"
+        required: false
+        default: ""
+      release_tag:
+        description: "Attach the built packages to this existing tag's release (e.g. v9.60.1). Empty = build only"
+        required: false
+        default: ""
 
 jobs:
   build-wasm:
@@ -113,6 +121,18 @@ jobs:
             category: pthread
             engine_label: "SFNN HalfKA_hm2 1024x2-15-64"
             eval_note: "external (~75 MB + progress.bin)"
+          - name: pthread-halfka2304
+            dir: yaneuraou-wasm-pthread-halfka2304
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
+            export_name: YaneuraOu_Nagisa4
+            environment: web,worker
+            pthread: 1
+            pthread_pool_size: 8
+            initial_memory: 536870912
+            maximum_memory: 4294967296
+            category: pthread
+            engine_label: "SFNN HalfKA_hm2 2304x2-15-64"
+            eval_note: "external (~172 MB + progress.bin)"
 
           # Material / Mobility / HumanLike (hlsl) の各 variant はビルド対象から外して
           # いる。packages/ 配下のソースは残してあるので、配布を再開したくなったら
@@ -121,6 +141,8 @@ jobs:
           # 実用構成のみ。
           # halfka1024 (NAGISA_V3) は eval 75 MB + progress.bin が要るので cfworkers variant は無い
           # (128 MB heap に収まらない)。
+          # halfka2304 (NAGISA_V4) は eval 172 MB とさらに大きいので同様に cfworkers variant は無い。
+          # initial_memory は eval が載る 512 MB にしてある (V3 の倍)。
 
           # Node.js variants — built with EM_ENVIRONMENT=node and
           # EXPORTED_RUNTIME_METHODS including 'callMain' so the loader can
@@ -212,11 +234,44 @@ jobs:
             category: node
             engine_label: "SFNN HalfKA_hm2 1024x2-15-64"
             eval_note: "external (~75 MB + progress.bin)"
+          - name: node-halfka2304
+            dir: yaneuraou-wasm-node-halfka2304
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
+            export_name: YaneuraOu_Nagisa4
+            environment: node
+            pthread: 1
+            pthread_pool_size: 32
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 536870912
+            maximum_memory: 4294967296
+            category: node
+            engine_label: "SFNN HalfKA_hm2 2304x2-15-64"
+            eval_note: "external (~172 MB + progress.bin)"
 
     steps:
+      # The matrix stays the single source of truth (the release job and
+      # generate_release_body.py both parse it out of this file), so a subset
+      # build is expressed by skipping the steps rather than by shrinking the
+      # matrix. Unselected entries finish in seconds.
+      - name: Select or skip this package
+        id: gate
+        env:
+          WANTED: ${{ inputs.packages }}
+          NAME: ${{ matrix.package.name }}
+        run: |
+          if [ -z "${WANTED}" ] || printf '%s' "${WANTED}" | tr ',' '\n' | tr -d ' ' | grep -qx "${NAME}"; then
+            echo "selected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "selected=false" >> "$GITHUB_OUTPUT"
+            echo "${NAME} is not in '${WANTED}' — skipping"
+          fi
+
       - uses: actions/checkout@v7
+        if: steps.gate.outputs.selected == 'true'
 
       - name: docker pull
+        if: steps.gate.outputs.selected == 'true'
         run: |
           # Per-matrix override > workflow_dispatch input > default.
           # Node variants pin themselves to 3.1.43 via the matrix.
@@ -224,6 +279,7 @@ jobs:
           sudo docker pull "emscripten/emsdk:${EMSDK_VERSION}"
 
       - name: build wasm (${{ matrix.package.name }})
+        if: steps.gate.outputs.selected == 'true'
         run: |
           EMSDK_VERSION="${{ matrix.package.emsdk_version || inputs.emsdk_version || '5.0.5' }}"
           # Node variants need 'callMain' in EXPORTED_RUNTIME_METHODS so the
@@ -257,6 +313,7 @@ jobs:
               ${{ matrix.package.extra_make_args }}
 
       - name: verify and compress
+        if: steps.gate.outputs.selected == 'true'
         run: |
           cd packages/${{ matrix.package.dir }}/dist
           ls -lh yaneuraou.js yaneuraou.wasm
@@ -274,13 +331,19 @@ jobs:
           ls -lh
 
       - uses: actions/upload-artifact@v7
+        if: steps.gate.outputs.selected == 'true'
         with:
           name: ${{ matrix.package.dir }}-dist
           path: packages/${{ matrix.package.dir }}/dist/
 
   release-wasm:
     needs: build-wasm
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Tag push cuts a new release; a dispatch with release_tag attaches the
+    # packages it just built to a release that already exists. `inputs` is
+    # null on push, so the event has to be checked before reading it.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-latest
 
     permissions:
@@ -294,12 +357,20 @@ jobs:
         with:
           bun-version: "1.3.13"
 
-      - name: Extract version from tag
+      - name: Resolve the release tag
         id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          # Tag push takes the tag it was pushed with; a dispatch takes the
+          # tag named in release_tag. Both produce v-less version + full tag.
+          if [ -n "${RELEASE_TAG}" ]; then
+            TAG="${RELEASE_TAG}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Download all WASM artifacts
         uses: actions/download-artifact@v8
@@ -334,6 +405,12 @@ jobs:
           # rooted at the package name so consumer paths don't change.
           while IFS= read -r d; do
             [ -n "$d" ] || continue
+            # A subset dispatch only produces artifacts for what it built;
+            # everything else in the matrix has nothing to stage.
+            if [ ! -d "download/${d}-dist" ]; then
+              echo "no artifact for ${d} — skipping"
+              continue
+            fi
             p="packages/$d"
             mkdir -p "$p/dist"
             cp -R "download/${d}-dist/." "$p/dist/"
