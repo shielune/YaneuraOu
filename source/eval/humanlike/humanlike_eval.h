@@ -7,6 +7,8 @@
 
 #include "../../types.h"
 
+namespace YaneuraOu {
+
 class Position;
 
 namespace Eval {
@@ -110,5 +112,6 @@ void halfkpl_dump_cmd(Position& pos, std::istringstream& is);
 
 } // namespace HumanLike
 } // namespace Eval
+} // namespace YaneuraOu
 
 #endif

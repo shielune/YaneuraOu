@@ -418,6 +418,14 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MATERIAL)
 	CPPFLAGS += -DMATERIAL_LEVEL=$(MATERIAL_LEVEL)
 endif
 
+ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
+	SOURCES  +=                                                                \
+		eval/mobility/evaluate_mobility.cpp                                    \
+		eval/mobility/mobility_weights_embedded.cpp                            \
+		eval/humanlike/humanlike_eval.cpp                                      \
+		engine/yaneuraou-engine/yaneuraou-search.cpp
+endif
+
 ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 	ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP)
 	else

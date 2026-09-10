@@ -14,6 +14,7 @@
 #include "../../position.h"
 #include "../../evaluate.h"
 
+namespace YaneuraOu {
 namespace Eval {
 namespace HumanLike {
 
@@ -529,3 +530,4 @@ bool is_free_capture(const Position& pos, Move m) {
 
 } // namespace HumanLike
 } // namespace Eval
+} // namespace YaneuraOu

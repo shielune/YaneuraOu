@@ -28,6 +28,9 @@
 #include "../../book/book.h"
 #include "../../movepick.h"
 #include "../../usi.h"
+#if defined(EVAL_MOBILITY)
+#include "../../eval/humanlike/humanlike_eval.h"
+#endif
 #include "../../mate/mate.h"
 #include "../../tune.h"
 
@@ -598,6 +601,25 @@ void YaneuraOuEngine::trace_eval() const {
 
     //sync_cout << "\n" << Eval::trace(p, *networks) << sync_endl;
 	// TODO あとで
+
+#if defined(EVAL_MOBILITY)
+	// The 164 features and the value they add up to, one line each.
+	//
+	// This is the only way to see either from outside the binary: the weights
+	// are compiled in, so there is no file to read them from, and a feature
+	// extractor written anywhere else has nothing to check itself against.
+	// `go` will not do -- it reports a searched score, not this one.
+	{
+		float feat[Eval::HumanLike::NUM_FEATURES];
+		Eval::HumanLike::extract_features(p, feat);
+		std::ostringstream ss;
+		ss << "feat";
+		for (int i = 0; i < Eval::HumanLike::NUM_FEATURES; ++i)
+			ss << ' ' << (int)feat[i];
+		sync_cout << ss.str() << sync_endl;
+	}
+#endif
+	sync_cout << "eval " << Eval::evaluate(p) << sync_endl;
 }
 
 // 現在の局面の評価値を出力する。

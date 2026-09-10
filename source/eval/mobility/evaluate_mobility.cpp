@@ -15,6 +15,7 @@
 // 重みは scripts/humanlike_eval/embed_mobility_weights.py で
 // mobility_weights_embedded.cpp に焼き込まれる。
 
+namespace YaneuraOu {
 namespace Eval { namespace Mobility {
 
 extern const float kEmbeddedMobilityWeights[164];
@@ -25,6 +26,10 @@ extern const int   kEmbeddedMobilityWeightsSize;
 namespace Eval {
 
 void init() {}
+
+// この評価関数は固有のエンジンオプションを持たない。重みはコンパイル時に
+// 焼き込まれていて、切り替えるものが何もないため。
+void add_options(OptionsMap&, ThreadPool&) {}
 
 void load_eval() {
 	// 重みはコンパイル時に焼き込み済み。読み込み処理は不要。
@@ -57,5 +62,6 @@ Value evaluate(const Position& pos) {
 }
 
 } // namespace Eval
+} // namespace YaneuraOu
 
 #endif // EVAL_MOBILITY
