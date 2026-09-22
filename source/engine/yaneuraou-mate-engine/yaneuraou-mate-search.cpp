@@ -66,7 +66,12 @@ class YaneuraOuMateWorker: public Worker {
 
         // 読み筋の出力するヘルパ
         auto print_pv = [&]() {
-            auto elapsed        = time.elapsed();
+            // 経過時間は0になりうる。詰みがすぐ見つかると下の待機ループに一度も入らず、
+            // thread.join()のあとの「最後に必ず1回」の出力がここへ到達するため。
+            // 0のまま割ると整数のゼロ除算になり、WASMビルドでは
+            // RuntimeError: divide by zero で探索スレッドごと落ちる。
+            // yaneuraou-search.cppのnps算出と同じく、1で下限を張る。
+            auto elapsed        = std::max(TimePoint(1), time.elapsed());
             u64  nodes_searched = solver.get_nodes_searched();
 
             // nps算出
