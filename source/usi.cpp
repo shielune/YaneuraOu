@@ -1,6 +1,8 @@
 ﻿#include <cstdlib>
+#include <deque>
 #include <sstream>
 #include <queue>
+#include <vector>
 
 #include "types.h"
 #include "usi.h"
@@ -12,6 +14,7 @@
 #include "benchmark.h"
 #include "engine.h"
 #include "movegen.h"
+#include "evaluate.h"
 
 #if defined(__EMSCRIPTEN__)
 // yaneuraou.wasm
@@ -409,6 +412,15 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
     // この局面での指し手をすべて出力
     else if (token == "moves")
         moves();
+
+#if defined(EVAL_MOBILITY)
+    // 読み筋に沿った評価の内訳を JSON で出す。
+    //   explain [top <n>] [moves <move1> <move2> ...]
+    // moves を省くと現局面の内訳だけを出す。指した手はすべて戻すので、
+    // このコマンドの前後で局面は変わらない。
+    else if (token == "explain")
+        explain(is);
+#endif
 
     // オプションを取得する
     else if (token == "getoption")
@@ -1405,6 +1417,60 @@ void USIEngine::moves() {
         std::cout << m << ' ';
     std::cout << std::endl;
 }
+
+#if defined(EVAL_MOBILITY)
+// "explain"コマンドのhandler。
+//   explain [top <n>] [moves <move1> <move2> ...]
+// 読み筋を指し進めながら、節点ごとの駒得・利きの・玉の安全度と、
+// 寄与が大きく動いた列を出す。手はすべて戻すので局面は変わらない。
+void USIEngine::explain(std::istringstream& is) {
+    auto& pos = engine.get_position();
+
+    int  topn = 5;
+    std::vector<Move> pv;
+    std::string token;
+    while (is >> token)
+    {
+        if (token == "top")
+        {
+            int n = 0;
+            if (is >> n && n > 0)
+                topn = n;
+            continue;
+        }
+        if (token == "moves")
+        {
+            // 以降は全部指し手。局面を進めながら解釈しないと、二手目以降が
+            // 現局面では非合法になって読めない。ここでは文字列のまま貯めて
+            // おき、hce_explain の手前で一手ずつ直す。
+            break;
+        }
+    }
+
+    // 指し手の解釈は局面を進めながら行う。to_move() はその局面で合法な手しか
+    // 返さないので、先にまとめて直すことはできない。
+    std::vector<std::string> usi_moves;
+    while (is >> token)
+        usi_moves.push_back(token);
+
+    std::deque<StateInfo> states;
+    std::vector<Move>     played;
+    for (const auto& str : usi_moves)
+    {
+        Move m = to_move(pos, str);
+        if (m == Move::none() || !pos.pseudo_legal(m, true) || !pos.legal(m))
+            break;
+        pv.push_back(m);
+        states.emplace_back();
+        pos.do_move(m, states.back());
+        played.push_back(m);
+    }
+    for (size_t k = played.size(); k-- > 0;)
+        pos.undo_move(played[k]);
+
+    Eval::hce_explain(pos, pv, topn);
+}
+#endif
 
 // "getoption"コマンドのhandler
 // オプションの値を取得する。

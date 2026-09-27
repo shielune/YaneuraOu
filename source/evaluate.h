@@ -5,6 +5,7 @@
 #include "types.h"
 
 #include <functional>
+#include <vector>
 
 // -------------------------------------
 //   評価関数に対応するheaderの読み込み
@@ -42,6 +43,15 @@ namespace Eval {
 
 	// 評価値の内訳表示(デバッグ用)
 	void print_eval_stat(Position& pos);
+
+#if defined(EVAL_MOBILITY)
+	// 読み筋に沿った評価の内訳を JSON で出す ("explain" コマンドの実体)。
+	// pv を順に指しながら、節点ごとに駒得・利き・玉の安全度と、
+	// 直前の節点から寄与が大きく動いた列を topn 個ずつ並べる。
+	// 線形の経路なら評価値は列ごとの寄与の和そのものなので、この分解は厳密。
+	// 呼び出しの前後で pos は変わらない (指した手はすべて戻す)。
+	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn);
+#endif
 
 	// 評価関数パラメーターを読み込む。
 	// 時間のかかる評価関数の初期化処理はここに書くこと。

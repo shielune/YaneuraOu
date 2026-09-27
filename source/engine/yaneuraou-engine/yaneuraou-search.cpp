@@ -610,14 +610,19 @@ void YaneuraOuEngine::trace_eval() const {
 	// extractor written anywhere else has nothing to check itself against.
 	// `go` will not do -- it reports a searched score, not this one.
 	{
-		float feat[Eval::HumanLike::NUM_FEATURES];
-		Eval::HumanLike::extract_features(p, feat);
+		// plain の並び。他の版は幅が四桁になるので、ここには出さない。
+		const Eval::HumanLike::Layout layout =
+		    Eval::HumanLike::make_layout(Eval::HumanLike::Variant::Plain);
+		float feat[Eval::HumanLike::NUM_PLAIN_MOBILITY];
+		Eval::HumanLike::extract_features(p, layout, feat);
 		std::ostringstream ss;
 		ss << "feat";
-		for (int i = 0; i < Eval::HumanLike::NUM_FEATURES; ++i)
+		for (int i = 0; i < layout.mobility; ++i)
 			ss << ' ' << (int)feat[i];
 		sync_cout << ss.str() << sync_endl;
 	}
+	// 駒得・利き・玉の安全度の内訳。線形の経路ならこの三つの和が評価値になる。
+	Eval::print_eval_stat(p);
 #endif
 	sync_cout << "eval " << Eval::evaluate(p) << sync_endl;
 }
