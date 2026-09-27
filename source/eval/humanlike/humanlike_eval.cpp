@@ -464,7 +464,7 @@ bool load_mobility_weights(const std::string& path) {
 		tmp.push_back(v);
 	}
 	// MB は plain の 164 列だけを使う。段・升・先で掛けた版は HceWeightsFile
-	// (evaluate_mobility.cpp) の経路で読む。
+	// (evaluate_hce.cpp) の経路で読む。
 	if (tmp.size() != (size_t)NUM_BOARD_FEATURES_FOLDED + NUM_HAND_FEATURES) {
 		std::cerr << "humanlike_eval[MB]: " << tmp.size()
 		          << " entries, expected " << NUM_BOARD_FEATURES_FOLDED + NUM_HAND_FEATURES << std::endl;

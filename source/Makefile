@@ -420,8 +420,8 @@ endif
 
 ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
 	SOURCES  +=                                                                \
-		eval/mobility/evaluate_mobility.cpp                                    \
-		eval/mobility/mobility_weights_embedded.cpp                            \
+		eval/hce/evaluate_hce.cpp                                              \
+		eval/hce/mobility_weights_embedded.cpp                                 \
 		eval/humanlike/humanlike_eval.cpp                                      \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
 endif
