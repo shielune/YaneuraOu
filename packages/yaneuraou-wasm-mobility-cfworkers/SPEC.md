@@ -8,7 +8,7 @@ This document is for LLMs and AI agents that integrate with or generate code for
 - Engine: YaneuraOu Mobility (KIKI) V8.50 (`YANEURAOU_ENGINE_KIKI`)
 - Runtime: Cloudflare Workers (V8 Isolate, single-thread, WASM SIMD)
 - License: GPL-3.0
-- Eval data: embedded (`eval/mobility/mobility_weights_embedded.cpp`, 164-dim learned linear, no external file required)
+- Eval data: embedded (`eval/hce/mobility_weights_embedded.cpp`, 164-dim learned linear, no external file required)
 
 ## Module Exports
 

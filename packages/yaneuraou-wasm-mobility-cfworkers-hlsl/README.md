@@ -10,7 +10,7 @@ Mobility (KIKI) 評価関数 — 駒種×距離×方向 164 params を Ridge fit
 ## 仕様
 
 - エンジン: YaneuraOu Mobility (KIKI) (V8.50) — 学習済み 164 次元線形評価関数
-- 評価関数: 同梱 (`eval/mobility/mobility_weights_embedded.cpp`、外部ファイル不要)
+- 評価関数: 同梱 (`eval/hce/mobility_weights_embedded.cpp`、外部ファイル不要)
 - スレッド: 1 固定 (Workers は SharedArrayBuffer 不可)
 - WASM SIMD: 有効 (V8 対応)
 - メモリ: 64MB initial / 128MB max / 2MB stack
