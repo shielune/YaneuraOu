@@ -198,6 +198,10 @@ private:
 
 	void isready();
     void moves();
+#if defined(EVAL_MOBILITY)
+    // "explain"コマンドのhandler。読み筋に沿った評価の内訳をJSONで出す。
+    void explain(std::istringstream& is);
+#endif
     void getoption(std::istringstream& is);
     void qsearch_psv(std::istringstream& is);
     void unittest(std::istringstream& is);

@@ -11,13 +11,206 @@
 #include <cmath>
 #include <algorithm> // for std::min()
 #include <numeric>	 // for std::accumulate()
+#include <atomic>
 #define SIZE_OF_ARRAY(array) (sizeof(array)/sizeof(array[0]))
 
 namespace YaneuraOu {
+
+#if MATERIAL_LEVEL == 1 || !defined(MATERIAL_LEVEL)
+// ---------------------------------------------------------------------------
+// Material learned weights (17 params)
+// ---------------------------------------------------------------------------
+// Index layout:
+//   [0..6]  : 盤上駒 (PAWN, LANCE, KNIGHT, SILVER, GOLD, BISHOP, ROOK)
+//   [7]     : 金型成駒 (PRO_PAWN / PRO_LANCE / PRO_KNIGHT / PRO_SILVER まとめて)
+//   [8]     : 馬 (HORSE)
+//   [9]     : 龍 (DRAGON)
+//   [10..16]: 持ち駒 (PAWN, LANCE, KNIGHT, SILVER, GOLD, BISHOP, ROOK)
+//
+// 重みは下に焼き込んである。読み込むファイルは無い。
+// ---------------------------------------------------------------------------
+namespace {
+constexpr int NUM_MAT_FEATURES = 17;
+
+// 駒種 → board weight index (-1 = 対象外 / 玉)
+// PieceType は 1-based: PAWN=1..ROOK=7, PRO_PAWN=8..PRO_SILVER=11, HORSE=12, DRAGON=13, KING=14
+int mat_board_index(PieceType pt) {
+    switch (pt) {
+        case PAWN:       return 0;
+        case LANCE:      return 1;
+        case KNIGHT:     return 2;
+        case SILVER:     return 3;
+        case GOLD:       return 4;
+        case BISHOP:     return 5;
+        case ROOK:       return 6;
+        case PRO_PAWN:   return 7;
+        case PRO_LANCE:  return 7;
+        case PRO_KNIGHT: return 7;
+        case PRO_SILVER: return 7;
+        case HORSE:      return 8;
+        case DRAGON:     return 9;
+        default:         return -1; // KING, NO_PIECE_TYPE
+    }
+}
+
+// 持ち駒種 → hand weight index
+// PIECE_HAND_NB: PAWN=1..ROOK=7
+int mat_hand_index(PieceType pt) {
+    switch (pt) {
+        case PAWN:   return 10;
+        case LANCE:  return 11;
+        case KNIGHT: return 12;
+        case SILVER: return 13;
+        case GOLD:   return 14;
+        case BISHOP: return 15;
+        case ROOK:   return 16;
+        default:     return -1;
+    }
+}
+
+// 重みの実体は生成物。`tideborn/tools/embed_hce_weights.py` が書く。
+#include "material_weights_embedded.h"
+float g_mat_weights[NUM_MAT_FEATURES] = MATERIAL_EMBEDDED_WEIGHTS;
+std::atomic<bool> g_mat_weights_loaded{true};
+
+// 学習済み重みを Eval::PieceValue[] / CapturePieceValue[] / ProDiffPieceValue[] に
+// 反映させる。これにより探索の futility / SEE / movepick 等の枝刈り基準も
+// 学習済み駒価値に揃う (V0Full と同じ挙動)。
+//
+// PieceValue[PIECE_NB]:
+//   B_PAWN(1)..B_DRAGON(14)   = + 学習済み盤上駒価値
+//   W_PAWN(17)..W_DRAGON(30)  = - 同上
+//   KING, NO_PIECE は 0 のまま
+//
+// CapturePieceValue[PIECE_NB] (両色とも正値):
+//   取られたときの相手にとっての価値増加 = 学習済み盤上 + 持駒価値
+//   PRO_* は 「成った価値 + 元駒の持駒価値」
+//
+// ProDiffPieceValue[PIECE_NB]:
+//   成った時の差分 = w[+pt] - w[pt]
+//   PAWN/PRO_PAWN どちらの index に対しても "と金 - 歩" を返す
+void apply_weights_to_piece_value() {
+    using namespace Eval;
+    // 駒種 → 学習済み盤上 weight
+    auto wb = [](PieceType pt) -> float {
+        switch (pt) {
+            case PAWN:       return g_mat_weights[0];
+            case LANCE:      return g_mat_weights[1];
+            case KNIGHT:     return g_mat_weights[2];
+            case SILVER:     return g_mat_weights[3];
+            case GOLD:       return g_mat_weights[4];
+            case BISHOP:     return g_mat_weights[5];
+            case ROOK:       return g_mat_weights[6];
+            case PRO_PAWN:   return g_mat_weights[7];
+            case PRO_LANCE:  return g_mat_weights[7];
+            case PRO_KNIGHT: return g_mat_weights[7];
+            case PRO_SILVER: return g_mat_weights[7];
+            case HORSE:      return g_mat_weights[8];
+            case DRAGON:     return g_mat_weights[9];
+            default:         return 0.0f;
+        }
+    };
+    // 駒種 → 学習済み持駒 weight (PRO_* は元駒の持駒価値を使う)
+    auto wh = [](PieceType pt) -> float {
+        switch (pt) {
+            case PAWN: case PRO_PAWN:     return g_mat_weights[10];
+            case LANCE: case PRO_LANCE:   return g_mat_weights[11];
+            case KNIGHT: case PRO_KNIGHT: return g_mat_weights[12];
+            case SILVER: case PRO_SILVER: return g_mat_weights[13];
+            case GOLD:                    return g_mat_weights[14];
+            case BISHOP: case HORSE:      return g_mat_weights[15];
+            case ROOK: case DRAGON:       return g_mat_weights[16];
+            default:                      return 0.0f;
+        }
+    };
+
+    static const PieceType piece_types[] = {
+        PAWN, LANCE, KNIGHT, SILVER, BISHOP, ROOK, GOLD,
+        // KING はスキップ (idx 8 は配列上 KING)
+        PRO_PAWN, PRO_LANCE, PRO_KNIGHT, PRO_SILVER, HORSE, DRAGON,
+    };
+
+    // PieceValue / CapturePieceValue / ProDiffPieceValue を書き換え
+    for (PieceType pt : piece_types) {
+        int b = (int)pt;            // BLACK 側 Piece index (B_PAWN=1 など)
+        int w = b + PIECE_WHITE;    // WHITE 側 (B_*+16)
+
+        int pv  = (int)wb(pt);
+        PieceValue[b] =  pv;
+        PieceValue[w] = -pv;
+
+        // CapturePieceValue = 盤上 + 持駒 (PRO_* は成った価値 + 元駒持駒)
+        int cv = (int)wb(pt) + (int)wh(pt);
+        CapturePieceValue[b] = cv;
+        CapturePieceValue[w] = cv;
+
+        // ProDiffPieceValue: 成った価値 - 成る前盤上価値
+        // PAWN/PRO_PAWN どちらの index にも "と金 - 歩" を入れる慣習
+        int diff = 0;
+        switch (pt) {
+            case PAWN:   case PRO_PAWN:   diff = (int)wb(PRO_PAWN)   - (int)wb(PAWN);   break;
+            case LANCE:  case PRO_LANCE:  diff = (int)wb(PRO_LANCE)  - (int)wb(LANCE);  break;
+            case KNIGHT: case PRO_KNIGHT: diff = (int)wb(PRO_KNIGHT) - (int)wb(KNIGHT); break;
+            case SILVER: case PRO_SILVER: diff = (int)wb(PRO_SILVER) - (int)wb(SILVER); break;
+            case BISHOP: case HORSE:      diff = (int)wb(HORSE)      - (int)wb(BISHOP); break;
+            case ROOK:   case DRAGON:     diff = (int)wb(DRAGON)     - (int)wb(ROOK);   break;
+            default: diff = 0;
+        }
+        ProDiffPieceValue[b] = diff;
+        ProDiffPieceValue[w] = diff;
+    }
+
+    std::cerr << "material_eval[MAT]: applied weights to PieceValue / CapturePieceValue / ProDiffPieceValue" << std::endl;
+}
+
+
+// 学習済みweightで駒得スコアを計算する（先手視点・先手プラス）
+int compute_learned_material(const Position& pos) {
+    if (!g_mat_weights_loaded.load(std::memory_order_acquire))
+        return 0;
+
+    double score = 0.0;
+
+    // 盤上駒
+    for (Square sq = SQ_ZERO; sq < SQ_NB; ++sq) {
+        Piece pc = pos.piece_on(sq);
+        if (pc == NO_PIECE) continue;
+        PieceType pt = type_of(pc);
+        int idx = mat_board_index(pt);
+        if (idx < 0) continue;
+        float sign = (color_of(pc) == BLACK) ? 1.0f : -1.0f;
+        score += sign * g_mat_weights[idx];
+    }
+
+    // 持ち駒
+    for (Color c = BLACK; c < COLOR_NB; ++c) {
+        Hand h = pos.hand_of(c);
+        float sign = (c == BLACK) ? 1.0f : -1.0f;
+        for (PieceType pt = PAWN; pt < PIECE_HAND_NB; ++pt) {
+            int cnt = hand_count(h, pt);
+            if (cnt == 0) continue;
+            int idx = mat_hand_index(pt);
+            if (idx < 0) continue;
+            score += sign * cnt * g_mat_weights[idx];
+        }
+    }
+
+    return (int)score;
+}
+} // anonymous namespace
+#endif // MATERIAL_LEVEL == 1
+
 namespace Eval {
 
 	// 駒得のみの評価関数のとき。
-	void load_eval() {}
+	void load_eval() {
+#if MATERIAL_LEVEL == 1 || !defined(MATERIAL_LEVEL)
+		// 重みは焼き込み済みなので読むファイルは無い。ただし探索は駒の価値を
+		// PieceValue / CapturePieceValue / ProDiffPieceValue 経由で見るので、
+		// 評価関数だけが学習値を知っている状態にならないよう、ここで配る。
+		apply_weights_to_piece_value();
+#endif
+	}
 	void print_eval_stat(Position& pos) {}
 	void evaluate_with_no_return(const Position& pos) {}
 	Value evaluate(const Position& pos) { return compute_eval(pos); }
@@ -29,6 +222,11 @@ namespace Eval {
 
 	void add_options(OptionsMap&, ThreadPool&) {}
 	Value compute_eval(const Position& pos) {
+		// 学習済みweightがロードされていればそれを使う
+		if (g_mat_weights_loaded.load(std::memory_order_acquire)) {
+			int score = compute_learned_material(pos);
+			return pos.side_to_move() == BLACK ? Value(score) : Value(-score);
+		}
 		auto score = pos.state()->materialValue;
 		ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
 
