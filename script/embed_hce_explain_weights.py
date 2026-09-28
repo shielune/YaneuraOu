@@ -34,6 +34,7 @@ VALUES_PER_LINE = 8
 #: than no description at all.
 KNOWN_LAYOUTS = {
     4474: "material 17 + mobility 4407 + king_safety 50 (rank+contact, folded)",
+    4476: "material 17 + mobility 4407 + king_safety 50 + tempo 2 (rank+contact, folded)",
 }
 
 

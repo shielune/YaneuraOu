@@ -24,7 +24,8 @@
 // 探索からは一度も呼ばない。評価値は NNUE のまま変わらず、explain が出す
 // black_pov はこの副評価器の値であって、NNUE の評価値ではない。
 //
-// 重みは rank+contact の 4474 個を hce_explain_weights_embedded.cpp に埋め込んである。
+// 重みは rank+contact の 4474 個に手番の 2 列を足した 4476 個を
+// hce_explain_weights_embedded.cpp に埋め込んである。
 // HceWeightsFile で別の幅のファイルに差し替えられ、版と種類は読んだ個数で決まる
 // (HumanLike::layout_for_dim)。読めなかったときは埋め込みに戻る。
 //
