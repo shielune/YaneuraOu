@@ -43,7 +43,7 @@ struct LinearWeights {
 	std::vector<float> w;
 	int dim = 0;              // 0 ならまだ何も読んでいない
 	HumanLike::Layout layout;
-	int kind = 1;             // 0 利きだけ / 1 v2 / 2 進行度で按分
+	int kind = 1;             // 0 利きだけ / 1 v2 / 2 進行度で按分 / 3 v2 と手番の 2 列
 	double bias = 0.0;        // ファイルの末尾に切片があればその値
 	const char* source = "none";
 };
@@ -111,6 +111,7 @@ void load_linear_weights(const std::string& path) {
 
 // この局面での、layout.features() 列それぞれの実効的な重み。
 // 按分した重みは前半が x*(1-t)、後半が x*t なので、進行度で畳んで 1 本にする。
+// 手番の 2 列はここには入れず、take_snapshot が別に足す。
 void effective_weights(const Position& pos, const HumanLike::Layout& layout, double* w) {
 	const int n = layout.features();
 	std::fill(w, w + n, 0.0);
@@ -119,7 +120,7 @@ void effective_weights(const Position& pos, const HumanLike::Layout& layout, dou
 			w[layout.off_mobility() + i] = (double)g_w.w[i];
 		return;
 	}
-	if (g_w.kind == 1) {
+	if (g_w.kind == 1 || g_w.kind == 3) {
 		for (int i = 0; i < n; ++i)
 			w[i] = (double)g_w.w[i];
 		return;
@@ -164,10 +165,13 @@ int see_value(const Position& pos, Move m) {
 }
 
 // 一つの節点の、列ごとの寄与。先手視点で、切片の前。
+// 手番の列がある重みでは、contrib の末尾に手番の 2 列が続く。
 struct Snapshot {
-	std::vector<double> contrib;   // layout.features() 個
-	double mat = 0.0, mob = 0.0, kng = 0.0;
+	std::vector<double> contrib;   // layout.features() 個、手番の列があれば +2
+	double mat = 0.0, mob = 0.0, kng = 0.0, tmp = 0.0;
 };
+
+inline bool has_tempo() { return g_w.kind == 3; }
 
 void take_snapshot(const Position& pos, const HumanLike::Layout& layout, Snapshot& out) {
 	const int n = layout.features();
@@ -176,8 +180,8 @@ void take_snapshot(const Position& pos, const HumanLike::Layout& layout, Snapsho
 	std::vector<double> w((size_t)n);
 	effective_weights(pos, layout, w.data());
 
-	out.contrib.assign((size_t)n, 0.0);
-	out.mat = out.mob = out.kng = 0.0;
+	out.contrib.assign((size_t)n + (has_tempo() ? HumanLike::NUM_TEMPO_FEATURES : 0), 0.0);
+	out.mat = out.mob = out.kng = out.tmp = 0.0;
 	for (int i = 0; i < n; ++i) {
 		const double c = w[i] * (double)feat[i];
 		out.contrib[(size_t)i] = c;
@@ -185,15 +189,25 @@ void take_snapshot(const Position& pos, const HumanLike::Layout& layout, Snapsho
 		else if (i < layout.off_king())       out.mob += c;
 		else                                  out.kng += c;
 	}
+	if (has_tempo()) {
+		float z[HumanLike::NUM_TEMPO_FEATURES];
+		HumanLike::extract_tempo_features(pos, z);
+		for (int k = 0; k < HumanLike::NUM_TEMPO_FEATURES; ++k) {
+			const double c = (double)g_w.w[(size_t)n + k] * (double)z[k];
+			out.contrib[(size_t)n + k] = c;
+			out.tmp += c;
+		}
+	}
 }
 
 // 直前の節点から寄与が動いた列を、動いた量の大きい順に topn 個。
 std::string top_movers(const HumanLike::Layout& layout,
                        const Snapshot& before, const Snapshot& after, int topn) {
 	const int n = layout.features();
+	const int cols = (int)after.contrib.size();
 	std::vector<int> order;
-	order.reserve((size_t)n);
-	for (int i = 0; i < n; ++i)
+	order.reserve((size_t)cols);
+	for (int i = 0; i < cols; ++i)
 		if (before.contrib[(size_t)i] != after.contrib[(size_t)i])
 			order.push_back(i);
 	std::sort(order.begin(), order.end(), [&](int a, int b) {
@@ -207,7 +221,8 @@ std::string top_movers(const HumanLike::Layout& layout,
 	for (size_t k = 0; k < order.size(); ++k) {
 		const int i = order[k];
 		// feature_v2_name は static な文字列を使い回すので、その場で写す。
-		const std::string name = HumanLike::feature_v2_name(layout, i);
+		const std::string name = i < n ? HumanLike::feature_v2_name(layout, i)
+		                               : HumanLike::tempo_feature_name(i - n);
 		if (k) out += ",";
 		out += "{\"name\":" + json_quote(name)
 		     + ",\"d\":" + num(after.contrib[(size_t)i] - before.contrib[(size_t)i]) + "}";
@@ -227,15 +242,21 @@ void emit_node(const Position& pos, const HumanLike::Layout& layout,
 		      + ",\"gives_check\":" + (gives_check ? "true" : "false");
 	}
 	line += ",\"sfen\":" + json_quote(pos.sfen())
-	      + ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + g_w.bias))
+	      + ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
 	      + ",\"material\":" + num(now.mat)
 	      + ",\"mobility\":" + num(now.mob)
 	      + ",\"king\":" + num(now.kng);
+	// 手番の列がない重みでは tempo を出さない。そうした重みの出力は、
+	// 手番の列を足す前と一字一句同じになる。
+	if (has_tempo())
+		line += ",\"tempo\":" + num(now.tmp);
 	if (before) {
 		line += ",\"d_material\":" + num(now.mat - before->mat)
 		      + ",\"d_mobility\":" + num(now.mob - before->mob)
-		      + ",\"d_king\":" + num(now.kng - before->kng)
-		      + ",\"top\":" + top_movers(layout, *before, now, topn);
+		      + ",\"d_king\":" + num(now.kng - before->kng);
+		if (has_tempo())
+			line += ",\"d_tempo\":" + num(now.tmp - before->tmp);
+		line += ",\"top\":" + top_movers(layout, *before, now, topn);
 	}
 	line += "}";
 	sync_cout << line << sync_endl;
@@ -275,7 +296,7 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn) {
 	          << ",\"weights\":" << json_quote(g_w.source)
 	          << ",\"variant\":" << json_quote(HumanLike::variant_name(layout.variant))
 	          << ",\"pieces\":" << json_quote(HumanLike::pieces_name(layout.pieces))
-	          << ",\"features\":" << layout.features()
+	          << ",\"features\":" << (has_tempo() ? layout.with_tempo() : layout.features())
 	          << ",\"phase\":" << HumanLike::game_phase(pos)
 	          << ",\"pov\":\"black\""
 	          << ",\"caveat\":" << json_quote(

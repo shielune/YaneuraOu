@@ -414,6 +414,7 @@ bool layout_for_dim(int dim, Layout& out, int& kind) {
 		if (dim == L.mobility) { out=L; kind=0; return true; }
 		if (dim == L.features()) { out=L; kind=1; return true; }
 		if (dim == L.tapered()) { out=L; kind=2; return true; }
+		if (dim == L.with_tempo()) { out=L; kind=3; return true; }
 	}
 	return false;
 }
@@ -925,6 +926,17 @@ float game_phase(const Position& pos) {
 	return (float)t;
 }
 
+void extract_tempo_features(const Position& pos, float* z) {
+	const float s = pos.side_to_move() == BLACK ? 1.0f : -1.0f;
+	z[0] = s;
+	z[1] = s * game_phase(pos);
+}
+
+const char* tempo_feature_name(int k) {
+	static const char* names[NUM_TEMPO_FEATURES] = {"tempo", "tempo_phase"};
+	return (k >= 0 && k < NUM_TEMPO_FEATURES) ? names[k] : "?";
+}
+
 void extract_features_phased(const Position& pos, const Layout& layout, float* feat) {
 	const int n = layout.features();
 	std::vector<float> x((size_t)n);
@@ -961,6 +973,12 @@ double linear_value(const Position& pos, const Layout& layout, int kind, const f
 		sum += weight(layout.off_king() + i) * (double)kng[i];
 	sum += mobility_dot(pos, layout, w + layout.off_mobility(),
 	                    (kind == 2) ? w + n + layout.off_mobility() : nullptr, t);
+	if (kind == 3) {
+		float z[NUM_TEMPO_FEATURES];
+		extract_tempo_features(pos, z);
+		for (int k = 0; k < NUM_TEMPO_FEATURES; ++k)
+			sum += (double)w[n + k] * (double)z[k];
+	}
 	return sum;
 }
 
