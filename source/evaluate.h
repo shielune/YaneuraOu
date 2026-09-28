@@ -44,13 +44,17 @@ namespace Eval {
 	// 評価値の内訳表示(デバッグ用)
 	void print_eval_stat(Position& pos);
 
-#if defined(EVAL_MOBILITY)
+#if defined(USE_HCE_EXPLAIN)
 	// 読み筋に沿った評価の内訳を JSON で出す ("explain" コマンドの実体)。
 	// pv を順に指しながら、節点ごとに駒得・利き・玉の安全度と、
 	// 直前の節点から寄与が大きく動いた列を topn 個ずつ並べる。
-	// 線形の経路なら評価値は列ごとの寄与の和そのものなので、この分解は厳密。
+	// 使うのは HCE v2 の線形評価で、評価値は列ごとの寄与の和そのものなので、
+	// この分解は厳密。探索が使う評価関数とは別物で、探索の値は変わらない。
 	// 呼び出しの前後で pos は変わらない (指した手はすべて戻す)。
 	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn);
+
+	// explain が使う重みを差し替える "HceWeightsFile" を生やす。
+	void add_hce_explain_options(OptionsMap& options);
 #endif
 
 	// 評価関数パラメーターを読み込む。

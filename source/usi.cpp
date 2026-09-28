@@ -126,6 +126,11 @@ void USIEngine::set_engine(IEngine& _engine) {
     Eval::add_options(engine.get_options(), engine.get_threads());
 #endif
 
+#if defined(USE_HCE_EXPLAIN)
+    // explain 用の副評価器の option。探索の評価関数とは関係しない。
+    Eval::add_hce_explain_options(engine.get_options());
+#endif
+
 	// optionの値が変更された時に、その結果文字列を出力するためのhandlerを設定してやる。
     engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
         if (str.has_value())
@@ -413,7 +418,7 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
     else if (token == "moves")
         moves();
 
-#if defined(EVAL_MOBILITY)
+#if defined(USE_HCE_EXPLAIN)
     // 読み筋に沿った評価の内訳を JSON で出す。
     //   explain [top <n>] [moves <move1> <move2> ...]
     // moves を省くと現局面の内訳だけを出す。指した手はすべて戻すので、
@@ -1418,7 +1423,7 @@ void USIEngine::moves() {
     std::cout << std::endl;
 }
 
-#if defined(EVAL_MOBILITY)
+#if defined(USE_HCE_EXPLAIN)
 // "explain"コマンドのhandler。
 //   explain [top <n>] [moves <move1> <move2> ...]
 // 読み筋を指し進めながら、節点ごとの駒得・利きの・玉の安全度と、
