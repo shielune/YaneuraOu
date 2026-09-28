@@ -198,7 +198,7 @@ private:
 
 	void isready();
     void moves();
-#if defined(EVAL_MOBILITY)
+#if defined(USE_HCE_EXPLAIN)
     // "explain"コマンドのhandler。読み筋に沿った評価の内訳をJSONで出す。
     void explain(std::istringstream& is);
 #endif
