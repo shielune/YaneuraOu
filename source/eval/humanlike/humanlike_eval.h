@@ -89,6 +89,9 @@ constexpr int NUM_MATERIAL_FOLDED       = 17;
 constexpr int NUM_MATERIAL_SPLIT        = 20;
 constexpr int MAX_MATERIAL_FEATURES     = NUM_MATERIAL_SPLIT;
 constexpr int NUM_KING_FEATURES         = 50;
+// 手番の 2 列。先手番なら +1、後手番なら -1 を s として、s と s*t (t は進行度)。
+// 他の列と同じく先手視点なので、正の重みは指す側の得になる。
+constexpr int NUM_TEMPO_FEATURES        = 2;
 constexpr int OFF_MATERIAL              = 0;
 
 enum class Pieces { Folded, Split };
@@ -119,6 +122,7 @@ struct Layout {
 	int off_king() const { return material + mobility; }
 	int features() const { return material + mobility + NUM_KING_FEATURES; }
 	int tapered() const { return features() * 2; }
+	int with_tempo() const { return features() + NUM_TEMPO_FEATURES; }
 };
 
 Layout make_layout(Variant v, Pieces p = Pieces::Folded);
@@ -160,7 +164,8 @@ double mobility_dot(const Position& pos, const Layout& layout,
                     const float* w0, const float* w1, float t);
 
 // 重みとの内積そのもの (先手視点、切片の前)。kind は layout_for_dim が返すもので、
-// 0 なら利きだけ、1 なら駒得と玉の安全度も、2 は進行度で按分した並び。
+// 0 なら利きだけ、1 なら駒得と玉の安全度も、2 は進行度で按分した並び、
+// 3 は 1 の後ろに手番の 2 列 (layout.with_tempo() 列)。
 // 利きの部分は mobility_dot を通るので、幅の広い版でも配列を作らない。
 double linear_value(const Position& pos, const Layout& layout, int kind, const float* w);
 
@@ -252,8 +257,14 @@ float game_phase(const Position& pos);
 // 進行度で按分した並び (layout.tapered() 列)。
 void extract_features_phased(const Position& pos, const Layout& layout, float* feat);
 
+// 手番の 2 列の値 (s と s*t)。kind 3 の重みの末尾 2 個に掛ける。
+void extract_tempo_features(const Position& pos, float* z);
+
 // 各列の名前 (dump の見出しと突き合わせ用)。
 const char* feature_v2_name(const Layout& layout, int index);
+
+// 手番の列の名前。k は 0 か 1。manaka-hce-fit.rs の TEMPO_NAMES と同じ。
+const char* tempo_feature_name(int k);
 
 // ---------------------------------------------------------------------------
 // dump (mobility_dump.cpp)

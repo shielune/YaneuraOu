@@ -35,8 +35,9 @@
 //   legacy164 (既定) … 従来どおり。164 次元 × 焼き込み重みの内積ひとつ。
 //                       option を何も触らなければ変更前と 1 の位まで同じ値を返す。
 //   linear          … HceWeightsFile で読んだ重みとの内積。版と種類は読んだ個数で決まる。
-//                       六つの版それぞれに「利きだけ」「駒得＋利き＋玉」「進行度で按分」の
-//                       三つの幅があり、18 通りはすべて異なるので取り違えない。切片あり。
+//                       六つの版それぞれに「利きだけ」「駒得＋利き＋玉」「進行度で按分」
+//                       「駒得＋利き＋玉＋手番の 2 列」の四つの幅があり、24 通りはすべて
+//                       異なるので取り違えない。切片あり。
 //   mlp             … plain の 231 次元を入力とする全結合層 (231 → 32 → 32 → 1、ReLU)。
 //
 // 切片の置き場所は二つに分けてある。
@@ -280,6 +281,7 @@ double raw_black_pov(const Position& pos) {
 // この局面での、layout.features() 列それぞれの実効的な重み。
 // legacy164 は利きの 164 列だけに重みがあり、駒得と玉の安全度は 0。
 // 按分した重みは前半が x*(1-t)、後半が x*t なので、進行度で畳んで 1 本にする。
+// 手番の 2 列 (kind 3) はここには入れない。print_eval_stat が別に出す。
 // 重みが無いときと mlp のときは false を返す。全結合層の出力は
 // ブロックごとの和ではないので、寄与を分けて出すこと自体ができない。
 bool effective_weights(const Position& pos, const HumanLike::Layout& layout, double* w) {
@@ -301,7 +303,7 @@ bool effective_weights(const Position& pos, const HumanLike::Layout& layout, dou
 				w[layout.off_mobility() + i] = (double)g_linear_w[i];
 			return true;
 		}
-		if (g_linear_kind == 1) {
+		if (g_linear_kind == 1 || g_linear_kind == 3) {
 			for (int i = 0; i < n; ++i)
 				w[i] = (double)g_linear_w[i];
 			return true;
@@ -418,11 +420,13 @@ void print_eval_stat(Position& pos) {
 
 	std::vector<double> w((size_t)n);
 	const bool separable = effective_weights(pos, layout, w.data());
+	// 手番の 2 列は読んだ重みにあるときだけ。HceTempo の値とは別物。
+	const bool turn_columns = g_route == Route::Linear && g_linear_dim != 0 && g_linear_kind == 3;
 
 	std::cout << "--- EVAL STAT: EVAL_MOBILITY" << std::endl
 	          << "  route    = " << kRouteNames[(int)g_route] << std::endl
 	          << "  variant  = " << HumanLike::variant_name(layout.variant)
-	          << " (" << n << " 列)" << std::endl
+	          << " (" << (turn_columns ? layout.with_tempo() : n) << " 列)" << std::endl
 	          << "  phase    = " << t << std::endl;
 
 	if (separable) {
@@ -436,8 +440,16 @@ void print_eval_stat(Position& pos) {
 		}
 		std::cout << "  material = " << mat << std::endl
 		          << "  mobility = " << mob << std::endl
-		          << "  king     = " << kng << std::endl
-		          << "  subtotal = " << (mat + mob + kng)
+		          << "  king     = " << kng << std::endl;
+		double turn = 0.0;
+		if (turn_columns) {
+			float z[HumanLike::NUM_TEMPO_FEATURES];
+			HumanLike::extract_tempo_features(pos, z);
+			for (int k = 0; k < HumanLike::NUM_TEMPO_FEATURES; ++k)
+				turn += (double)g_linear_w[(size_t)n + k] * (double)z[k];
+			std::cout << "  turn     = " << turn << " (重みの手番の 2 列)" << std::endl;
+		}
+		std::cout << "  subtotal = " << (mat + mob + kng + turn)
 		          << " (先手視点、切片の前)" << std::endl;
 	} else if (g_route == Route::Mlp) {
 		std::cout << "  material = n/a" << std::endl
