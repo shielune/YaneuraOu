@@ -17,6 +17,7 @@
 #include "../../misc.h"
 #include "../../usioption.h"
 #include "../humanlike/humanlike_eval.h"
+#include "hce_progress.h"
 
 // "explain" コマンドの実体。NNUE 系の edition に、HCE v2 の線形評価を
 // 説明専用の副評価器として持ち込む。
@@ -50,6 +51,9 @@ struct LinearWeights {
 };
 
 LinearWeights g_w;
+
+// 進行度 (終局までの残り手数の推定)。HceProgressFile で読む。読めていなければ出力に出さない。
+Progress g_progress;
 
 inline double clamp3000(double v) {
 	return v > 3000.0 ? 3000.0 : (v < -3000.0 ? -3000.0 : v);
@@ -242,6 +246,9 @@ void emit_node(const Position& pos, const HumanLike::Layout& layout,
 		      + ",\"see\":" + std::to_string(see)
 		      + ",\"gives_check\":" + (gives_check ? "true" : "false");
 	}
+	// 進行度のファイルを読んでいるときだけ。無いときの出力は今までと同じ。
+	if (g_progress.loaded())
+		line += ",\"moves_left\":" + num(g_progress.moves_left(pos));
 	line += ",\"sfen\":" + json_quote(pos.sfen())
 	      + ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
 	      + ",\"material\":" + num(now.mat)
@@ -270,6 +277,22 @@ void add_hce_explain_options(OptionsMap& options) {
 	// 空のままなら、最初の explain で埋め込みの重みを使う。
 	options.add("HceWeightsFile", Option("", [](const Option& o) {
 		Hce::load_linear_weights((std::string)o);
+		return std::nullopt;
+	}));
+	// 空なら進行度を出さない。読めないときも出さず、理由を info string で知らせる。
+	options.add("HceProgressFile", Option("", [](const Option& o) {
+		const std::string path = (std::string)o;
+		Hce::g_progress = Hce::Progress();
+		if (path.empty())
+			return std::nullopt;
+		std::string error;
+		Hce::Progress loaded;
+		if (loaded.load(path, error)) {
+			Hce::g_progress = loaded;
+			sync_cout << "info string HceProgressFile: loaded " << path << sync_endl;
+		} else {
+			sync_cout << "info string HceProgressFile: " << error << sync_endl;
+		}
 		return std::nullopt;
 	}));
 }
