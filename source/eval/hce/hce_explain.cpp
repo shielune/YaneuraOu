@@ -71,6 +71,11 @@ struct Nets {
 	Mlp speed;
 	Mlp king;
 	Mlp activity;
+	// 各要素の値のうち、17 列の駒の枚数の差で説明できる部分。要素から引いて駒得に足す。
+	// 駒得が「どの要素から見ても駒の価値」になり、ほかの要素には駒の数では言えない分だけが残る。
+	float moved_speed[NUM_MATERIAL_COLUMNS] = {};
+	float moved_king[NUM_MATERIAL_COLUMNS] = {};
+	float moved_activity[NUM_MATERIAL_COLUMNS] = {};
 	int king_radius = 3;
 	bool built = false;
 };
@@ -107,6 +112,18 @@ bool build_nets(const Model& model, std::string& error) {
 			return false;
 		}
 	}
+	auto moved = [&](const char* name, float* out) {
+		const Model::Section* sec = model.find(name);
+		if (!sec) return true;   // 無ければ移さない
+		if (sec->v.size() != NUM_MATERIAL_COLUMNS) {
+			error = std::string("section ") + name + " is not 17 values";
+			return false;
+		}
+		for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i) out[i] = sec->v[i];
+		return true;
+	};
+	if (!moved("mv_s", nets.moved_speed) || !moved("mv_k", nets.moved_king) || !moved("mv_a", nets.moved_activity))
+		return false;
 	nets.built = true;
 	g_nets = nets;
 	return true;
@@ -320,19 +337,24 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 	// 進行度のファイルを読んでいるときだけ。無いときの出力は今までと同じ。
 	if (g_progress.loaded())
 		line += ",\"moves_left\":" + num(g_progress.moves_left(pos));
-	// モデルを読んでいるときだけ。要素ごとの値で、先手視点。足し合わせると評価値になる。
+	// モデルを読んでいるときだけ。要素ごとの値で、先手視点。足し合わせるとモデルの評価値になる。
 	if (model_ready()) {
 		const float left = g_progress.moves_left(pos);
 		int count[NUM_MATERIAL_COLUMNS];
 		material_counts(pos, count);
+
+		// 駒得は、駒の価値の表に枚数を掛けたもの (進行度の倍率の前)。
 		double material = 0.0;
 		for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
 			material += (double)count[i] * (double)g_model.material_values()[i];
 		material *= (double)g_model.curve(Model::MATERIAL, left);
+
 		const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
 		const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
-		std::string parts = "\"material\":" + num(material) + ",\"tempo\":" + num(tempo);
-		// 速度: 王手と短い詰みの 8 列を、先手視点と後手視点で通して引く。
+
+		// 速度、玉の安全度、駒の働きは、それぞれ倍率を掛けたあとの値。
+		bool   has_speed = false, has_king = false, has_activity = false;
+		double speed = 0.0, king = 0.0, activity = 0.0;
 		if (g_nets.speed.valid()) {
 			int s[NUM_SPEED];
 			speed_features(pos, s);
@@ -342,7 +364,8 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 				y[i] = -x[i];
 			}
 			const double raw = (double)(g_nets.speed.forward(x) - g_nets.speed.forward(y)) * 500.0;
-			parts += ",\"speed\":" + num(raw * (double)g_model.curve(Model::SPEED, left));
+			speed = raw * (double)g_model.curve(Model::SPEED, left);
+			has_speed = true;
 		}
 		if (g_nets.king.valid() || g_nets.activity.valid()) {
 			uint8_t board[NUM_BOARD];
@@ -353,8 +376,8 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 				const float black = g_nets.king.forward(window.data());
 				king_window(board, 1, g_nets.king_radius, window.data());
 				const float white = g_nets.king.forward(window.data());
-				parts += ",\"king\":" + num((double)(black - white) * 500.0
-				                              * (double)g_model.curve(Model::KING, left));
+				king = (double)(black - white) * 500.0 * (double)g_model.curve(Model::KING, left);
+				has_king = true;
 			}
 			if (g_nets.activity.valid()) {
 				std::vector<float> facts, sign;
@@ -362,9 +385,29 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 				double sum = 0.0;
 				for (int i = 0; i < n; ++i)
 					sum += (double)g_nets.activity.forward(&facts[size_t(i) * PIECE_FACTS]) * (double)sign[i];
-				parts += ",\"activity\":" + num(sum * 100.0 * (double)g_model.curve(Model::ACTIVITY, left));
+				activity = sum * 100.0 * (double)g_model.curve(Model::ACTIVITY, left);
+				has_activity = true;
 			}
 		}
+
+		// 駒の枚数の差で説明できる部分を、速度・玉・駒の働きから引いて駒得に足す。
+		// 合計は変わらない。駒得は「どの要素から見ても駒の価値」になり、ほかには駒の数では言えない分が残る。
+		auto shift = [&](bool has, double& value, const float* table) {
+			if (!has) return;
+			double moved = 0.0;
+			for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
+				moved += (double)count[i] * (double)table[i];
+			value    -= moved;
+			material += moved;
+		};
+		shift(has_speed,    speed,    g_nets.moved_speed);
+		shift(has_king,     king,     g_nets.moved_king);
+		shift(has_activity, activity, g_nets.moved_activity);
+
+		std::string parts = "\"material\":" + num(material) + ",\"tempo\":" + num(tempo);
+		if (has_speed)    parts += ",\"speed\":"    + num(speed);
+		if (has_king)     parts += ",\"king\":"     + num(king);
+		if (has_activity) parts += ",\"activity\":" + num(activity);
 		line += ",\"parts\":{" + parts + "}";
 	}
 	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
