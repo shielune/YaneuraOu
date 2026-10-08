@@ -22,6 +22,7 @@ jobs:
           - name: kp256-cfworkers
             dir: yaneuraou-wasm-kp256-cfworkers
             edition: YANEURAOU_ENGINE_NNUE_KP256
+            hce_explain: 'ON'
             export_name: YaneuraOu_K_P
             environment: web
             pthread: 0
@@ -44,6 +45,7 @@ jobs:
           - name: pthread-kp256
             dir: yaneuraou-wasm-pthread-kp256
             edition: YANEURAOU_ENGINE_NNUE_KP256
+            hce_explain: 'ON'
             export_name: YaneuraOu_K_P
             environment: web,worker
             pthread: 1
@@ -68,6 +70,7 @@ jobs:
           - name: pthread-halfkp128
             dir: yaneuraou-wasm-pthread-halfkp128
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
+            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP128
             environment: web,worker
             pthread: 1
@@ -80,6 +83,7 @@ jobs:
           - name: pthread-halfkp256
             dir: yaneuraou-wasm-pthread-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
+            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP256
             environment: web,worker
             pthread: 1
@@ -92,6 +96,7 @@ jobs:
           - name: pthread-halfkp768
             dir: yaneuraou-wasm-pthread-halfkp768
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP768
             environment: web,worker
             pthread: 1
@@ -104,6 +109,7 @@ jobs:
           - name: pthread-halfka1024
             dir: yaneuraou-wasm-pthread-halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+            hce_explain: 'ON'
             export_name: YaneuraOu_Nagisa
             environment: web,worker
             pthread: 1
@@ -131,6 +137,7 @@ jobs:
           - name: node-kp256
             dir: yaneuraou-wasm-node-kp256
             edition: YANEURAOU_ENGINE_NNUE_KP256
+            hce_explain: 'ON'
             export_name: YaneuraOu_K_P
             environment: node
             pthread: 1
@@ -159,6 +166,7 @@ jobs:
           - name: node-halfkp128
             dir: yaneuraou-wasm-node-halfkp128
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
+            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP128
             environment: node
             pthread: 1
@@ -173,6 +181,7 @@ jobs:
           - name: node-halfkp256
             dir: yaneuraou-wasm-node-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
+            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP256
             environment: node
             pthread: 1
@@ -187,6 +196,7 @@ jobs:
           - name: node-halfkp768
             dir: yaneuraou-wasm-node-halfkp768
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP768
             environment: node
             pthread: 1
@@ -201,6 +211,7 @@ jobs:
           - name: node-halfka1024
             dir: yaneuraou-wasm-node-halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+            hce_explain: 'ON'
             export_name: YaneuraOu_Nagisa
             environment: node
             pthread: 1
@@ -254,6 +265,7 @@ jobs:
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
               EM_STACK_SIZE=2097152 \
               EM_CLOSURE=0 \
+              HCE_EXPLAIN=${{ matrix.package.hce_explain || 'OFF' }} \
               ${{ matrix.package.extra_make_args }}
 
       - name: verify and compress
