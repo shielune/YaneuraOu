@@ -558,6 +558,8 @@ ifneq (,$(IS_NNUE_EDITION))
 		SOURCES += \
 			eval/humanlike/humanlike_eval.cpp                               \
 			eval/hce/hce_explain.cpp                                        \
+			eval/hce/hce_material.cpp                                       \
+			eval/hce/hce_model.cpp                                          \
 			eval/hce/hce_progress.cpp                                       \
 			eval/hce/hce_speed.cpp                                          \
 			eval/hce/hce_explain_weights_embedded.cpp

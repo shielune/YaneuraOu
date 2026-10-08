@@ -17,6 +17,8 @@
 #include "../../misc.h"
 #include "../../usioption.h"
 #include "../humanlike/humanlike_eval.h"
+#include "hce_material.h"
+#include "hce_model.h"
 #include "hce_progress.h"
 #include "hce_speed.h"
 
@@ -55,6 +57,22 @@ LinearWeights g_w;
 
 // 進行度 (終局までの残り手数の推定)。HceProgressFile で読む。読めていなければ出力に出さない。
 Progress g_progress;
+
+// 局面を要素に分けるモデル。HceExplainFile で読む。
+Model g_model;
+
+// モデルの倍率は、ある進行度のネットワークに合わせて学習してある。違うものと組むと
+// 倍率が合わないので、同じものを読んでいるときだけ要素を出す。
+bool model_ready() {
+	return g_model.loaded() && g_progress.loaded()
+	    && g_model.progress_fingerprint() == g_progress.fingerprint();
+}
+
+void warn_if_unpaired() {
+	if (g_model.loaded() && g_progress.loaded() && !model_ready())
+		sync_cout << "info string HceExplainFile: its curves were fitted against another progress"
+		             " network than the one in HceProgressFile; the parts are not printed" << sync_endl;
+}
 
 // explain に速度の列を付けるか (HceSpeed)。局面ごとに詰みを探すので既定は偽。
 bool g_speed = false;
@@ -253,6 +271,19 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 	// 進行度のファイルを読んでいるときだけ。無いときの出力は今までと同じ。
 	if (g_progress.loaded())
 		line += ",\"moves_left\":" + num(g_progress.moves_left(pos));
+	// モデルを読んでいるときだけ。要素ごとの値で、先手視点。足し合わせると評価値になる。
+	if (model_ready()) {
+		const float left = g_progress.moves_left(pos);
+		int count[NUM_MATERIAL_COLUMNS];
+		material_counts(pos, count);
+		double material = 0.0;
+		for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
+			material += (double)count[i] * (double)g_model.material_values()[i];
+		material *= (double)g_model.curve(Model::MATERIAL, left);
+		const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
+		const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
+		line += ",\"parts\":{\"material\":" + num(material) + ",\"tempo\":" + num(tempo) + "}";
+	}
 	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
 	if (g_speed) {
 		int s[NUM_SPEED];
@@ -292,6 +323,23 @@ void add_hce_explain_options(OptionsMap& options) {
 		Hce::load_linear_weights((std::string)o);
 		return std::nullopt;
 	}));
+	// 空なら要素に分けない。読めないときも分けず、理由を info string で知らせる。
+	options.add("HceExplainFile", Option("", [](const Option& o) {
+		const std::string path = (std::string)o;
+		Hce::g_model = Hce::Model();
+		if (path.empty())
+			return std::nullopt;
+		std::string error;
+		Hce::Model loaded;
+		if (loaded.load(path, error)) {
+			Hce::g_model = loaded;
+			sync_cout << "info string HceExplainFile: loaded " << path << sync_endl;
+			Hce::warn_if_unpaired();
+		} else {
+			sync_cout << "info string HceExplainFile: " << error << sync_endl;
+		}
+		return std::nullopt;
+	}));
 	options.add("HceSpeed", Option(false, [](const Option& o) {
 		Hce::g_speed = (bool)o;
 		return std::nullopt;
@@ -307,6 +355,7 @@ void add_hce_explain_options(OptionsMap& options) {
 		if (loaded.load(path, error)) {
 			Hce::g_progress = loaded;
 			sync_cout << "info string HceProgressFile: loaded " << path << sync_endl;
+			Hce::warn_if_unpaired();
 		} else {
 			sync_cout << "info string HceProgressFile: " << error << sync_endl;
 		}
