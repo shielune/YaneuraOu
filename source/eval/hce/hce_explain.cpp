@@ -18,6 +18,7 @@
 #include "../../usioption.h"
 #include "../humanlike/humanlike_eval.h"
 #include "hce_board.h"
+#include "hce_net.h"
 #include "hce_material.h"
 #include "hce_model.h"
 #include "hce_progress.h"
@@ -64,6 +65,32 @@ Model g_model;
 
 // モデルの倍率は、ある進行度のネットワークに合わせて学習してある。違うものと組むと
 // 倍率が合わないので、同じものを読んでいるときだけ要素を出す。
+// モデルのうち、ネットワークの節を組み立てたもの。
+struct Nets {
+	Mlp speed;
+	bool built = false;
+};
+Nets g_nets;
+
+// 節からネットワークを作る。足りない節があれば false。
+bool build_nets(const Model& model, std::string& error) {
+	Nets nets;
+	const Model::Section* sp = model.find("speed");
+	if (sp) {
+		if (!nets.speed.assign(sp->v, int(sp->p[0]), int(sp->p[1]))) {
+			error = "section speed does not match its widths";
+			return false;
+		}
+		if (nets.speed.in() != 8) {
+			error = "section speed does not take the eight speed columns";
+			return false;
+		}
+	}
+	nets.built = true;
+	g_nets = nets;
+	return true;
+}
+
 bool model_ready() {
 	return g_model.loaded() && g_progress.loaded()
 	    && g_model.progress_fingerprint() == g_progress.fingerprint();
@@ -283,7 +310,20 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		material *= (double)g_model.curve(Model::MATERIAL, left);
 		const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
 		const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
-		line += ",\"parts\":{\"material\":" + num(material) + ",\"tempo\":" + num(tempo) + "}";
+		std::string parts = "\"material\":" + num(material) + ",\"tempo\":" + num(tempo);
+		// 速度: 王手と短い詰みの 8 列を、先手視点と後手視点で通して引く。
+		if (g_nets.speed.valid()) {
+			int s[NUM_SPEED];
+			speed_features(pos, s);
+			float x[NUM_SPEED], y[NUM_SPEED];
+			for (int i = 0; i < NUM_SPEED; ++i) {
+				x[i] = float(s[i]) * 0.25f;
+				y[i] = -x[i];
+			}
+			const double raw = (double)(g_nets.speed.forward(x) - g_nets.speed.forward(y)) * 500.0;
+			parts += ",\"speed\":" + num(raw * (double)g_model.curve(Model::SPEED, left));
+		}
+		line += ",\"parts\":{" + parts + "}";
 	}
 	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
 	if (g_speed) {
@@ -328,11 +368,12 @@ void add_hce_explain_options(OptionsMap& options) {
 	options.add("HceExplainFile", Option("", [](const Option& o) {
 		const std::string path = (std::string)o;
 		Hce::g_model = Hce::Model();
+		Hce::g_nets  = Hce::Nets();
 		if (path.empty())
 			return std::nullopt;
 		std::string error;
 		Hce::Model loaded;
-		if (loaded.load(path, error)) {
+		if (loaded.load(path, error) && Hce::build_nets(loaded, error)) {
 			Hce::g_model = loaded;
 			sync_cout << "info string HceExplainFile: loaded " << path << sync_endl;
 			Hce::warn_if_unpaired();
