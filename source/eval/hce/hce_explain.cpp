@@ -18,6 +18,7 @@
 #include "../../usioption.h"
 #include "../humanlike/humanlike_eval.h"
 #include "hce_board.h"
+#include "hce_factors.h"
 #include "hce_net.h"
 #include "hce_material.h"
 #include "hce_model.h"
@@ -68,6 +69,9 @@ Model g_model;
 // モデルのうち、ネットワークの節を組み立てたもの。
 struct Nets {
 	Mlp speed;
+	Mlp king;
+	Mlp activity;
+	int king_radius = 3;
 	bool built = false;
 };
 Nets g_nets;
@@ -83,6 +87,23 @@ bool build_nets(const Model& model, std::string& error) {
 		}
 		if (nets.speed.in() != 8) {
 			error = "section speed does not take the eight speed columns";
+			return false;
+		}
+	}
+	const Model::Section* kg = model.find("king");
+	if (kg) {
+		const int radius = int(kg->p[2]);
+		if (radius < 1 || radius > 4 || int(kg->p[0]) != window_width(radius)
+		    || !nets.king.assign(kg->v, int(kg->p[0]), int(kg->p[1]))) {
+			error = "section king does not match its window";
+			return false;
+		}
+		nets.king_radius = radius;
+	}
+	const Model::Section* ac = model.find("activity");
+	if (ac) {
+		if (int(ac->p[0]) != PIECE_FACTS || !nets.activity.assign(ac->v, int(ac->p[0]), int(ac->p[1]))) {
+			error = "section activity does not match the per-piece facts";
 			return false;
 		}
 	}
@@ -322,6 +343,27 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 			}
 			const double raw = (double)(g_nets.speed.forward(x) - g_nets.speed.forward(y)) * 500.0;
 			parts += ",\"speed\":" + num(raw * (double)g_model.curve(Model::SPEED, left));
+		}
+		if (g_nets.king.valid() || g_nets.activity.valid()) {
+			uint8_t board[NUM_BOARD];
+			board_features(pos, board);
+			if (g_nets.king.valid()) {
+				std::vector<float> window(size_t(window_width(g_nets.king_radius)));
+				king_window(board, 0, g_nets.king_radius, window.data());
+				const float black = g_nets.king.forward(window.data());
+				king_window(board, 1, g_nets.king_radius, window.data());
+				const float white = g_nets.king.forward(window.data());
+				parts += ",\"king\":" + num((double)(black - white) * 500.0
+				                              * (double)g_model.curve(Model::KING, left));
+			}
+			if (g_nets.activity.valid()) {
+				std::vector<float> facts, sign;
+				const int n = piece_facts(board, facts, sign);
+				double sum = 0.0;
+				for (int i = 0; i < n; ++i)
+					sum += (double)g_nets.activity.forward(&facts[size_t(i) * PIECE_FACTS]) * (double)sign[i];
+				parts += ",\"activity\":" + num(sum * 100.0 * (double)g_model.curve(Model::ACTIVITY, left));
+			}
 		}
 		line += ",\"parts\":{" + parts + "}";
 	}
