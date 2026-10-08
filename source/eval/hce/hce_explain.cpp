@@ -17,6 +17,7 @@
 #include "../../misc.h"
 #include "../../usioption.h"
 #include "../humanlike/humanlike_eval.h"
+#include "hce_board.h"
 #include "hce_material.h"
 #include "hce_model.h"
 #include "hce_progress.h"
@@ -338,6 +339,27 @@ void add_hce_explain_options(OptionsMap& options) {
 		} else {
 			sync_cout << "info string HceExplainFile: " << error << sync_endl;
 		}
+		return std::nullopt;
+	}));
+	// 局面の升ごとの事実を、学習側と突き合わせるために 1 行で出す。explain の出力には影響しない。
+	// 値は UCI の option として受けた SFEN。出力は "hce_board": [987 個の整数]。
+	options.add("HceDumpBoard", Option("", [](const Option& o) {
+		const std::string sfen = (std::string)o;
+		if (sfen.empty())
+			return std::nullopt;
+		Position pos;
+		StateInfo st;
+		if (pos.set(sfen, &st).has_value()) {
+			sync_cout << "info string HceDumpBoard: bad SFEN" << sync_endl;
+			return std::nullopt;
+		}
+		uint8_t out[Hce::NUM_BOARD];
+		Hce::board_features(pos, out);
+		std::string line = "{\"hce_board\":[";
+		for (int i = 0; i < Hce::NUM_BOARD; ++i)
+			line += (i ? "," : "") + std::to_string(int(out[i]));
+		line += "]}";
+		sync_cout << line << sync_endl;
 		return std::nullopt;
 	}));
 	options.add("HceSpeed", Option(false, [](const Option& o) {
