@@ -18,6 +18,7 @@
 #include "../../usioption.h"
 #include "../humanlike/humanlike_eval.h"
 #include "hce_progress.h"
+#include "hce_speed.h"
 
 // "explain" コマンドの実体。NNUE 系の edition に、HCE v2 の線形評価を
 // 説明専用の副評価器として持ち込む。
@@ -54,6 +55,9 @@ LinearWeights g_w;
 
 // 進行度 (終局までの残り手数の推定)。HceProgressFile で読む。読めていなければ出力に出さない。
 Progress g_progress;
+
+// explain に速度の列を付けるか (HceSpeed)。局面ごとに詰みを探すので既定は偽。
+bool g_speed = false;
 
 inline double clamp3000(double v) {
 	return v > 3000.0 ? 3000.0 : (v < -3000.0 ? -3000.0 : v);
@@ -237,7 +241,7 @@ std::string top_movers(const HumanLike::Layout& layout,
 }
 
 // 一つの節点ぶんの JSON。move が MOVE_NONE なら根の局面。
-void emit_node(const Position& pos, const HumanLike::Layout& layout,
+void emit_node(Position& pos, const HumanLike::Layout& layout,
                int ply, Move move, int see, bool gives_check,
                const Snapshot* before, const Snapshot& now, int topn) {
 	std::string line = "{\"ply\":" + std::to_string(ply);
@@ -249,6 +253,15 @@ void emit_node(const Position& pos, const HumanLike::Layout& layout,
 	// 進行度のファイルを読んでいるときだけ。無いときの出力は今までと同じ。
 	if (g_progress.loaded())
 		line += ",\"moves_left\":" + num(g_progress.moves_left(pos));
+	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
+	if (g_speed) {
+		int s[NUM_SPEED];
+		speed_features(pos, s);
+		line += ",\"speed\":{";
+		for (int i = 0; i < NUM_SPEED; ++i)
+			line += std::string(i ? "," : "") + "\"" + kSpeedNames[i] + "\":" + std::to_string(s[i]);
+		line += "}";
+	}
 	line += ",\"sfen\":" + json_quote(pos.sfen())
 	      + ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
 	      + ",\"material\":" + num(now.mat)
@@ -277,6 +290,10 @@ void add_hce_explain_options(OptionsMap& options) {
 	// 空のままなら、最初の explain で埋め込みの重みを使う。
 	options.add("HceWeightsFile", Option("", [](const Option& o) {
 		Hce::load_linear_weights((std::string)o);
+		return std::nullopt;
+	}));
+	options.add("HceSpeed", Option(false, [](const Option& o) {
+		Hce::g_speed = (bool)o;
 		return std::nullopt;
 	}));
 	// 空なら進行度を出さない。読めないときも出さず、理由を info string で知らせる。
