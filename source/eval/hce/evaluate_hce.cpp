@@ -6,7 +6,6 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
-#include <deque>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -36,8 +35,9 @@
 //   legacy164 (既定) … 従来どおり。164 次元 × 焼き込み重みの内積ひとつ。
 //                       option を何も触らなければ変更前と 1 の位まで同じ値を返す。
 //   linear          … HceWeightsFile で読んだ重みとの内積。版と種類は読んだ個数で決まる。
-//                       六つの版それぞれに「利きだけ」「駒得＋利き＋玉」「進行度で按分」の
-//                       三つの幅があり、18 通りはすべて異なるので取り違えない。切片あり。
+//                       六つの版それぞれに「利きだけ」「駒得＋利き＋玉」「進行度で按分」
+//                       「駒得＋利き＋玉＋手番の 2 列」の四つの幅があり、24 通りはすべて
+//                       異なるので取り違えない。切片あり。
 //   mlp             … plain の 231 次元を入力とする全結合層 (231 → 32 → 32 → 1、ReLU)。
 //
 // 切片の置き場所は二つに分けてある。
@@ -281,6 +281,7 @@ double raw_black_pov(const Position& pos) {
 // この局面での、layout.features() 列それぞれの実効的な重み。
 // legacy164 は利きの 164 列だけに重みがあり、駒得と玉の安全度は 0。
 // 按分した重みは前半が x*(1-t)、後半が x*t なので、進行度で畳んで 1 本にする。
+// 手番の 2 列 (kind 3) はここには入れない。print_eval_stat が別に出す。
 // 重みが無いときと mlp のときは false を返す。全結合層の出力は
 // ブロックごとの和ではないので、寄与を分けて出すこと自体ができない。
 bool effective_weights(const Position& pos, const HumanLike::Layout& layout, double* w) {
@@ -302,7 +303,7 @@ bool effective_weights(const Position& pos, const HumanLike::Layout& layout, dou
 				w[layout.off_mobility() + i] = (double)g_linear_w[i];
 			return true;
 		}
-		if (g_linear_kind == 1) {
+		if (g_linear_kind == 1 || g_linear_kind == 3) {
 			for (int i = 0; i < n; ++i)
 				w[i] = (double)g_linear_w[i];
 			return true;
@@ -419,11 +420,13 @@ void print_eval_stat(Position& pos) {
 
 	std::vector<double> w((size_t)n);
 	const bool separable = effective_weights(pos, layout, w.data());
+	// 手番の 2 列は読んだ重みにあるときだけ。HceTempo の値とは別物。
+	const bool turn_columns = g_route == Route::Linear && g_linear_dim != 0 && g_linear_kind == 3;
 
 	std::cout << "--- EVAL STAT: EVAL_MOBILITY" << std::endl
 	          << "  route    = " << kRouteNames[(int)g_route] << std::endl
 	          << "  variant  = " << HumanLike::variant_name(layout.variant)
-	          << " (" << n << " 列)" << std::endl
+	          << " (" << (turn_columns ? layout.with_tempo() : n) << " 列)" << std::endl
 	          << "  phase    = " << t << std::endl;
 
 	if (separable) {
@@ -437,8 +440,16 @@ void print_eval_stat(Position& pos) {
 		}
 		std::cout << "  material = " << mat << std::endl
 		          << "  mobility = " << mob << std::endl
-		          << "  king     = " << kng << std::endl
-		          << "  subtotal = " << (mat + mob + kng)
+		          << "  king     = " << kng << std::endl;
+		double turn = 0.0;
+		if (turn_columns) {
+			float z[HumanLike::NUM_TEMPO_FEATURES];
+			HumanLike::extract_tempo_features(pos, z);
+			for (int k = 0; k < HumanLike::NUM_TEMPO_FEATURES; ++k)
+				turn += (double)g_linear_w[(size_t)n + k] * (double)z[k];
+			std::cout << "  turn     = " << turn << " (重みの手番の 2 列)" << std::endl;
+		}
+		std::cout << "  subtotal = " << (mat + mob + kng + turn)
 		          << " (先手視点、切片の前)" << std::endl;
 	} else if (g_route == Route::Mlp) {
 		std::cout << "  material = n/a" << std::endl
@@ -458,193 +469,6 @@ void print_eval_stat(Position& pos) {
 	          << " (file " << g_file_bias << " + option " << g_opt_bias << ")" << std::endl
 	          << "  tempo    = " << g_opt_tempo << std::endl
 	          << "  eval     = " << (int)Eval::evaluate(pos) << std::endl;
-}
-
-namespace {
-
-// JSON の文字列に出せない字を落とす。列の名前は自前で組んでいるので " と \
-// くらいしか来ないが、SFEN と指し手も同じ道を通すのでまとめて面倒を見る。
-std::string json_quote(const std::string& v) {
-	std::string out = "\"";
-	for (char c : v) {
-		if (c == '"' || c == '\\') { out += '\\'; out += c; }
-		else if ((unsigned char)c < 0x20)  out += ' ';
-		else out += c;
-	}
-	out += '"';
-	return out;
-}
-
-// 小数は要らない。評価値の単位は内部値で、1 の位より下は読む意味がない。
-std::string num(double v) {
-	std::ostringstream ss;
-	ss << (long long)std::llround(v);
-	return ss.str();
-}
-
-// see_ge は「しきい値以上か」しか答えないので、二分探索で数値に直す。
-// 探す幅は駒がぶつかり合って動きうる範囲 (飛車二枚ぶんで足りる) にとってある。
-// 16 回でこの幅を 1 まで詰められる。
-int see_value(const Position& pos, Move m) {
-	int lo = -4000, hi = 4000;   // lo は必ず満たす側、hi は満たさないかもしれない側
-	if (!pos.see_ge(m, (Value)lo)) return lo;
-	if (pos.see_ge(m, (Value)hi))  return hi;
-	while (hi - lo > 1) {
-		const int mid = lo + (hi - lo) / 2;
-		if (pos.see_ge(m, (Value)mid)) lo = mid; else hi = mid;
-	}
-	return lo;
-}
-
-// 一つの節点の、列ごとの寄与。先手視点で、切片と符号反転の前。
-struct Snapshot {
-	std::vector<double> contrib;   // layout.features() 個
-	double mat = 0.0, mob = 0.0, kng = 0.0;
-};
-
-bool take_snapshot(const Position& pos, const HumanLike::Layout& layout, Snapshot& out) {
-	const int n = layout.features();
-	std::vector<float> feat((size_t)n);
-	HumanLike::extract_features_v2(pos, layout, feat.data());
-	std::vector<double> w((size_t)n);
-	if (!effective_weights(pos, layout, w.data()))
-		return false;
-
-	out.contrib.assign((size_t)n, 0.0);
-	out.mat = out.mob = out.kng = 0.0;
-	for (int i = 0; i < n; ++i) {
-		const double c = w[i] * (double)feat[i];
-		out.contrib[(size_t)i] = c;
-		if      (i < layout.off_mobility()) out.mat += c;
-		else if (i < layout.off_king())       out.mob += c;
-		else                                  out.kng += c;
-	}
-	return true;
-}
-
-// 直前の節点から寄与が動いた列を、動いた量の大きい順に topn 個。
-std::string top_movers(const HumanLike::Layout& layout,
-                       const Snapshot& before, const Snapshot& after, int topn) {
-	const int n = layout.features();
-	std::vector<int> order;
-	order.reserve((size_t)n);
-	for (int i = 0; i < n; ++i)
-		if (before.contrib[(size_t)i] != after.contrib[(size_t)i])
-			order.push_back(i);
-	std::sort(order.begin(), order.end(), [&](int a, int b) {
-		return std::abs(after.contrib[(size_t)a] - before.contrib[(size_t)a])
-		     > std::abs(after.contrib[(size_t)b] - before.contrib[(size_t)b]);
-	});
-	if ((int)order.size() > topn)
-		order.resize((size_t)topn);
-
-	std::string out = "[";
-	for (size_t k = 0; k < order.size(); ++k) {
-		const int i = order[k];
-		// feature_v2_name は static な文字列を使い回すので、その場で写す。
-		const std::string name = HumanLike::feature_v2_name(layout, i);
-		if (k) out += ",";
-		out += "{\"name\":" + json_quote(name)
-		     + ",\"d\":" + num(after.contrib[(size_t)i] - before.contrib[(size_t)i]) + "}";
-	}
-	out += "]";
-	return out;
-}
-
-// 一つの節点ぶんの JSON。move が MOVE_NONE なら根の局面。
-void emit_node(const Position& pos, const HumanLike::Layout& layout,
-               int ply, Move move, int see, bool gives_check,
-               const Snapshot* before, const Snapshot& now, int topn) {
-	const double bias = g_file_bias + g_opt_bias;
-	std::string line = "{\"ply\":" + std::to_string(ply);
-	if (move != Move::none()) {
-		line += ",\"move\":" + json_quote(to_usi_string(move))
-		      + ",\"see\":" + std::to_string(see)
-		      + ",\"gives_check\":" + (gives_check ? "true" : "false");
-	}
-	line += ",\"sfen\":" + json_quote(pos.sfen())
-	      + ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + bias))
-	      + ",\"material\":" + num(now.mat)
-	      + ",\"mobility\":" + num(now.mob)
-	      + ",\"king\":" + num(now.kng);
-	if (before) {
-		line += ",\"d_material\":" + num(now.mat - before->mat)
-		      + ",\"d_mobility\":" + num(now.mob - before->mob)
-		      + ",\"d_king\":" + num(now.kng - before->kng)
-		      + ",\"top\":" + top_movers(layout, *before, now, topn);
-	}
-	line += "}";
-	sync_cout << line << sync_endl;
-}
-
-} // namespace
-
-void hce_explain(Position& pos, const std::vector<Move>& pv, int topn) {
-	// linear のときは読んだ重みが決めた版、それ以外は plain。print_eval_stat と同じ。
-	const HumanLike::Layout layout =
-	    (g_route == Route::Linear && g_linear_dim != 0) ? g_linear_layout : plain_layout();
-
-	Snapshot root;
-	if (!take_snapshot(pos, layout, root)) {
-		sync_cout << "{\"error\":"
-		          << json_quote(g_route == Route::Mlp
-		                        ? "mlp route is not separable"
-		                        : "no weights loaded; set HceWeightsFile first")
-		          << "}" << sync_endl;
-		return;
-	}
-
-	// 六つの版は合計こそ揃うが、駒得・利き・玉への配り方が版ごとに大きく違う。
-	// 項の絶対値を単独で読むと版を跨いだ途端に話が合わなくなるので、読んでよい
-	// のは同じ版の中での差分だけ、という断りを出力自体に入れておく。
-	sync_cout << "{\"route\":" << json_quote(kRouteNames[(int)g_route])
-	          << ",\"variant\":" << json_quote(HumanLike::variant_name(layout.variant))
-	          << ",\"pieces\":" << json_quote(HumanLike::pieces_name(layout.pieces))
-	          << ",\"features\":" << layout.features()
-	          << ",\"phase\":" << HumanLike::game_phase(pos)
-	          << ",\"pov\":\"black\""
-	          << ",\"caveat\":" << json_quote(
-	                 "項の絶対値は版ごとに配り方が違う。読んでよいのは同じ版の中での差分だけ。")
-	          << "}" << sync_endl;
-
-	emit_node(pos, layout, 0, Move::none(), 0, false, nullptr, root, topn);
-
-	// 指した手は最後に全部戻すので、StateInfo は寿命が要る。deque なら
-	// 足しても前の要素が動かない。
-	std::deque<StateInfo> states;
-	std::vector<Move> played;
-	Snapshot before = root;
-
-	for (size_t k = 0; k < pv.size(); ++k) {
-		const Move m = pv[k];
-		// 第二引数は「不成も含めて生成した手か」。explain は人が並べた読み筋を
-		// 受けるので、不成の手も弾かずに通す。
-		if (m == Move::none() || !pos.pseudo_legal(m, true) || !pos.legal(m)) {
-			sync_cout << "{\"ply\":" << (k + 1)
-			          << ",\"move\":" << json_quote(to_usi_string(m))
-			          << ",\"error\":\"illegal move\"}" << sync_endl;
-			break;
-		}
-		// 指す前の局面でないと意味がない二つ。
-		const int  see   = see_value(pos, m);
-		const bool check = pos.gives_check(m);
-
-		states.emplace_back();
-		pos.do_move(m, states.back());
-		played.push_back(m);
-
-		Snapshot now;
-		if (!take_snapshot(pos, layout, now)) {
-			sync_cout << "{\"ply\":" << (k + 1)
-			          << ",\"error\":\"weights went away mid-pv\"}" << sync_endl;
-			break;
-		}
-		emit_node(pos, layout, (int)k + 1, m, see, check, &before, now, topn);
-		before = now;
-	}
-
-	for (size_t k = played.size(); k-- > 0; )
-		pos.undo_move(played[k]);
 }
 
 void evaluate_with_no_return(const Position& /*pos*/) {

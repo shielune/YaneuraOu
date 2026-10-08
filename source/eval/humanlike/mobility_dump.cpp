@@ -53,11 +53,11 @@ struct DumpArgs {
 	int         dims = 0;            // 0 なら版の v2 の幅
 	bool        names = false;       // 列名も書き出す
 	Layout      layout;              // 既定は plain
-	int         kind = 1;            // 0 利きだけ / 1 v2 / 2 按分
+	int         kind = 1;            // 0 利きだけ / 1 v2 / 2 按分 / 3 v2 と手番の 2 列
 };
 
 // "input /path output /path variant rank+contact dims 1087" のような並びを読む。
-// variant を書かずに dims だけ書いてもよい。六つの版の 18 通りの幅はすべて異なるので、
+// variant を書かずに dims だけ書いてもよい。六つの版の 24 通りの幅はすべて異なるので、
 // dims だけで版と種類が決まる。
 bool parse_dump_args(const std::string& s, DumpArgs& a, const char* who) {
 	std::istringstream is(s);
@@ -95,10 +95,12 @@ bool parse_dump_args(const std::string& s, DumpArgs& a, const char* who) {
 		a.kind = (a.dims == a.layout.mobility)   ? 0
 		       : (a.dims == a.layout.features()) ? 1
 		       : (a.dims == a.layout.tapered())  ? 2
+		       : (a.dims == a.layout.with_tempo()) ? 3
 		                                         : -1;
 		if (a.kind < 0) {
 			sync_cout << "info string " << who << ": dims must be " << a.layout.mobility
 			          << " / " << a.layout.features() << " / " << a.layout.tapered()
+			          << " / " << a.layout.with_tempo()
 			          << " for variant " << variant_name(v) << sync_endl;
 			return false;
 		}
@@ -117,6 +119,10 @@ bool parse_dump_args(const std::string& s, DumpArgs& a, const char* who) {
 void extract_dims(const Position& pos, const Layout& layout, int kind, float* feat) {
 	if      (kind == 0) extract_features(pos, layout, feat);
 	else if (kind == 1) extract_features_v2(pos, layout, feat);
+	else if (kind == 3) {
+		extract_features_v2(pos, layout, feat);
+		extract_tempo_features(pos, feat + layout.features());
+	}
 	else                extract_features_phased(pos, layout, feat);
 }
 
@@ -227,6 +233,9 @@ void hce_dump_file_cmd(const std::string& args) {
 		os << "names";
 		for (int i = 0; i < a.layout.features(); ++i)
 			os << ' ' << feature_v2_name(a.layout, i);
+		if (a.kind == 3)
+			for (int k = 0; k < NUM_TEMPO_FEATURES; ++k)
+				os << ' ' << tempo_feature_name(k);
 		os << '\n';
 	}
 
@@ -420,9 +429,13 @@ void hce_dump_binpack_cmd(const std::string& args) {
 		    << "pov=black\n"
 		    << "dtype=float32\n"
 		    << "X_shape=(N,D) row-major\n";
-		if (a.names && a.kind != 0)
+		if (a.names && a.kind != 0) {
 			for (int i = 0; i < a.layout.features(); ++i)
 				ofs << "col" << i << "=" << feature_v2_name(a.layout, i) << "\n";
+			if (a.kind == 3)
+				for (int k = 0; k < NUM_TEMPO_FEATURES; ++k)
+					ofs << "col" << (a.layout.features() + k) << "=" << tempo_feature_name(k) << "\n";
+		}
 	}
 
 	sync_cout << "info string HceDumpBinpack: wrote " << kept << " rows (D=" << D
