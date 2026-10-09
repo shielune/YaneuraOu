@@ -41,3 +41,17 @@ gh release edit wasm-v9.60.0 --repo shielune/YaneuraOu --notes-file /tmp/body.md
 ```
 
 とすれば、リポジトリと公開物が食い違わない。
+
+## 同じ版を二度出す (explain の有る版と無い版)
+
+同じ版を、`explain` コマンドの無い `vX.Y.Z` と、有る `vX.Y.Z-explain` の二つのタグで出す。
+
+- タグの末尾が `-explain` のときだけ、NNUE のパッケージを `HCE_EXPLAIN=ON` でビルドする。
+  WASM も Windows も同じ。詰み専用の mate は、どちらのタグでも OFF のまま。
+- パッケージの名前は変わらない。Release が二つできて、tarball の名前の版が
+  `-v9.61.1.tar.gz` と `-v9.61.1-explain.tar.gz` で分かれる。
+- `-explain` の Release は「最新」にしない。`latest` は explain の無い版を指す。
+- 散文も版ごとに別のファイル: `docs/releases/X.Y.Z.md` と `docs/releases/X.Y.Z-explain.md`。
+  `--version 9.61.1-explain` で後者を読む。
+- タグを打たずに試すときは、`build-wasm.yml` と `make-mingw.yml` の
+  `workflow_dispatch` の `explain` 入力を真にする。
