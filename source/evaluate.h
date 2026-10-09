@@ -52,7 +52,13 @@ namespace Eval {
 	// この分解は厳密。探索が使う評価関数とは別物で、探索の値は変わらない。
 	// 呼び出しの前後で pos は変わらない (指した手はすべて戻す)。
 	// header が偽なら、先頭の {"route":...} の行を出さない (同じ局面から複数の読み筋を続けて出すとき)。
-	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn, bool header = true);
+	// rejected が空でなければ、pv のあとに指せなかった手 (反則、パス、resign など) の文字列で、
+	// 読み筋の最後に {"ply":N,"move":...,"error":"illegal move"} の行を出して、そこで終わったと分かるようにする。
+	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn, bool header = true,
+	                 const std::string& rejected = std::string());
+
+	// "explain" コマンドの書き方の誤りを、内訳と同じ JSON の流れに {"error":...} で出す。
+	void hce_explain_usage_error(const std::string& why, const std::string& token);
 
 	// explain が使う重みを差し替える "HceWeightsFile" を生やす。
 	void add_hce_explain_options(OptionsMap& options);

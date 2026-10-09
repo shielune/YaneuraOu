@@ -555,7 +555,8 @@ void add_hce_explain_options(OptionsMap& options) {
 	}));
 }
 
-void hce_explain(Position& pos, const std::vector<Move>& pv, int topn, bool header) {
+void hce_explain(Position& pos, const std::vector<Move>& pv, int topn, bool header,
+                 const std::string& rejected) {
 	using namespace Hce;
 
 	if (g_w.dim == 0)
@@ -619,8 +620,23 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn, bool head
 		before = now;
 	}
 
+	// pv のあとに指せなかった手があれば、そこで終わったことを流れの中に残す。
+	// (pv の途中で弾いたときは、上のループがすでに同じ行を出している。)
+	if (played.size() == pv.size() && !rejected.empty())
+		sync_cout << "{\"ply\":" << (pv.size() + 1)
+		          << ",\"move\":" << json_quote(rejected)
+		          << ",\"error\":\"illegal move\"}" << sync_endl;
+
 	for (size_t k = played.size(); k-- > 0; )
 		pos.undo_move(played[k]);
+}
+
+void hce_explain_usage_error(const std::string& why, const std::string& token) {
+	using namespace Hce;
+	sync_cout << "{\"error\":" << json_quote(why)
+	          << ",\"token\":" << json_quote(token)
+	          << ",\"usage\":" << json_quote("explain [top <n>] [moves <move1> <move2> ...]")
+	          << "}" << sync_endl;
 }
 
 } // namespace Eval
