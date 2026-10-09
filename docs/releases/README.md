@@ -42,16 +42,17 @@ gh release edit wasm-v9.60.0 --repo shielune/YaneuraOu --notes-file /tmp/body.md
 
 とすれば、リポジトリと公開物が食い違わない。
 
-## 同じ版を二度出す (explain の有る版と無い版)
+## explain の有るビルドと無いビルド
 
-同じ版を、`explain` コマンドの無い `vX.Y.Z` と、有る `vX.Y.Z-explain` の二つのタグで出す。
+`explain` コマンドの有る版と無い版は、**同じ Release に並べて載せる**。タグは分けない。
 
-- タグの末尾が `-explain` のときだけ、NNUE のパッケージを `HCE_EXPLAIN=ON` でビルドする。
-  WASM も Windows も同じ。詰み専用の mate は、どちらのタグでも OFF のまま。
-- パッケージの名前は変わらない。Release が二つできて、tarball の名前の版が
-  `-v9.61.1.tar.gz` と `-v9.61.1-explain.tar.gz` で分かれる。
-- `-explain` の Release は「最新」にしない。`latest` は explain の無い版を指す。
-- 散文も版ごとに別のファイル: `docs/releases/X.Y.Z.md` と `docs/releases/X.Y.Z-explain.md`。
-  `--version 9.61.1-explain` で後者を読む。
-- タグを打たずに試すときは、`build-wasm.yml` と `make-mingw.yml` の
-  `workflow_dispatch` の `explain` 入力を真にする。
+- `build-wasm.yml` と `make-mingw.yml` の matrix に `explain: ['OFF', 'ON']` の軸がある。
+  `OFF` が通常のビルド、`ON` が `HCE_EXPLAIN=ON` のビルド。
+- 詰み専用の mate は評価関数がなく、`HCE_EXPLAIN=ON` を渡してもビルドに何も入らない
+  (Makefile の NNUE の節の中だけで効く)。なので `exclude` で ON を作らない。
+- tarball は、通常のものがこれまでの名前のまま、explain 入りのものは版のあとに `-explain` が付く。
+  `yaneuraou-wasm-pthread-kp256-v9.61.1.tar.gz` と `yaneuraou-wasm-pthread-kp256-v9.61.1-explain.tar.gz`。
+  Windows も同じ (`yaneuraou-windows-kp256-v9.61.1-explain.tar.gz`)。
+- 中の `package.json` の名前と版は両方とも同じ。違うのはエンジン本体 (`yaneuraou.wasm` など) だけ。
+- 本文の「explain の有るビルド」の節は `script/generate_release_body.py` が matrix から作る。
+  どのパッケージに `-explain` があるかは matrix の `exclude` を読んで決まる。
