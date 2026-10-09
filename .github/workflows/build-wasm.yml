@@ -10,10 +10,20 @@ on:
         description: "emscripten/emsdk Docker tag"
         required: false
         default: "5.0.5"
+      explain:
+        description: "Build the NNUE packages with the explain command (HCE_EXPLAIN=ON). A tag ending in -explain does this by itself."
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
+
+    env:
+      # Each version is released twice: vX.Y.Z without the explain command,
+      # and vX.Y.Z-explain with it. The tag decides; the packages are the same.
+      EXPLAIN_BUILD: ${{ (endsWith(github.ref, '-explain') || inputs.explain) && 'ON' || 'OFF' }}
 
     strategy:
       fail-fast: false
@@ -265,7 +275,7 @@ jobs:
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
               EM_STACK_SIZE=2097152 \
               EM_CLOSURE=0 \
-              HCE_EXPLAIN=${{ matrix.package.hce_explain || 'OFF' }} \
+              HCE_EXPLAIN=${{ env.EXPLAIN_BUILD == 'ON' && matrix.package.hce_explain || 'OFF' }} \
               ${{ matrix.package.extra_make_args }}
 
       - name: verify and compress
@@ -400,6 +410,9 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "YaneuraOu ${{ steps.version.outputs.version }}"
           body_path: release_body.md
+          # vX.Y.Z-explain is the same version built with the explain command;
+          # the plain vX.Y.Z stays the one "latest" points at.
+          make_latest: ${{ endsWith(steps.version.outputs.tag, '-explain') && 'false' || 'legacy' }}
           # Glob across the matrix-generated tar.gz set — covers however
           # many packages the matrix produces, no per-name listing needed.
           files: |
