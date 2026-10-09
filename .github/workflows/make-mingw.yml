@@ -6,6 +6,12 @@ on:
     tags:
       - "v[0-9]*"
   workflow_dispatch:
+    inputs:
+      explain:
+        description: "Build the NNUE engines with the explain command (HCE_EXPLAIN=ON). A tag ending in -explain does this by itself."
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build-mingw:
@@ -13,6 +19,11 @@ jobs:
     # https://docs.github.com/ja/actions/using-github-hosted-runners/about-github-hosted-runners
     # https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md
     runs-on: ubuntu-22.04
+
+    env:
+      # 同じ版を二度出す。explain コマンドの無い vX.Y.Z と、有る vX.Y.Z-explain。
+      # どちらかはタグで決まる (build-wasm.yml と同じ)。
+      EXPLAIN_BUILD: ${{ (endsWith(github.ref, '-explain') || inputs.explain) && 'ON' || 'OFF' }}
 
     strategy:
       # 1つの archcpu が落ちても残りの組み合わせは見たい
@@ -67,9 +78,9 @@ jobs:
         # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
         # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
         #
-        # explain コマンド (HCE_EXPLAIN) は NNUE の 5 エディションに入れる。
-        # 詰み専用の MATE には評価関数がないので入れない (build-wasm.yml と同じ分け方)。
-        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3 HCE_EXPLAIN=${{ matrix.edition == 'YANEURAOU_MATE_ENGINE' && 'OFF' || 'ON' }}"
+        # explain コマンド (HCE_EXPLAIN) は -explain のタグのときだけ、NNUE の 5 エディションに入れる。
+        # 詰み専用の MATE には評価関数がないので、どちらのタグでも入れない (build-wasm.yml と同じ分け方)。
+        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3 HCE_EXPLAIN=${{ matrix.edition != 'YANEURAOU_MATE_ENGINE' && env.EXPLAIN_BUILD == 'ON' && 'ON' || 'OFF' }}"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -156,4 +167,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          # このジョブが先に Release を作ることがある。-explain の版を「最新」にしない
+          # (build-wasm.yml と同じ指定)。
+          make_latest: ${{ endsWith(steps.version.outputs.tag, '-explain') && 'false' || 'legacy' }}
           files: dist/*.tar.gz
