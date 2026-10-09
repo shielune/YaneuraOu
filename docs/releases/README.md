@@ -56,3 +56,17 @@ gh release edit wasm-v9.60.0 --repo shielune/YaneuraOu --notes-file /tmp/body.md
 - 中の `package.json` の名前と版は両方とも同じ。違うのはエンジン本体 (`yaneuraou.wasm` など) だけ。
 - 本文の「explain の有るビルド」の節は `script/generate_release_body.py` が matrix から作る。
   どのパッケージに `-explain` があるかは matrix の `exclude` を読んで決まる。
+
+## HCE のモデルファイル
+
+`explain` が読む 2 つのファイルは `assets/hce-explain/` に置き、Release の資産として
+tarball と並べて付ける (`build-wasm.yml` の `release-wasm` の `files:`)。
+
+- `hce-progress.bin` (形式 `HCEPRG01`、`HceProgressFile` に渡す): 残り手数を当てる進行度ネット。
+- `hce-explain.bin` (形式 `HCEXPL01`、`HceExplainFile` に渡す): 駒得・速度・玉の安全度・駒の働き・手番のモデル。
+- NAGISA が `nn.bin` の隣に要求する `progress.bin` とは別物。取り違えないよう、名前に `hce-` を付けている。
+- モデルは進行度ファイルとの対で学習してあり、両方の指紋 (進行度ファイル全体の FNV-1a 64) が合わないと
+  `explain` は内訳を出さない。差し替えるときは 2 つ一緒に。
+- 本文の表 (大きさと SHA-256) は `script/generate_release_body.py` がファイルそのものから作る。
+  ファイルが無ければ「利用者が用意する」という文になる。
+- バイナリ扱いにするため `.gitattributes` に `assets/hce-explain/*.bin binary` を足してある。
