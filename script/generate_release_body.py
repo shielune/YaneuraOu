@@ -296,6 +296,48 @@ Load a book through the `BookDir` / `BookFile` USI options.
 > 700T-shock (32 MB) OOMs the 128 MB cfworkers heap — on cfworkers, stick to 100T-shock. The petabook strains the heap even on pthread variants."""
 
 
+def editions_with_explain(matrix: dict) -> list[str]:
+    """The editions of a workflow matrix that are also built with the explain command.
+
+    The matrix has an `explain: [OFF, ON]` axis; `exclude` lists the editions
+    that skip ON (mate: it has no evaluation to explain). Reading it from
+    there keeps this text from drifting from what CI builds.
+    """
+    if "ON" not in matrix.get("explain", []):
+        return []
+    skipped = set()
+    for x in matrix.get("exclude", []):
+        if x.get("explain") != "ON":
+            continue
+        ed = x.get("edition") or (x.get("package") or {}).get("edition")
+        if ed:
+            skipped.add(ed)
+    if "edition" in matrix:
+        names = list(matrix["edition"])
+    else:
+        names = [p["edition"] for p in matrix["package"]]
+    return [e for e in names if e not in skipped]
+
+
+def explain_section(packages: list[dict], wasm_matrix: dict) -> str:
+    """Say what the `-explain` tarballs are."""
+    n = len(editions_with_explain(wasm_matrix))
+    if n == 0:
+        return ""
+    names = [p["dir"] for p in packages
+             if p["edition"] in set(editions_with_explain(wasm_matrix))]
+    return f"""## Builds with the `explain` command
+
+The {word(len(names))} NNUE packages are also built with `HCE_EXPLAIN=ON` and attached as
+`<package>-v<version>-explain.tar.gz`, next to the plain `<package>-v<version>.tar.gz`
+(the Windows engines likewise). They are the same package with an engine that also answers
+`explain moves <moves>`: for each position of a line it splits the evaluation into material,
+speed, king safety, piece activity and tempo. It reads two files you supply
+(`HceProgressFile` and `HceExplainFile`); without them it prints only the older linear
+breakdown. The plain package has no `explain` command; use it when you do not need one.
+The Mate packages have no evaluation to explain and come in one build only."""
+
+
 def windows_section(mingw_workflow: Path) -> str:
     """Describe the tarballs make-mingw.yml attaches to this same release.
 
@@ -309,16 +351,19 @@ def windows_section(mingw_workflow: Path) -> str:
         matrix = data["jobs"]["build-mingw"]["strategy"]["matrix"]
         archcpus = list(matrix["archcpu"])
         editions = list(matrix["edition"])
+        n_explain = len(editions_with_explain(matrix))
     except (KeyError, TypeError):
         return ""
 
     cpus = ", ".join(f"`{a}`" for a in archcpus)
     return f"""## Windows (native)
 
-Also attached: {word(len(editions))} `yaneuraou-windows-*.tar.gz` files, one per
+Also attached: {word(len(editions))} `yaneuraou-windows-<network>-v<version>.tar.gz` files, one per
 network, built with MinGW for 64-bit Windows. Each holds that engine compiled
 for every CPU target — {cpus} — so download the network you want and pick the
-`.exe` matching your machine.
+`.exe` matching your machine. The {word(n_explain)} NNUE networks also come as
+`yaneuraou-windows-<network>-v<version>-explain.tar.gz`, built with the explain command
+(see above).
 
 **Which CPU build**: `AVX2` covers any Haswell-or-later Intel and most AMD. Use
 `SSE42` on older hardware, `ZEN2` / `ZEN3` on Ryzen, and the `AVX512*` builds
@@ -345,7 +390,8 @@ def load_headline(version: str, notes_dir: Path) -> str | None:
 
 
 def build_body(packages: list[dict], headline: str | None = None,
-               mingw_workflow: Path | None = None) -> str:
+               mingw_workflow: Path | None = None,
+               wasm_matrix: dict | None = None) -> str:
     by_cat: dict[str, list[dict]] = {}
     for p in packages:
         cat = p.get("category")
@@ -423,6 +469,10 @@ def build_body(packages: list[dict], headline: str | None = None,
     if node_rows:
         sections.append(table_node(node_rows))
     sections.append(STATIC_NODE_QUICKSTART)
+    if wasm_matrix:
+        explain = explain_section(packages, wasm_matrix)
+        if explain:
+            sections.append(explain)
     if mingw_workflow:
         win = windows_section(mingw_workflow)
         if win:
@@ -463,7 +513,8 @@ def main() -> int:
     args = ap.parse_args()
 
     wf = yaml.safe_load(args.workflow.read_text())
-    packages = wf["jobs"]["build-wasm"]["strategy"]["matrix"]["package"]
+    wasm_matrix = wf["jobs"]["build-wasm"]["strategy"]["matrix"]
+    packages = wasm_matrix["package"]
     headline = load_headline(args.version, args.notes_dir)
     if headline is None:
         print(
@@ -472,7 +523,8 @@ def main() -> int:
             file=sys.stderr,
         )
     body = build_body(packages, headline,
-                      mingw_workflow=args.workflow.parent / "make-mingw.yml")
+                      mingw_workflow=args.workflow.parent / "make-mingw.yml",
+                      wasm_matrix=wasm_matrix)
     args.output.write_text(body)
     print(f"wrote {args.output} ({len(body)} bytes, {body.count(chr(10))} lines)", file=sys.stderr)
     return 0

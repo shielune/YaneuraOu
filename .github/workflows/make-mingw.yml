@@ -6,12 +6,6 @@ on:
     tags:
       - "v[0-9]*"
   workflow_dispatch:
-    inputs:
-      explain:
-        description: "Build the NNUE engines with the explain command (HCE_EXPLAIN=ON). A tag ending in -explain does this by itself."
-        type: boolean
-        required: false
-        default: false
 
 jobs:
   build-mingw:
@@ -19,11 +13,6 @@ jobs:
     # https://docs.github.com/ja/actions/using-github-hosted-runners/about-github-hosted-runners
     # https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md
     runs-on: ubuntu-22.04
-
-    env:
-      # 同じ版を二度出す。explain コマンドの無い vX.Y.Z と、有る vX.Y.Z-explain。
-      # どちらかはタグで決まる (build-wasm.yml と同じ)。
-      EXPLAIN_BUILD: ${{ (endsWith(github.ref, '-explain') || inputs.explain) && 'ON' || 'OFF' }}
 
     strategy:
       # 1つの archcpu が落ちても残りの組み合わせは見たい
@@ -60,6 +49,14 @@ jobs:
           - ZEN3
         # 32bit (i686) は配布しないので、それ向けの除外は不要になった。
         # AVXVNNI (-march=alderlake) は ubuntu-22.04 の MinGW では通らない。
+        #
+        # どのエディションも explain コマンドの無い版 (OFF) と、有る版 (ON, HCE_EXPLAIN=ON)
+        # を作り、Release には両方を載せる (build-wasm.yml と同じ)。詰み専用の MATE には
+        # 評価関数がなく説明するものが無いので、ON は作らない。
+        explain: ['OFF', 'ON']
+        exclude:
+          - edition: YANEURAOU_MATE_ENGINE
+            explain: 'ON'
 
     steps:
       - name: Checkout own repository
@@ -77,14 +74,11 @@ jobs:
       - name: make
         # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
         # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
-        #
-        # explain コマンド (HCE_EXPLAIN) は -explain のタグのときだけ、NNUE の 5 エディションに入れる。
-        # 詰み専用の MATE には評価関数がないので、どちらのタグでも入れない (build-wasm.yml と同じ分け方)。
-        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3 HCE_EXPLAIN=${{ matrix.edition != 'YANEURAOU_MATE_ENGINE' && env.EXPLAIN_BUILD == 'ON' && 'ON' || 'OFF' }}"
+        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3 HCE_EXPLAIN=${{ matrix.explain }}"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_${{ github.sha }}
+          name: build-mingw_${{ github.run_number }}_${{ matrix.edition }}_${{ matrix.compiler }}_${{ matrix.target }}_${{ matrix.archcpu }}_explain${{ matrix.explain }}_${{ github.sha }}
           path: ./main/build/**/*
 
   release-mingw:
@@ -105,11 +99,17 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
-      - name: Download every build artifact
+      - name: Download the builds without the explain command
         uses: actions/download-artifact@v8
         with:
-          pattern: build-mingw_*
-          path: download/
+          pattern: build-mingw_*_explainOFF_*
+          path: download/plain
+
+      - name: Download the builds with the explain command
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-mingw_*_explainON_*
+          path: download/explain
 
       # The matrix produces one artifact per (edition, archcpu) pair, each
       # holding a single .exe. Ship one tarball per engine instead, so a user
@@ -122,7 +122,7 @@ jobs:
       - name: Repack one tarball per engine
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          mkdir -p stage dist
+          mkdir -p dist
 
           network_of() {
             case "$1" in
@@ -138,25 +138,35 @@ jobs:
             esac
           }
 
-          find download -name '*.exe' -print0 | while IFS= read -r -d '' exe; do
-            base="$(basename "$exe")"
-            # <FileStr>-windows-<compiler>-<target>-<archcpu>.exe
-            network="$(network_of "${base%%-windows-*}")"
-            case "$network" in
-              UNMAPPED:*) echo "no network name for ${network#UNMAPPED:}" >&2; exit 1 ;;
-            esac
-            mkdir -p "stage/${network}"
-            # Inside the archive, name each binary after its CPU target only.
-            cp "$exe" "stage/${network}/yaneuraou-windows-${network}-${base##*-}"
-          done
+          # pack <directory holding the .exe files> <tarball suffix>
+          # The builds with the explain command get the same names with
+          # -explain before the extension, as the WASM packages do.
+          pack() {
+            rm -rf stage
+            mkdir -p stage
+            find "$1" -name '*.exe' -print0 | while IFS= read -r -d '' exe; do
+              base="$(basename "$exe")"
+              # <FileStr>-windows-<compiler>-<target>-<archcpu>.exe
+              network="$(network_of "${base%%-windows-*}")"
+              case "$network" in
+                UNMAPPED:*) echo "no network name for ${network#UNMAPPED:}" >&2; exit 1 ;;
+              esac
+              mkdir -p "stage/${network}"
+              # Inside the archive, name each binary after its CPU target only.
+              cp "$exe" "stage/${network}/yaneuraou-windows-${network}-${base##*-}"
+            done
 
-          # .tar.gz rather than .zip, to match the WASM packages in the same
-          # release. Windows 11 unpacks these natively; older Windows needs
-          # 7-Zip or similar.
-          for d in stage/*/; do
-            network="$(basename "$d")"
-            tar czf "dist/yaneuraou-windows-${network}-v${VERSION}.tar.gz" -C "$d" .
-          done
+            # .tar.gz rather than .zip, to match the WASM packages in the same
+            # release. Windows 11 unpacks these natively; older Windows needs
+            # 7-Zip or similar.
+            for d in stage/*/; do
+              network="$(basename "$d")"
+              tar czf "dist/yaneuraou-windows-${network}-v${VERSION}$2.tar.gz" -C "$d" .
+            done
+          }
+
+          pack download/plain ""
+          pack download/explain "-explain"
           ls -lh dist/
 
       # Same tag as build-wasm.yml, so these land on the release that
@@ -167,7 +177,4 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          # このジョブが先に Release を作ることがある。-explain の版を「最新」にしない
-          # (build-wasm.yml と同じ指定)。
-          make_latest: ${{ endsWith(steps.version.outputs.tag, '-explain') && 'false' || 'legacy' }}
           files: dist/*.tar.gz

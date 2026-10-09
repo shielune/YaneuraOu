@@ -10,29 +10,26 @@ on:
         description: "emscripten/emsdk Docker tag"
         required: false
         default: "5.0.5"
-      explain:
-        description: "Build the NNUE packages with the explain command (HCE_EXPLAIN=ON). A tag ending in -explain does this by itself."
-        type: boolean
-        required: false
-        default: false
 
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
 
-    env:
-      # Each version is released twice: vX.Y.Z without the explain command,
-      # and vX.Y.Z-explain with it. The tag decides; the packages are the same.
-      EXPLAIN_BUILD: ${{ (endsWith(github.ref, '-explain') || inputs.explain) && 'ON' || 'OFF' }}
-
     strategy:
       fail-fast: false
       matrix:
+        # Every package is built without the explain command (HCE_EXPLAIN=OFF) and,
+        # except mate, with it (ON). The release carries both: the plain tarball
+        # and one ending in -explain. Mate has no evaluation to explain.
+        explain: ['OFF', 'ON']
+        exclude:
+          - package:
+              edition: YANEURAOU_MATE_ENGINE
+            explain: 'ON'
         package:
           - name: kp256-cfworkers
             dir: yaneuraou-wasm-kp256-cfworkers
             edition: YANEURAOU_ENGINE_NNUE_KP256
-            hce_explain: 'ON'
             export_name: YaneuraOu_K_P
             environment: web
             pthread: 0
@@ -55,7 +52,6 @@ jobs:
           - name: pthread-kp256
             dir: yaneuraou-wasm-pthread-kp256
             edition: YANEURAOU_ENGINE_NNUE_KP256
-            hce_explain: 'ON'
             export_name: YaneuraOu_K_P
             environment: web,worker
             pthread: 1
@@ -80,7 +76,6 @@ jobs:
           - name: pthread-halfkp128
             dir: yaneuraou-wasm-pthread-halfkp128
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
-            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP128
             environment: web,worker
             pthread: 1
@@ -93,7 +88,6 @@ jobs:
           - name: pthread-halfkp256
             dir: yaneuraou-wasm-pthread-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
-            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP256
             environment: web,worker
             pthread: 1
@@ -106,7 +100,6 @@ jobs:
           - name: pthread-halfkp768
             dir: yaneuraou-wasm-pthread-halfkp768
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
-            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP768
             environment: web,worker
             pthread: 1
@@ -119,7 +112,6 @@ jobs:
           - name: pthread-halfka1024
             dir: yaneuraou-wasm-pthread-halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
-            hce_explain: 'ON'
             export_name: YaneuraOu_Nagisa
             environment: web,worker
             pthread: 1
@@ -147,7 +139,6 @@ jobs:
           - name: node-kp256
             dir: yaneuraou-wasm-node-kp256
             edition: YANEURAOU_ENGINE_NNUE_KP256
-            hce_explain: 'ON'
             export_name: YaneuraOu_K_P
             environment: node
             pthread: 1
@@ -176,7 +167,6 @@ jobs:
           - name: node-halfkp128
             dir: yaneuraou-wasm-node-halfkp128
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
-            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP128
             environment: node
             pthread: 1
@@ -191,7 +181,6 @@ jobs:
           - name: node-halfkp256
             dir: yaneuraou-wasm-node-halfkp256
             edition: YANEURAOU_ENGINE_NNUE
-            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP256
             environment: node
             pthread: 1
@@ -206,7 +195,6 @@ jobs:
           - name: node-halfkp768
             dir: yaneuraou-wasm-node-halfkp768
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
-            hce_explain: 'ON'
             export_name: YaneuraOu_HalfKP768
             environment: node
             pthread: 1
@@ -221,7 +209,6 @@ jobs:
           - name: node-halfka1024
             dir: yaneuraou-wasm-node-halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
-            hce_explain: 'ON'
             export_name: YaneuraOu_Nagisa
             environment: node
             pthread: 1
@@ -275,7 +262,7 @@ jobs:
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
               EM_STACK_SIZE=2097152 \
               EM_CLOSURE=0 \
-              HCE_EXPLAIN=${{ env.EXPLAIN_BUILD == 'ON' && matrix.package.hce_explain || 'OFF' }} \
+              HCE_EXPLAIN=${{ matrix.explain }} \
               ${{ matrix.package.extra_make_args }}
 
       - name: verify and compress
@@ -297,7 +284,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.package.dir }}-dist
+          name: ${{ matrix.package.dir }}${{ matrix.explain == 'ON' && '-explain' || '' }}-dist
           path: packages/${{ matrix.package.dir }}/dist/
 
   release-wasm:
@@ -336,17 +323,23 @@ jobs:
           # packages exist. Surface its dirs to the subsequent shell + the
           # action-gh-release step so we don't repeat the list inline.
           python3 - <<'PY'
-          import json, os, yaml
+          import os, yaml
           wf = yaml.safe_load(open('.github/workflows/build-wasm.yml'))
-          pkgs = wf['jobs']['build-wasm']['strategy']['matrix']['package']
-          dirs = [p['dir'] for p in pkgs]
+          m = wf['jobs']['build-wasm']['strategy']['matrix']
+          # Editions the matrix leaves out of the explain build (mate).
+          no_explain = {x['package']['edition'] for x in m.get('exclude', [])
+                        if x.get('explain') == 'ON'}
+          dirs = [p['dir'] for p in m['package']]
+          explain_dirs = [p['dir'] for p in m['package'] if p['edition'] not in no_explain]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('dirs<<EOF\n' + '\n'.join(dirs) + '\nEOF\n')
+              f.write('explain_dirs<<EOF\n' + '\n'.join(explain_dirs) + '\nEOF\n')
           PY
 
       - name: Stage each package + compile loader + create tar.gz
         env:
           PKG_DIRS: ${{ steps.matrix.outputs.dirs }}
+          EXPLAIN_DIRS: ${{ steps.matrix.outputs.explain_dirs }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Drive directly from the matrix dirs piped through GITHUB_OUTPUT.
@@ -354,6 +347,23 @@ jobs:
           # this loop expands automatically. `d` is the bare package name;
           # the working tree keeps packages under packages/, but tarballs are
           # rooted at the package name so consumer paths don't change.
+          #
+          # Each package is packed twice when the matrix built it with the
+          # explain command: first as it is (-v<version>.tar.gz), then with the
+          # explain build's engine copied over it (-v<version>-explain.tar.gz).
+          pack() {
+            # pack <package dir> <tarball suffix> <extra files>
+            tar czf "$1-v${VERSION}$2.tar.gz" -C packages \
+              "$1/package.json" \
+              "$1/README.md" \
+              "$1/SPEC.md" \
+              "$1/dist/index.js" \
+              "$1/dist/index.d.ts" \
+              "$1/dist/yaneuraou.js" \
+              "$1/dist/yaneuraou.wasm" \
+              "$1/dist/yaneuraou.wasm.br" \
+              $3
+          }
           while IFS= read -r d; do
             [ -n "$d" ] || continue
             p="packages/$d"
@@ -376,16 +386,11 @@ jobs:
                 extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
                 ;;
             esac
-            tar czf "${d}-v${VERSION}.tar.gz" -C packages \
-              "$d/package.json" \
-              "$d/README.md" \
-              "$d/SPEC.md" \
-              "$d/dist/index.js" \
-              "$d/dist/index.d.ts" \
-              "$d/dist/yaneuraou.js" \
-              "$d/dist/yaneuraou.wasm" \
-              "$d/dist/yaneuraou.wasm.br" \
-              $extra
+            pack "$d" "" "$extra"
+            if grep -qxF "$d" <<<"$EXPLAIN_DIRS"; then
+              cp -R "download/${d}-explain-dist/." "$p/dist/"
+              pack "$d" "-explain" "$extra"
+            fi
           done <<EOF
           $PKG_DIRS
           EOF
@@ -410,10 +415,8 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "YaneuraOu ${{ steps.version.outputs.version }}"
           body_path: release_body.md
-          # vX.Y.Z-explain is the same version built with the explain command;
-          # the plain vX.Y.Z stays the one "latest" points at.
-          make_latest: ${{ endsWith(steps.version.outputs.tag, '-explain') && 'false' || 'legacy' }}
           # Glob across the matrix-generated tar.gz set — covers however
           # many packages the matrix produces, no per-name listing needed.
           files: |
             yaneuraou-wasm-*-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-*-v${{ steps.version.outputs.version }}-explain.tar.gz
