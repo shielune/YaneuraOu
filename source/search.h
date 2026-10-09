@@ -187,6 +187,9 @@ struct LimitsType {
 #if !STOCKFISH
         disablePvInterval               = false;
 #endif
+#if defined(USE_HCE_EXPLAIN)
+        explain                         = false;
+#endif
     }
 
     // 時間制御を行うのか。
@@ -253,6 +256,12 @@ struct LimitsType {
 
     // benchコマンド中はPV出力間隔の抑制を無効化して、最終info nodesを安定して取得する。
     bool disablePvInterval;
+#endif
+
+#if defined(USE_HCE_EXPLAIN)
+    // "go ... explain"。探索のあと、bestmoveの前に、読み筋と、その末端からの静止探索の読み筋を
+    // "explain"に通した内訳を出す。
+    bool explain;
 #endif
 };
 

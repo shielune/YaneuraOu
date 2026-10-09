@@ -51,7 +51,8 @@ namespace Eval {
 	// 使うのは HCE v2 の線形評価で、評価値は列ごとの寄与の和そのものなので、
 	// この分解は厳密。探索が使う評価関数とは別物で、探索の値は変わらない。
 	// 呼び出しの前後で pos は変わらない (指した手はすべて戻す)。
-	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn);
+	// header が偽なら、先頭の {"route":...} の行を出さない (同じ局面から複数の読み筋を続けて出すとき)。
+	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn, bool header = true);
 
 	// explain が使う重みを差し替える "HceWeightsFile" を生やす。
 	void add_hce_explain_options(OptionsMap& options);
