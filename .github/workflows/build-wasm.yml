@@ -420,3 +420,5 @@ jobs:
           files: |
             yaneuraou-wasm-*-v${{ steps.version.outputs.version }}.tar.gz
             yaneuraou-wasm-*-v${{ steps.version.outputs.version }}-explain.tar.gz
+            assets/hce-explain/hce-progress.bin
+            assets/hce-explain/hce-explain.bin
