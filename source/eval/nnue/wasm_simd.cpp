@@ -116,5 +116,9 @@ template void affine<  64,  1,   64>(const int8_t A[ 1][  64], const uint8_t x[ 
 template void affine<1024, 16, 1024>(const int8_t A[16][1024], const uint8_t x[1024], const int32_t b[16], int32_t y[16]);
 template void affine<  30, 64,   32>(const int8_t A[64][  32], const uint8_t x[  32], const int32_t b[64], int32_t y[64]);
 
+// SFNN HalfKA_hm2_2304x2_15_64 (V4)
+// 💡 L1以降は 1024 版と同じ形なので、入力層のぶんだけ足せばよい。
+template void affine<2304, 16, 2304>(const int8_t A[16][2304], const uint8_t x[2304], const int32_t b[16], int32_t y[16]);
+
 } // namespace emscripten_wasm_simd
 #endif
