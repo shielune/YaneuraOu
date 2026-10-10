@@ -970,6 +970,15 @@ void Search::YaneuraOuWorker::pre_start_searching() {
     }
 }
 
+size_t Search::YaneuraOuWorker::multi_pv_option() const {
+    size_t n = size_t(options["MultiPV"]);
+#if defined(USE_HCE_EXPLAIN)
+    if (limits.explain)
+        n = std::max(n, kExplainLines);
+#endif
+    return n;
+}
+
 void Search::YaneuraOuWorker::start_searching() {
 
 #if defined(USE_SFNN)
@@ -1275,7 +1284,7 @@ SKIP_SEARCH:
     Skill skill = Skill(20, 0);
 #endif
 
-    if (int(options["MultiPV"]) == 1 && !limits.depth && !limits.mate && !skill.enabled()
+    if (multi_pv_option() == 1 && !limits.depth && !limits.mate && !skill.enabled()
         && rootMoves[0].pv[0] != Move::none())
 #if STOCKFISH
         bestThread = threads.get_best_thread()->worker.get();
@@ -1430,6 +1439,76 @@ SKIP_SEARCH:
 
 #endif
 
+#if defined(USE_HCE_EXPLAIN)
+    // "go ... explain": 候補手の読み筋それぞれに、その末端からの静止探索の読み筋をつなぎ、
+    // まとめて"explain"に通す。MultiPVはkExplainLines本以上で探索してあるので、
+    // 上位kExplainLines本を順に出す。
+    //
+    // 末端が駒の取り合いの途中だと、取る手の直後の局面は取り返しが読み筋の外にあって
+    // 駒損に見える。静止探索で静かな局面まで進めると、探索の値と同じ条件で内訳を見られる。
+    //
+    // bestmoveの前に出す。GUIはbestmoveを待つので、ここで出せば別のコマンドを送る手間がない。
+    // 探索スレッドはすべて止まっているので、rootPosを動かしてよい。
+    // MultiPVが1より大きいと、get_best_thread()は使わず、bestThreadはこのスレッドになる。
+    if (limits.explain && !search_skipped && !bestThread->rootMoves.empty()
+        && !bestThread->rootMoves[0].pv.empty())
+    {
+        // qsearch_pv()は節点数と選択深さを書き換えるので、最後に戻す。
+        const auto savedNodes    = nodes.load(std::memory_order_relaxed);
+        const auto savedSelDepth = selDepth;
+
+        const size_t lines = std::min({bestThread->rootMoves.size(), multi_pv_option(), kExplainLines});
+        for (size_t i = 0; i < lines; ++i)
+        {
+            const auto& rm = bestThread->rootMoves[i];
+            if (rm.pv.empty())
+                continue;
+
+            std::vector<Move> line;
+            for (Move m : rm.pv)
+                line.push_back(m);
+
+            // 読み筋を指して、末端から静止探索する。
+            std::vector<StateInfo> states(line.size());
+            size_t                 played = 0;
+            for (; played < line.size(); ++played)
+            {
+                const Move m = line[played];
+                if (!m.is_ok() || !(rootPos.pseudo_legal_s<true>(m) && rootPos.legal(m)))
+                    break;
+                rootPos.do_move(m, states[played]);
+            }
+
+            // 途中で指せない手があれば、そこまでで切る。静止探索はしない。
+            PVMoves quiet;
+            if (played == line.size())
+                qsearch_pv(rootPos, quiet);
+
+            for (size_t k = played; k-- > 0;)
+                rootPos.undo_move(line[k]);
+
+            line.resize(played);
+            const size_t pvLength = line.size();
+            for (Move m : quiet)
+                line.push_back(m);
+
+            // info行と同じ評価値。探索が終わっていない行は一つ前の反復の値。
+            Value v = rm.score != -VALUE_INFINITE ? rm.uciScore : rm.previousScore;
+            if (v == -VALUE_INFINITE)
+                v = VALUE_ZERO;
+
+            // どこまでが探索の読み筋で、どこからが静止探索かを示す。
+            sync_cout << "{\"explain_go\":{\"multipv\":" << (i + 1)
+                      << ",\"score\":\"" << USIEngine::format_score(v) << "\""
+                      << ",\"pv\":" << pvLength << ",\"qsearch\":" << quiet.size() << "}}" << sync_endl;
+            Eval::hce_explain(rootPos, line, 5, i == 0);
+        }
+
+        nodes.store(savedNodes, std::memory_order_relaxed);
+        selDepth = savedSelDepth;
+    }
+#endif
+
     main_manager()->updates.onBestmove(bestmove, ponder);
 }
 
@@ -1540,7 +1619,7 @@ bool Search::YaneuraOuWorker::iterative_deepening() {
     // MultiPV
     // 💡 bestmoveとしてしこの局面の上位N個を探索する機能
 
-    size_t multiPV = size_t(options["MultiPV"]);
+    size_t multiPV = multi_pv_option();
 
 #if STOCKFISH
     Skill skill(options["Skill Level"], options["UCI_LimitStrength"] ? int(options["UCI_Elo"]) : 0);
@@ -5754,7 +5833,7 @@ void SearchManager::pv(Search::YaneuraOuWorker&  worker,
     auto&      rootMoves = worker.rootMoves;
     auto&      pos       = worker.rootPos;
     size_t     pvIdx     = worker.pvIdx;
-    size_t     multiPV   = std::min(size_t(worker.options["MultiPV"]), rootMoves.size());
+    size_t     multiPV   = std::min(worker.multi_pv_option(), rootMoves.size());
 #if STOCKFISH
     uint64_t tbHits = threads.tb_hits() + (worker.tbConfig.rootInTB ? rootMoves.size() : 0);
 #endif
