@@ -24,6 +24,7 @@
 #include "hce_model.h"
 #include "hce_progress.h"
 #include "hce_speed.h"
+#include "../../mate/mate.h"
 
 // "explain" コマンドの実体。NNUE 系の edition に、HCE v2 の線形評価を
 // 説明専用の副評価器として持ち込む。
@@ -142,6 +143,12 @@ void warn_if_unpaired() {
 
 // explain に速度の列を付けるか (HceSpeed)。局面ごとに詰みを探すので既定は偽。
 bool g_speed = false;
+
+// 手番を渡した局面で、手番でない側の詰み (詰めろ) を DfPn で探すときのノード数の上限 (HceThreat)。
+// 0 なら探さない。既定は 100 万: 手元の 1 局 (776 局面) では、詰めろ 64 局面のうち 63 を見つけ、
+// 詰みと答えて間違いはなかった。上限で打ち切るので長い詰みは見逃すが、詰みと答えたときは証明できたときだけ。
+constexpr u64 kDefaultThreatNodes = 1000000;
+u64 g_threat_nodes = kDefaultThreatNodes;
 
 inline double clamp3000(double v) {
 	return v > 3000.0 ? 3000.0 : (v < -3000.0 ? -3000.0 : v);
@@ -411,6 +418,35 @@ std::string parts_json(const Parts& p) {
 	return out;
 }
 
+// 手番を渡した局面 pos (王手はかかっていない) で、手番側 (= もとの手番でない側) の詰みを DfPn で探す。
+// 詰みを証明できたときだけ ply と読み筋を返す。上限までに解けない、不詰、メモリ不足は、いずれも
+// 見つからなかった扱い (ply は 0)。
+struct Threat {
+	int               ply = 0;
+	std::vector<Move> pv;
+};
+
+Threat find_threat(Position& pos, u64 nodes) {
+	Threat t;
+#if defined(USE_MATE_DFPN)
+	static Mate::Dfpn::MateDfpnSolver solver(Mate::Dfpn::DfpnSolverType::Node32bit);
+	static u64 allocated = 0;
+	if (allocated != nodes) {
+		solver.alloc_by_nodes_limit((size_t)nodes);
+		allocated = nodes;
+	}
+	solver.set_max_game_ply(0);
+	const Move m = solver.mate_dfpn(pos, nodes);
+	if (m != Move::none() && m != Move::null() && m != Move::resign()) {
+		t.ply = solver.get_mate_ply();
+		t.pv  = solver.get_pv();
+	}
+#else
+	(void)pos; (void)nodes;
+#endif
+	return t;
+}
+
 // 一つの節点ぶんの JSON。move が MOVE_NONE なら根の局面。
 void emit_node(Position& pos, const HumanLike::Layout& layout,
                int ply, Move move, int see, bool gives_check,
@@ -452,8 +488,21 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 			pos.do_null_move(st);
 			const float left_pass = g_progress.moves_left(pos);
 			const Parts passed = compute_parts(pos, left_pass, have_speed_cols ? swapped : nullptr);
+			// 手番を渡した局面で、手番でない側が詰ませられるか。詰めろ。
+			std::string threat;
+			if (g_threat_nodes > 0) {
+				const Threat t = find_threat(pos, g_threat_nodes);
+				if (t.ply) {
+					std::string pv_s;
+					for (size_t i = 0; i < t.pv.size(); ++i)
+						pv_s += (i ? " " : "") + to_usi_string(t.pv[i]);
+					threat = ",\"threat\":{\"ply\":" + std::to_string(t.ply) + ",\"pv\":" + json_quote(pv_s) + "}";
+				} else {
+					threat = ",\"threat\":null";
+				}
+			}
 			pos.undo_null_move();
-			line += ",\"pass\":{\"moves_left\":" + num(left_pass) + ",\"parts\":{" + parts_json(passed) + "}}";
+			line += ",\"pass\":{\"moves_left\":" + num(left_pass) + ",\"parts\":{" + parts_json(passed) + "}" + threat + "}";
 		}
 	}
 	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
@@ -530,6 +579,12 @@ void add_hce_explain_options(OptionsMap& options) {
 			line += (i ? "," : "") + std::to_string(int(out[i]));
 		line += "]}";
 		sync_cout << line << sync_endl;
+		return std::nullopt;
+	}));
+	// 手番を渡した局面の詰み (詰めろ) を DfPn で探すときのノード数の上限。0 で探さない。
+	// メモリは上限に比例して増える (100 万で 16 MB ほど、3000 万で 500 MB ほど)。
+	options.add("HceThreat", Option((int)Hce::kDefaultThreatNodes, 0, 100000000, [](const Option& o) {
+		Hce::g_threat_nodes = (u64)(int)o;
 		return std::nullopt;
 	}));
 	options.add("HceSpeed", Option(false, [](const Option& o) {
