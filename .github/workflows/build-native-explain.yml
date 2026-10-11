@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    # Register these runners before releasing; no paid hosted runners are used.
+    # Match the existing release workflows: standard GitHub-hosted runners.
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 45
     strategy:
@@ -20,22 +20,22 @@ jobs:
         platform:
           - os: linux
             arch: amd64
-            runner: [self-hosted, Linux, X64]
+            runner: ubuntu-24.04
             cpu: SSE42
             compiler: g++
           - os: linux
             arch: arm64
-            runner: [self-hosted, Linux, ARM64]
+            runner: ubuntu-24.04-arm
             cpu: ARMV8
             compiler: g++
           - os: macos
             arch: amd64
-            runner: [self-hosted, macOS, X64]
+            runner: macos-15-intel
             cpu: APPLESSE42
             compiler: clang++
           - os: macos
             arch: arm64
-            runner: [self-hosted, macOS, ARM64]
+            runner: macos-15
             cpu: APPLEM1
             compiler: clang++
         engine:
@@ -54,6 +54,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.18.0'
       - name: Resolve artifact version
         id: source
         env:
@@ -67,15 +70,21 @@ jobs:
           fi
           printf 'tag=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
       - name: Check explain source and toolchain
+        env:
+          EXPECTED_ARCH: ${{ matrix.platform.arch }}
         run: |
-          # master predates explain. Fail rather than publish a mislabeled normal build.
+          case "$EXPECTED_ARCH:$RUNNER_ARCH" in
+            amd64:X64|arm64:ARM64) ;;
+            *) printf 'Runner architecture does not match the asset name\n' >&2; exit 1 ;;
+          esac
+          # Fail rather than publish a mislabeled normal build.
           grep -q 'HCE_EXPLAIN' source/Makefile
           test -f source/eval/hce/hce_explain.cpp
           command -v make
           command -v '${{ matrix.platform.compiler }}'
           command -v python3
           command -v node
-          command -v gh
+          command -v shasum
       - name: Build explain executable with isolated objects
         env:
           OS_NAME: ${{ matrix.platform.os }}
@@ -92,15 +101,9 @@ jobs:
           cp LICENSE stage/LICENSE
           printf 'Source: https://github.com/%s/tree/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" > stage/SOURCE.txt
           tar czf "dist/yaneuraou-${OS_NAME}-${ARCH}-${NETWORK}-${{ steps.source.outputs.tag }}-explain.tar.gz" -C stage .
-      - name: Fetch existing paired HCE models for verification only
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify existing paired HCE models without repackaging them
         run: |
-          mkdir -p "$RUNNER_TEMP/hce-models-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release download v9.61.1 --repo "$GITHUB_REPOSITORY" \
-            --pattern 'hce-*.bin' --clobber \
-            --dir "$RUNNER_TEMP/hce-models-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          cd "$RUNNER_TEMP/hce-models-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cd assets/hce-explain
           printf '%s  %s\n' \
             6a4ba678cf82e6e90cc677d4f869f2a8529efd1edd9e14a0ea5f11434dea6b00 hce-progress.bin \
             dbd5e7760406bf6df970c085532a01e2506d4795986bc395c55dc98f92a14ed1 hce-explain.bin \
@@ -109,7 +112,7 @@ jobs:
         run: |
           node script/test_native_explain.ts \
             "stage/yaneuraou-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.engine.network }}-explain" \
-            "$RUNNER_TEMP/hce-models-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            assets/hce-explain
       - uses: actions/upload-artifact@v7
         with:
           name: native-explain-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.engine.network }}
@@ -119,7 +122,7 @@ jobs:
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

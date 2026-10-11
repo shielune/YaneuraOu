@@ -81,14 +81,13 @@ quit
 
 ### ネイティブ版の CI 前提
 
-この追加ワークフローは課金対象の hosted runner を使わない。
-`[self-hosted, Linux, X64]`、`[self-hosted, Linux, ARM64]`、
-`[self-hosted, macOS, X64]`、`[self-hosted, macOS, ARM64]` の登録が必要。
-各 runner に make、C++17 対応の g++ (Linux) / Xcode の clang++ (macOS)、
-python3、Node.js 22.18 以降、GitHub CLI、shasum、tar を用意する。
-これらの runner が未登録ならジョブは待機し、リリースできない。
+既存のリリースワークフローと同じ GitHub-hosted runner を使う。
+Linux amd64 は `ubuntu-24.04`、Linux arm64 は `ubuntu-24.04-arm`、
+macOS Intel は `macos-15-intel`、Apple Silicon は `macos-15`。
+これらは [GitHub の標準 runner ラベル](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+で、独自の runner 登録は不要。ビルドには各イメージの make、g++ / Xcode の clang++、
+python3 を使い、検証用の Node.js は 22.18.0 に固定する。
 
-master は explain の導入前なので、この変更だけでは master からのタグはビルドできない。
 タグのソースに `HCE_EXPLAIN` と HCE の実装が必要で、無い場合は通常版を誤って公開せず失敗する。
 手動実行は選んだブランチのソースを検証して Actions artifact に保存するだけで、
 Release を作成・変更しない。手動実行のアーカイブ名ではタグの代わりに `dev-<commit>` を使う。
