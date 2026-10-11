@@ -263,3 +263,6 @@ dist/
 *.wasm
 *.exe
 *.tsbuildinfo
+
+# Local Codex configuration, credentials, and session state.
+/.codex/

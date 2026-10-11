@@ -160,6 +160,13 @@ MATERIAL_LEVEL = 1
 EVAL_EMBEDDING = OFF
 # EVAL_EMBEDDING = ON
 
+# HCE v2 の線形評価を、explain コマンド専用の副評価器として NNUE 系の edition に組み込む。
+# 探索からは呼ばないので、ON と OFF で bench の node 数は変わらない。
+# 重み (rank+contact、4474 個) は eval/hce/hce_explain_weights_embedded.cpp に埋め込んであり、
+# "HceWeightsFile" で差し替えられる。ON と OFF を切り替えるときは OBJDIR を分けるか make clean する。
+HCE_EXPLAIN = OFF
+# HCE_EXPLAIN = ON
+
 # === implementations ===
 
 # 以下では、
@@ -418,6 +425,14 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MATERIAL)
 	CPPFLAGS += -DMATERIAL_LEVEL=$(MATERIAL_LEVEL)
 endif
 
+ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
+	SOURCES  +=                                                                \
+		eval/hce/evaluate_hce.cpp                                              \
+		eval/hce/mobility_weights_embedded.cpp                                 \
+		eval/humanlike/humanlike_eval.cpp                                      \
+		engine/yaneuraou-engine/yaneuraou-search.cpp
+endif
+
 ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 	ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_DEEP)
 	else
@@ -537,6 +552,20 @@ ifneq (,$(IS_NNUE_EDITION))
 	endif
 	ifeq ($(EVAL_EMBEDDING),ON)
 		CPPFLAGS += -DNNUE_EMBEDDING
+	endif
+	ifeq ($(HCE_EXPLAIN),ON)
+		CPPFLAGS += -DUSE_HCE_EXPLAIN
+		SOURCES += \
+			eval/humanlike/humanlike_eval.cpp                               \
+			eval/hce/hce_explain.cpp                                        \
+			eval/hce/hce_board.cpp                                          \
+			eval/hce/hce_factors.cpp                                        \
+			eval/hce/hce_net.cpp                                            \
+			eval/hce/hce_material.cpp                                       \
+			eval/hce/hce_model.cpp                                          \
+			eval/hce/hce_progress.cpp                                       \
+			eval/hce/hce_speed.cpp                                          \
+			eval/hce/hce_explain_weights_embedded.cpp
 	endif
 endif
 
