@@ -20,7 +20,7 @@ only documents what differs.
 - `EM_MAXIMUM_MEMORY_SIZE=1073741824` (1 GB)
 - Everything else identical to `yaneuraou-wasm-node-kp256`.
 
-The weights live in `source/eval/kiki/mobility_weights_embedded.cpp`,
+The weights live in `source/eval/hce/mobility_weights_embedded.cpp`,
 which the KIKI edition's source list compiles in unconditionally — so
 the eval is part of the Wasm binary, no MEMFS plumbing involved.
 

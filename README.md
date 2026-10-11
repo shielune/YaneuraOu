@@ -39,6 +39,64 @@
 `EvalDir` で読ませる。入手先とサイズは
 [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) にまとめてある。
 
+## ネイティブ版 explain
+
+`build-native-explain.yml` は explain 対応のタグから、Linux amd64 / arm64 と
+macOS Intel / Apple Silicon の実行ファイルを作り、同じタグの Release に追加する。
+各環境で KP256、HalfKP128、HalfKP256、HalfKP768、HalfKA1024 を用意する。
+詰み専用エンジンは対象外。
+
+| 環境 | ファイル名の環境部分 | Makefile の CPU 対象 |
+|---|---|---|
+| Linux x86-64 (SSE4.2 対応) | `linux-amd64` | `SSE42` |
+| Linux AArch64 | `linux-arm64` | `ARMV8` |
+| macOS Intel (11 以降、SSE4.2 対応) | `macos-amd64` | `APPLESSE42` |
+| macOS Apple Silicon (11 以降) | `macos-arm64` | `APPLEM1` |
+
+取得するアーカイブは
+`yaneuraou-<環境>-<network>-<tag>-explain.tar.gz`。
+例えば `yaneuraou-linux-amd64-kp256-v9.61.1-explain.tar.gz` に入る実行ファイルは
+`yaneuraou-linux-amd64-kp256-explain`。この名前は新しいワークフローの出力規則であり、
+v9.61.1 の既存 Release にネイティブ版が追加済みという意味ではない。
+アーカイブには GPL ライセンスとソースのタグへのリンクを含める。
+Linux 版は動的リンクなので、ビルド用 runner と互換性のある glibc / libstdc++ が必要。
+
+`hce-progress.bin` と `hce-explain.bin` は既存の v9.61.1 Release から別途取得して、
+展開した実行ファイルと同じディレクトリに置く。モデルの再配布条件を変更せず、
+アーカイブには同梱しない。そのディレクトリで実行ファイルを起動し、標準入力に送る。
+
+```text
+usi
+setoption name HceProgressFile value hce-progress.bin
+setoption name HceExplainFile value hce-explain.bin
+position startpos
+explain moves 7g7f 3c3d 8h2b+ 3a2b
+quit
+```
+
+`explain` は根の局面と各着手後の局面を JSON 行として返す。
+モデルの組が読み込めていれば `parts` に `material`、`tempo`、`speed`、`king`、
+`activity` が入る。上の操作には NNUE の `nn.bin`、`isready`、`go` は不要。
+探索を行うときは選んだ network に合う NNUE が別途必要で、`isready` が評価関数を読む。
+
+### ネイティブ版の CI 前提
+
+既存のリリースワークフローと同じ GitHub-hosted runner を使う。
+Linux amd64 は `ubuntu-24.04`、Linux arm64 は `ubuntu-24.04-arm`、
+macOS Intel は `macos-15-intel`、Apple Silicon は `macos-15`。
+これらは [GitHub の標準 runner ラベル](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+で、独自の runner 登録は不要。ビルドには各イメージの make、g++ / Xcode の clang++、
+python3 を使い、検証用の Node.js は 22.18.0 に固定する。
+
+タグのソースに `HCE_EXPLAIN` と HCE の実装が必要で、無い場合は通常版を誤って公開せず失敗する。
+手動実行は選んだブランチのソースを検証して Actions artifact に保存するだけで、
+Release を作成・変更しない。手動実行のアーカイブ名ではタグの代わりに `dev-<commit>` を使う。
+タグ push では全 20 組のビルドとネイティブ動作確認が成功してからアーカイブを追加し、
+既存の WASM / Windows アセットとリリース本文は変更しない。
+ビルドは `HCE_EXPLAIN=ON` と組み合わせ別の `OBJDIR` を使い、通常版のオブジェクトを再利用しない。
+検証は SHA-256 を固定した既存のモデルを読み、NNUE 無しで通常の着手・捕獲・成りと
+各局面の `parts` の五項目を確認する。
+
 ## 性能 — ネイティブと比べてどうか
 
 「WASM だから遅い」ということはない。同一マシン・同一評価関数・同一探索条件で測ると、
