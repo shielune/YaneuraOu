@@ -1,0 +1,139 @@
+name: Build native explain
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Match the existing release workflows: standard GitHub-hosted runners.
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-24.04
+            cpu: SSE42
+            compiler: g++
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            cpu: ARMV8
+            compiler: g++
+          - os: macos
+            arch: amd64
+            runner: macos-15-intel
+            cpu: APPLESSE42
+            compiler: clang++
+          - os: macos
+            arch: arm64
+            runner: macos-15
+            cpu: APPLEM1
+            compiler: clang++
+        engine:
+          - network: kp256
+            edition: YANEURAOU_ENGINE_NNUE_KP256
+          - network: halfkp128
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_128X2_32_32
+          - network: halfkp256
+            edition: YANEURAOU_ENGINE_NNUE
+          - network: halfkp768
+            edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+          - network: halfka1024
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.18.0'
+      - name: Resolve artifact version
+        id: source
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            [[ "$REF_NAME" =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { printf 'Invalid version tag\n' >&2; exit 1; }
+            VERSION="$REF_NAME"
+          else
+            VERSION="dev-${GITHUB_SHA:0:12}"
+          fi
+          printf 'tag=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Check explain source and toolchain
+        env:
+          EXPECTED_ARCH: ${{ matrix.platform.arch }}
+        run: |
+          case "$EXPECTED_ARCH:$RUNNER_ARCH" in
+            amd64:X64|arm64:ARM64) ;;
+            *) printf 'Runner architecture does not match the asset name\n' >&2; exit 1 ;;
+          esac
+          # Fail rather than publish a mislabeled normal build.
+          grep -q 'HCE_EXPLAIN' source/Makefile
+          test -f source/eval/hce/hce_explain.cpp
+          command -v make
+          command -v '${{ matrix.platform.compiler }}'
+          command -v python3
+          command -v node
+          command -v shasum
+      - name: Build explain executable with isolated objects
+        env:
+          OS_NAME: ${{ matrix.platform.os }}
+          ARCH: ${{ matrix.platform.arch }}
+          NETWORK: ${{ matrix.engine.network }}
+        run: |
+          NAME="yaneuraou-${OS_NAME}-${ARCH}-${NETWORK}-explain"
+          mkdir -p stage dist
+          make -C source -j4 normal \
+            YANEURAOU_EDITION=${{ matrix.engine.edition }} HCE_EXPLAIN=ON \
+            TARGET_CPU=${{ matrix.platform.cpu }} COMPILER=${{ matrix.platform.compiler }} \
+            PYTHON=python3 OBJDIR="$RUNNER_TEMP/obj-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${NAME}" \
+            TARGET="$GITHUB_WORKSPACE/stage/$NAME"
+          cp LICENSE stage/LICENSE
+          printf 'Source: https://github.com/%s/tree/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" > stage/SOURCE.txt
+          tar czf "dist/yaneuraou-${OS_NAME}-${ARCH}-${NETWORK}-${{ steps.source.outputs.tag }}-explain.tar.gz" -C stage .
+      - name: Verify existing paired HCE models without repackaging them
+        run: |
+          cd assets/hce-explain
+          printf '%s  %s\n' \
+            6a4ba678cf82e6e90cc677d4f869f2a8529efd1edd9e14a0ea5f11434dea6b00 hce-progress.bin \
+            dbd5e7760406bf6df970c085532a01e2506d4795986bc395c55dc98f92a14ed1 hce-explain.bin \
+            | shasum -a 256 -c -
+      - name: Verify native explain without NNUE
+        run: |
+          node script/test_native_explain.ts \
+            "stage/yaneuraou-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.engine.network }}-explain" \
+            assets/hce-explain
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-explain-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.engine.network }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-explain-*
+          path: dist
+          merge-multiple: true
+      # Attach files only, preserving notes written by build-wasm.yml.
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*.tar.gz
+          fail_on_unmatched_files: true
