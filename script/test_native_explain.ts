@@ -121,4 +121,30 @@ if (process.env.EVAL_DIR) {
   assert.equal(body.length, total);
   assert.equal(out.filter(l => l.startsWith('{"done"')).length, 1, 'plain go must not explain');
 }
+
+// Book hit: every candidate the book lists as an info multipv line must be explained.
+// Runs only with EVAL_DIR and BOOK_DIR (directory) / BOOK_FILE set.
+if (process.env.EVAL_DIR && process.env.BOOK_DIR) {
+  const result = spawnSync(resolve(binary), [], {
+    input: ['usi', `setoption name EvalDir value ${resolve(process.env.EVAL_DIR)}`,
+      'setoption name USI_OwnBook value true',
+      `setoption name BookDir value ${process.env.BOOK_DIR}`,
+      `setoption name BookFile value ${process.env.BOOK_FILE ?? 'user_book1.db'}`,
+      'setoption name IgnoreBookPly value true', 'setoption name MultiPV value 5',
+      `setoption name HceProgressFile value ${resolve(models, 'hce-progress.bin')}`,
+      `setoption name HceExplainFile value ${resolve(models, 'hce-explain.bin')}`,
+      'isready', 'position startpos', 'go explain movetime 300', 'quit', ''].join('\n'),
+    encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024,
+  });
+  assert.ifError(result.error);
+  const lines = result.stdout.split(/\r?\n/);
+  const infos = lines.filter(l => /^info depth [1-9]\d* .*multipv /.test(l)).length;
+  const rows = lines.filter(l => l.startsWith('{')).map(l => JSON.parse(l));
+  assert(infos > 1, 'the start position must hit the book with several candidates');
+  assert.equal(rows[0].multipv, infos);
+  const leaves = rows.filter(r => r.kind === 'leaf');
+  assert.equal(leaves.length, infos);
+  assert.deepEqual(leaves.map(r => r.multipv), leaves.map((_, i) => i + 1));
+  assert.equal(rows.at(-1).positions, rows.length - 2);
+}
 console.log('native explain: root, quiet moves, capture/promotion, five parts, legacy, top 0 and illegal move passed');
