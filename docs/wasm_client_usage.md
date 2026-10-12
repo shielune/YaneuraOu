@@ -139,6 +139,7 @@ node variant + ESM の TypeScript loader (`createEngine`)。**
 | `@ultemica/yaneuraou-wasm-node-mate` | Mate (DfPn) | 不要 | 詰将棋ソルバ |
 | `@ultemica/yaneuraou-wasm-node-halfkp256` | NNUE HalfKP_256x2_32_32 (Suisho5) | 外部 (~62 MB) | 強い NNUE |
 | `@ultemica/yaneuraou-wasm-node-halfkp768` | NNUE HalfKP_768x2_16_64 (AobaNNUE) | 外部 (~184 MB) | AobaNNUE 系 |
+| `@ultemica/yaneuraou-wasm-node-halfka2304` | SFNN HalfKA_hm2 2304x2-15-64 (NAGISA_V4) | 外部 (~172 MB + progress.bin) | NAGISA_V4 系 |
 
 ブラウザ用と Cloudflare Workers 用は別パッケージ
 (`@ultemica/yaneuraou-wasm-pthread-*`, `@ultemica/yaneuraou-wasm-*-cfworkers`)

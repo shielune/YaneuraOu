@@ -43,7 +43,7 @@
 
 `build-native-explain.yml` は explain 対応のタグから、Linux amd64 / arm64 と
 macOS Intel / Apple Silicon の実行ファイルを作り、同じタグの Release に追加する。
-各環境で KP256、HalfKP128、HalfKP256、HalfKP768、HalfKA1024 を用意する。
+各環境で KP256、HalfKP128、HalfKP256、HalfKP768、HalfKA1024、HalfKA2304 を用意する。
 詰み専用エンジンは対象外。
 
 | 環境 | ファイル名の環境部分 | Makefile の CPU 対象 |
