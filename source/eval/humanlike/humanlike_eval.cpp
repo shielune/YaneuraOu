@@ -82,6 +82,9 @@ int g_hand_idx_table [PIECE_HAND_NB][OFFSET_RANGE][OFFSET_RANGE];
 // 盤上は `銀(1,-1)`、持ち駒は打った先の利きなので `打銀(1,-1)` と書き分ける。
 std::string g_board_slot_name[MAX_BOARD_FEATURES];
 std::string g_hand_slot_name[NUM_HAND_FEATURES];
+// explain 用の ASCII 名。既存の dump (学習側が日本語名で突き合わせる) は変えない。
+std::string g_board_slot_name_ascii[MAX_BOARD_FEATURES];
+std::string g_hand_slot_name_ascii[NUM_HAND_FEATURES];
 
 // 名前に出す駒の字。金の動きをするものは登録の時点で GOLD に寄せてあるので、
 // PRO_PAWN などがここへ来ることはない。
@@ -101,6 +104,26 @@ const char* piece_kanji(PieceType pt) {
 	case PRO_SILVER: return "成銀";
 	case HORSE:      return "馬";
 	case DRAGON:     return "龍";
+	default:         return "?";
+	}
+}
+
+const char* piece_ascii(PieceType pt) {
+	switch (pt) {
+	case PAWN:       return "pawn";
+	case LANCE:      return "lance";
+	case KNIGHT:     return "knight";
+	case SILVER:     return "silver";
+	case GOLD:       return "gold";
+	case BISHOP:     return "bishop";
+	case ROOK:       return "rook";
+	case KING:       return "king";
+	case PRO_PAWN:   return "promoted_pawn";
+	case PRO_LANCE:  return "promoted_lance";
+	case PRO_KNIGHT: return "promoted_knight";
+	case PRO_SILVER: return "promoted_silver";
+	case HORSE:      return "horse";
+	case DRAGON:     return "dragon";
 	default:         return "?";
 	}
 }
@@ -134,6 +157,7 @@ void init_index_tables() {
 		int& slot = g_board_idx_table[pt][df + OFFSET_BIAS][dr + OFFSET_BIAS];
 		if (slot < 0) {
 			g_board_slot_name[idx] = slot_label(piece_kanji(pt), df, dr);
+			g_board_slot_name_ascii[idx] = slot_label(piece_ascii(pt), df, dr);
 			slot = idx++;
 		}
 	};
@@ -210,6 +234,7 @@ void init_index_tables() {
 		int& slot = g_hand_idx_table[pt][df + OFFSET_BIAS][dr + OFFSET_BIAS];
 		if (slot < 0) {
 			g_hand_slot_name[hand_idx] = std::string("打") + slot_label(piece_kanji(pt), df, dr);
+			g_hand_slot_name_ascii[hand_idx] = std::string("drop.") + slot_label(piece_ascii(pt), df, dr);
 			slot = hand_idx++;
 		}
 	};
@@ -987,13 +1012,15 @@ namespace {
 // 利きの列の名前。土台の 164 列は init_index_tables が控えた名前を引き、
 // 掛けた軸を後ろに足す。番号の意味は manaka-hce-fit.rs の index_tables() が
 // 持っているので、並びを変えたら向こうと突き合わせること。
-std::string base_slot_name(const Layout& layout, int base) {
+std::string base_slot_name(const Layout& layout, int base, bool ascii) {
 	if (!g_index_inited.load(std::memory_order_acquire)) init_index_tables();
 	if (base < 0 || base >= layout.board + NUM_HAND_FEATURES) return std::to_string(base);
+	if (ascii)
+		return base < layout.board ? g_board_slot_name_ascii[base] : g_hand_slot_name_ascii[base - layout.board];
 	return base < layout.board ? g_board_slot_name[base] : g_hand_slot_name[base - layout.board];
 }
 
-std::string mobility_slot_name(const Layout& layout, int m) {
+std::string mobility_slot_name(const Layout& layout, int m, bool ascii) {
 	static const char* folded_names[10] = {"pawn","lance","knight","silver","bishop","rook","gold","king","horse","dragon"};
 	static const char* split_names[14] = {"pawn","lance","knight","silver","bishop","rook","gold","king",
 		"promoted_pawn","promoted_lance","promoted_knight","promoted_silver","horse","dragon"};
@@ -1003,22 +1030,22 @@ std::string mobility_slot_name(const Layout& layout, int m) {
 		return std::string(k < layout.contact_pieces ? ":own." : ":enemy.") + names[k % layout.contact_pieces];
 	};
 	if (layout.contact && m >= layout.off_contact_hand) {
-		int k=m-layout.off_contact_hand; return base_slot_name(layout, layout.board+k/layout.contact_dim)+contact(k%layout.contact_dim);
+		int k=m-layout.off_contact_hand; return base_slot_name(layout, layout.board+k/layout.contact_dim, ascii)+contact(k%layout.contact_dim);
 	}
 	if (layout.contact && m >= layout.off_contact_board) {
-		int k=m-layout.off_contact_board; return base_slot_name(layout,k/layout.contact_dim)+contact(k%layout.contact_dim);
+		int k=m-layout.off_contact_board; return base_slot_name(layout, k/layout.contact_dim, ascii)+contact(k%layout.contact_dim);
 	}
 	if (layout.cross && m < layout.board*layout.cross) {
 		int at=m/layout.cross, axis=m%layout.cross;
-		return base_slot_name(layout,at)+(layout.cross==9?"@rank":"@sq")+std::to_string(axis);
+		return base_slot_name(layout, at, ascii)+(layout.cross==9?"@rank":"@sq")+std::to_string(axis);
 	}
-	if (!layout.contact && m >= layout.off_hand) return base_slot_name(layout,layout.board+m-layout.off_hand);
-	return base_slot_name(layout,m);
+	if (!layout.contact && m >= layout.off_hand) return base_slot_name(layout, layout.board+m-layout.off_hand, ascii);
+	return base_slot_name(layout, m, ascii);
 }
 
 } // anonymous namespace
 
-const char* feature_v2_name(const Layout& layout, int index) {
+static const char* feature_v2_name_impl(const Layout& layout, int index, bool ascii) {
 	static const char* folded_material[17] = {"material.board.pawn","material.board.lance","material.board.knight","material.board.silver","material.board.gold","material.board.bishop","material.board.rook","material.board.promoted_minor","material.board.horse","material.board.dragon","material.hand.pawn","material.hand.lance","material.hand.knight","material.hand.silver","material.hand.gold","material.hand.bishop","material.hand.rook"};
 	static const char* split_material[20] = {"material.board.pawn","material.board.lance","material.board.knight","material.board.silver","material.board.gold","material.board.bishop","material.board.rook","material.board.promoted_pawn","material.board.promoted_lance","material.board.promoted_knight","material.board.promoted_silver","material.board.horse","material.board.dragon","material.hand.pawn","material.hand.lance","material.hand.knight","material.hand.silver","material.hand.gold","material.hand.bishop","material.hand.rook"};
 	static const char* kRingNames[13] = {
@@ -1040,7 +1067,7 @@ const char* feature_v2_name(const Layout& layout, int index) {
 	if (index < 0 || index >= layout.features()) return "?";
 	if (index < layout.off_mobility()) return layout.pieces == Pieces::Folded ? folded_material[index] : split_material[index];
 	if (index < layout.off_king()) {
-		buf = "mobility." + mobility_slot_name(layout, index - layout.off_mobility());
+		buf = "mobility." + mobility_slot_name(layout, index - layout.off_mobility(), ascii);
 		return buf.c_str();
 	}
 	int k = index - layout.off_king();
@@ -1060,6 +1087,14 @@ const char* feature_v2_name(const Layout& layout, int index) {
 	k -= 14;
 	buf = std::string("king.enemy_hand_times_exposure.") + kHandNames[k];
 	return buf.c_str();
+}
+
+const char* feature_v2_name(const Layout& layout, int index) {
+	return feature_v2_name_impl(layout, index, false);
+}
+
+const char* feature_v2_name_ascii(const Layout& layout, int index) {
+	return feature_v2_name_impl(layout, index, true);
 }
 
 } // namespace HumanLike

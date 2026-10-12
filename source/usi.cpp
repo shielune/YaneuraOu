@@ -420,7 +420,7 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
 
 #if defined(USE_HCE_EXPLAIN)
     // 読み筋に沿った評価の内訳を JSON で出す。
-    //   explain [top <n>] [moves <move1> <move2> ...]
+    //   explain [legacy] [top <n>] [moves <move1> <move2> ...]
     // moves を省くと現局面の内訳だけを出す。指した手はすべて戻すので、
     // このコマンドの前後で局面は変わらない。
     else if (token == "explain")
@@ -660,6 +660,10 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
 		// ponderモードでの思考。
         else if (token == "ponder")
 			limits.ponderMode = true;
+
+		// 探索終了時に読み筋の explain も出す。(HCE_EXPLAIN版のみ)
+		else if (token == "explain")
+			limits.explain = true;
 
 	return limits;
 }
@@ -1425,21 +1429,27 @@ void USIEngine::moves() {
 
 #if defined(USE_HCE_EXPLAIN)
 // "explain"コマンドのhandler。
-//   explain [top <n>] [moves <move1> <move2> ...]
+//   explain [legacy] [top <n>] [moves <move1> <move2> ...]
 // 読み筋を指し進めながら、節点ごとの駒得・利きの・玉の安全度と、
 // 寄与が大きく動いた列を出す。手はすべて戻すので局面は変わらない。
 void USIEngine::explain(std::istringstream& is) {
     auto& pos = engine.get_position();
 
     int  topn = 5;
+    bool legacy = false;
     std::vector<Move> pv;
     std::string token;
     while (is >> token)
     {
+        if (token == "legacy")
+        {
+            legacy = true;
+            continue;
+        }
         if (token == "top")
         {
             int n = 0;
-            if (is >> n && n > 0)
+            if (is >> n && n >= 0)
                 topn = n;
             continue;
         }
@@ -1460,11 +1470,19 @@ void USIEngine::explain(std::istringstream& is) {
 
     std::deque<StateInfo> states;
     std::vector<Move>     played;
+    std::string           illegal_move;
     for (const auto& str : usi_moves)
     {
-        Move m = to_move(pos, str);
-        if (m == Move::none() || !pos.pseudo_legal(m, true) || !pos.legal(m))
+        // to_move() は不正手で "info string Error!" を出してしまうので使わない。
+        // 不正手は hce_explain が JSON のエラー行にする。
+        Move m = (str == "resign" || str == "win" || str == "0000" || str == "null" || str == "pass")
+                   ? Move::none()
+                   : pos.to_move(to_move16(str));
+        if (m == Move::none() || !pos.pseudo_legal_s<true>(m) || !pos.legal(m))
+        {
+            illegal_move = str;
             break;
+        }
         pv.push_back(m);
         states.emplace_back();
         pos.do_move(m, states.back());
@@ -1473,7 +1491,7 @@ void USIEngine::explain(std::istringstream& is) {
     for (size_t k = played.size(); k-- > 0;)
         pos.undo_move(played[k]);
 
-    Eval::hce_explain(pos, pv, topn);
+    Eval::hce_explain(pos, pv, topn, legacy, illegal_move);
 }
 #endif
 
