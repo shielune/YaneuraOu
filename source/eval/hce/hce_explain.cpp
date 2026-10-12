@@ -141,7 +141,7 @@ void warn_if_unpaired() {
 		             " network than the one in HceProgressFile; the parts are not printed" << sync_endl;
 }
 
-// explain に速度の列を付けるか (HceSpeed)。局面ごとに詰みを探すので既定は偽。
+// explain に速度の列を付けるか (HceThreat)。局面ごとに詰みを探すので既定は偽。
 bool g_speed = false;
 
 inline double clamp3000(double v) {
@@ -348,7 +348,7 @@ struct PvTag {
 	const char* kind    = "";
 	int         multipv = 0;      // 0 なら出さない (root)
 	int         ply     = -1;     // 負なら出さない (root)
-	bool        with_see = false; // see / gives_check を出す (after_move)
+	bool        with_see = false; // see / gives_check を出す (pv)
 	bool        qsearched = false;// qsearch_sfen / qsearch_moves を出す
 	std::string sfen;             // PV 上の局面 (qsearch 前)
 	std::string qsearch_moves;    // JSON の配列 (例 ["2b3a","3b3a"])
@@ -448,10 +448,12 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		shift(has_king,     king,     g_nets.moved_king);
 		shift(has_activity, activity, g_nets.moved_activity);
 
+		// 内部名 (model.find("speed") / "activity" など) はモデルファイルの節の名前なので旧名のまま。
+		// 出力キーだけを threat / mobility に改名している。
 		std::string parts = "\"material\":" + num(material) + ",\"tempo\":" + num(tempo);
-		if (has_speed)    parts += ",\"speed\":"    + num(speed);
-		if (has_king)     parts += ",\"king\":"     + num(king);
-		if (has_activity) parts += ",\"activity\":" + num(activity);
+		if (has_speed)    parts += ",\"threat\":"    + num(speed);
+		if (has_king)     parts += ",\"king_safety\":" + num(king);
+		if (has_activity) parts += ",\"mobility\":" + num(activity);
 		if (tag && tag->parts_only) {
 			const_cast<PvTag*>(tag)->out_parts = "{" + parts + "}";
 			return;
@@ -461,11 +463,11 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		else
 			line += ",\"parts\":{" + parts + "}";
 	}
-	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
+	// 王手と短い詰みの 8 つの数。先手視点。重いので HceThreat が真のときだけ。
 	if (g_speed) {
 		int s[NUM_SPEED];
 		speed_features(pos, s);
-		line += ",\"speed\":{";
+		line += ",\"threat\":{";
 		for (int i = 0; i < NUM_SPEED; ++i)
 			line += std::string(i ? "," : "") + "\"" + kSpeedNames[i] + "\":" + std::to_string(s[i]);
 		line += "}";
@@ -486,19 +488,19 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		return;
 	}
 	line += ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
-	      + ",\"material\":" + num(now.mat)
-	      + ",\"mobility\":" + num(now.mob)
-	      + ",\"king\":" + num(now.kng);
+	      + ",\"linear_material\":" + num(now.mat)
+	      + ",\"linear_mobility\":" + num(now.mob)
+	      + ",\"linear_king\":" + num(now.kng);
 	// 手番の列がない重みでは tempo を出さない。そうした重みの出力は、
 	// 手番の列を足す前と一字一句同じになる。
 	if (has_tempo())
-		line += ",\"tempo\":" + num(now.tmp);
+		line += ",\"linear_tempo\":" + num(now.tmp);
 	if (before) {
-		line += ",\"d_material\":" + num(now.mat - before->mat)
-		      + ",\"d_mobility\":" + num(now.mob - before->mob)
-		      + ",\"d_king\":" + num(now.kng - before->kng);
+		line += ",\"d_linear_material\":" + num(now.mat - before->mat)
+		      + ",\"d_linear_mobility\":" + num(now.mob - before->mob)
+		      + ",\"d_linear_king\":" + num(now.kng - before->kng);
 		if (has_tempo())
-			line += ",\"d_tempo\":" + num(now.tmp - before->tmp);
+			line += ",\"d_linear_tempo\":" + num(now.tmp - before->tmp);
 		line += ",\"top\":" + top_movers(layout, *before, now, topn);
 	}
 	line += "}";
@@ -553,7 +555,7 @@ void add_hce_explain_options(OptionsMap& options) {
 		sync_cout << line << sync_endl;
 		return std::nullopt;
 	}));
-	options.add("HceSpeed", Option(false, [](const Option& o) {
+	options.add("HceThreat", Option(false, [](const Option& o) {
 		Hce::g_speed = (bool)o;
 		return std::nullopt;
 	}));
@@ -623,7 +625,7 @@ void hce_explain_pvs(const std::string& root_sfen,
 
 	sync_cout << "{\"pov\":\"black\""
 	          << ",\"phase\":" << HumanLike::game_phase(pos)
-	          << ",\"parts\":[\"material\",\"tempo\",\"speed\",\"king\",\"activity\"]"
+	          << ",\"parts\":[\"material\",\"tempo\",\"threat\",\"king_safety\",\"mobility\"]"
 	          << ",\"root_sfen\":" << json_quote(root_sfen)
 	          << ",\"multipv\":" << cands.size()
 	          << "}" << sync_endl;
@@ -685,26 +687,24 @@ void hce_explain_pvs(const std::string& root_sfen,
 			pos.do_move(m, states.back());
 			played.push_back(m);
 
-			// after_move: 1 手目を指した直後。qsearch しない素の局面。
-			if (k == 0) {
-				PvTag tag;
-				tag.kind     = "after_move";
-				tag.multipv  = multipv;
-				tag.ply      = 1;
-				tag.with_see = true;
-				tag.sfen     = pos.sfen();
-				emit_node(pos, layout, 1, m, see, check, nullptr, none, 0, false, &tag);
-				++positions;
-			}
+			// pv: 読み筋の各局面。qsearch しない素の局面。
+			PvTag tag;
+			tag.kind     = "pv";
+			tag.multipv  = multipv;
+			tag.ply      = (int)k + 1;
+			tag.with_see = true;
+			tag.sfen     = pos.sfen();
+			emit_node(pos, layout, (int)k + 1, m, see, check, nullptr, none, 0, false, &tag);
+			++positions;
 		}
 
-		// leaf: 読み筋の最終局面。qsearch して静かな局面で評価する。
+		// qsearch: 読み筋の末端局面から静止探索した葉の値。
 		if (!failed) {
 			PvTag tag;
 			tag.kind    = "leaf";
 			tag.multipv = multipv;
 			tag.ply     = (int)pv.size();
-			emit_quiet(tag, (int)pv.size(), pv.back());
+			emit_quiet(tag, (int)pv.size(), Move::none());
 		}
 
 		for (size_t k = played.size(); k-- > 0;)
@@ -758,7 +758,7 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn,
 	} else {
 		sync_cout << "{\"pov\":\"black\""
 		          << ",\"phase\":" << HumanLike::game_phase(pos)
-		          << ",\"parts\":[\"material\",\"tempo\",\"speed\",\"king\",\"activity\"]"
+		          << ",\"parts\":[\"material\",\"tempo\",\"threat\",\"king_safety\",\"mobility\"]"
 		          << "}" << sync_endl;
 	}
 

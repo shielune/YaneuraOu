@@ -38,16 +38,30 @@ explain [legacy] [top <n>] [moves <move1> <move2> ...]
 | `see` | 指す前の局面での静的交換値。根には無い |
 | `gives_check` | その手が王手か。根には無い |
 | `moves_left` | 進行度モデルによる残り手数。`HceProgressFile` を読んでいるときのみ |
-| `parts` | 先手視点の内訳 `material` `tempo` `speed` `king` `activity`。モデルを読んでいるときのみ（合計が評価値） |
+| `parts` | 先手視点の内訳 `material` `tempo` `threat` `king_safety` `mobility`。モデルを読んでいるときのみ（合計が評価値） |
 | `sfen` | その局面の SFEN |
 
-`legacy` 付きは、これに加えて旧線形内訳を出す: `black_pov` / `material` / `mobility` /
-`king` / `tempo` と、2 局面目以降は `d_material` / `d_mobility` / `d_king` / `d_tempo` と
+`legacy` 付きは、これに加えて旧線形内訳を出す: `black_pov` / `linear_material` / `linear_mobility` /
+`linear_king` / `linear_tempo` と、2 局面目以降は `d_linear_material` / `d_linear_mobility` / `d_linear_king` / `d_linear_tempo` と
 `top`（直前から寄与が大きく動いた列を `top <n>` 個、既定 5。`top 0` で空配列）。
 `top` の `name` は ASCII の識別子（例 `mobility.bishop(2,-2)@rank7`、
 持ち駒を打つ利きは `mobility.drop.pawn(0,1)`、`king.ring1.enemy_attacks_by.horse`）。
 駒名は pawn / lance / knight / silver / gold / bishop / rook / king / horse / dragon /
 promoted_pawn / promoted_lance / promoted_knight / promoted_silver。
+
+#### parts の 5 項目
+
+| キー | 意味 |
+| --- | --- |
+| `material` | 駒の価値の合計 |
+| `tempo` | 手番を持つことの価値（符号は手番で反転する） |
+| `threat` | 王手と短い詰み（1 手詰め・3 手詰め）から見た、どちらが先に詰ませそうか |
+| `king_safety` | 玉の安全度 |
+| `mobility` | 利き（各駒の利きの量と質）を入力にしたネットワーク |
+
+オプション `HceThreat` を真にすると、局面行に `"threat":{...}`（`threat` の入力になる 8 個の数。
+`mover.checks` など）も出る。局面ごとに詰みを探すので既定は偽。`parts.threat` とは別のキー。
+内部の名前（モデルファイルの節名）は旧名のままで、出力キーだけが上の名前になっている。
 
 ### エラー行と終端行
 
@@ -76,12 +90,12 @@ explain moves 7g7f 3c3d 8h2b+ 3a2b
 ```
 
 ```json
-{"pov":"black","phase":0,"parts":["material","tempo","speed","king","activity"]}
-{"ply":0,"moves_left":89,"parts":{"material":0,"tempo":10,"speed":0,"king":0,"activity":0},"sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"}
-{"ply":1,"move":"7g7f","see":0,"gives_check":false,"moves_left":88,"parts":{"material":0,"tempo":-10,"speed":6,"king":-21,"activity":43},"sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL w - 2"}
-{"ply":2,"move":"3c3d","see":0,"gives_check":false,"moves_left":87,"parts":{"material":0,"tempo":11,"speed":6,"king":0,"activity":0},"sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3"}
-{"ply":3,"move":"8h2b+","see":0,"gives_check":false,"moves_left":78,"parts":{"material":959,"tempo":-18,"speed":-2,"king":-394,"activity":-123},"sfen":"lnsgkgsnl/1r5+B1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL w B 4"}
-{"ply":4,"move":"3a2b","see":945,"gives_check":false,"moves_left":79,"parts":{"material":0,"tempo":18,"speed":21,"king":-40,"activity":28},"sfen":"lnsgkg1nl/1r5s1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL b Bb 5"}
+{"pov":"black","phase":0,"parts":["material","tempo","threat","king_safety","mobility"]}
+{"ply":0,"moves_left":89,"parts":{"material":0,"tempo":10,"threat":0,"king_safety":0,"mobility":0},"sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"}
+{"ply":1,"move":"7g7f","see":0,"gives_check":false,"moves_left":88,"parts":{"material":0,"tempo":-10,"threat":6,"king_safety":-21,"mobility":43},"sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL w - 2"}
+{"ply":2,"move":"3c3d","see":0,"gives_check":false,"moves_left":87,"parts":{"material":0,"tempo":11,"threat":6,"king_safety":0,"mobility":0},"sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3"}
+{"ply":3,"move":"8h2b+","see":0,"gives_check":false,"moves_left":78,"parts":{"material":959,"tempo":-18,"threat":-2,"king_safety":-394,"mobility":-123},"sfen":"lnsgkgsnl/1r5+B1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL w B 4"}
+{"ply":4,"move":"3a2b","see":945,"gives_check":false,"moves_left":79,"parts":{"material":0,"tempo":18,"threat":21,"king_safety":-40,"mobility":28},"sfen":"lnsgkg1nl/1r5s1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL b Bb 5"}
 {"done":true,"positions":5}
 ```
 
@@ -102,7 +116,7 @@ go explain <通常の go 指定>      例: go explain movetime 300 / go explain 
 ### 出力の順序
 
 1. 通常の `info ...`（最終 PV を含む）
-2. ヘッダ行 → 局面行（候補順、各候補は ply 昇順） → `{"done":true,...}`
+2. ヘッダ行 → `root` → 候補ごとに（`pv` を ply 昇順、最後に `leaf`） → `{"done":true,...}`
 3. `bestmove ...`（完了通知。これより後に `explain` の出力は出ない）
 
 `stop`、`infinite`、`ponder` でも同じ。探索スレッドがすべて止まった後、`bestmove` を出す前に
@@ -113,55 +127,55 @@ go explain <通常の go 指定>      例: go explain movetime 300 / go explain 
 ### ヘッダ行と局面行
 
 ヘッダ行は `pov` `phase` `parts` に加え、`root_sfen`（探索開始局面）と `multipv`（読み筋が空でない候補の数）。
-
-局面行は `kind` で区別する 3 種だけ。読み筋の途中の局面は出さない（制限ではなく仕様）。
 空の読み筋の候補は出さない。`done` の `positions` は出した局面行の数。
+
+局面行は `kind` で区別する 3 種。読み筋の各局面は静的評価（静止探索なし）で 1 手ずつ全手出し、
+その末端局面を静止探索した後の局面（`leaf`）の値を候補ごとに 1 行出す。
+**`leaf` は読み筋の末端局面を静止探索した後の局面**で、`sfen` が読み筋の最終局面、`qsearch_sfen` が葉。静止探索の途中の局面は出さず、手順を `qsearch_moves` に入れる。
 
 | kind | 出る回数 | 内容 | キー |
 | --- | --- | --- | --- |
-| `root` | 全体で 1 回 | 現局面。`parts` は**素の局面**（静止探索なし）、`qsearch_parts` は**静止探索後**の値 | `sfen` `moves_left` `parts` `qsearch_sfen` `qsearch_moves` `qsearch_parts` |
-| `after_move` | 候補ごとに 1 回 | 候補の 1 手目を指した直後。**静止探索しない**素の局面 | `multipv` `ply`(=1) `move` `see` `gives_check` `sfen` `moves_left` `parts` |
-| `leaf` | 候補ごとに 1 回 | 読み筋の最終局面。**静止探索の後**の値 | `multipv` `ply`(=読み筋の長さ) `move`(=最終手) `sfen` `qsearch_sfen` `qsearch_moves` `moves_left` `parts` |
+| `root` | 全体で 1 回 | 現局面（ply 0）。`parts` は素の局面、`qsearch_parts` は root からの静止探索後の値 | `sfen` `moves_left` `parts` `qsearch_sfen` `qsearch_moves` `qsearch_parts` |
+| `pv` | 候補の読み筋の手数ぶん | 読み筋の ply 手目を指した直後の局面。**静止探索しない**素の局面。手数の制限はない | `multipv` `ply`(1..読み筋の長さ) `move` `see` `gives_check` `sfen` `moves_left` `parts` |
+| `leaf` | 候補ごとに 1 回（`pv` の最後の次） | 読み筋の末端局面を静止探索した後の局面（葉）の値 | `multipv` `ply`(=読み筋の長さ) `sfen`(読み筋の最終局面) `qsearch_sfen` `qsearch_moves` `moves_left` `parts`(葉の値) |
 
-読み筋が 1 手のときは `after_move` と `leaf` が同じ局面を指すが、前者は素、後者は静止探索後で意味が違うので両方出す。
 `multipv` と `ply` と `kind` で行を特定できる。`root` に `multipv` と `ply` は無い。
-`qsearch_moves` はすでに静かなら空で、そのとき `qsearch_sfen` は `sfen` と同じ（`root` では `qsearch_parts` も `parts` と同じ）。
+`qsearch_moves` が空なら静かな局面で、`qsearch_sfen` は `sfen` と同じ。`root` では `qsearch_parts` が
+`parts` と同じ、`leaf` では `parts` が末尾の `pv` 行と同じになる。
 
-`root` の `parts` を素にしているのは、取り合いの途中の局面で「今の駒損」を見せるため。
-`qsearch_parts` と並べると、取り合いの後でどう変わるかが読める。
+#### 静止探索の扱い
 
-#### 静止探索の扱いと `after_move` の意味
+モデルは「静止探索後の評価値」に合わせて学習されている。`pv` 行と `root.parts` は静止探索をかけない
+**素の局面にモデルをそのまま当てた参考値**で、取り合いの途中なら大きく偏る。それが目的で、
+角を切るような一時的な駒損得をそのまま見せる。取り返した後の値は、`root.qsearch_parts` と
+`leaf` 行（モデルの学習条件に合う値）で読む。
 
-モデルは「静止探索後の評価値」に合わせて学習されている。`leaf` はこの条件に合わせ、
-`sfen` から既存の `qsearch_pv`（`qsearch_psv` と同じ実装）で静かな局面まで進めた
-`qsearch_sfen` で `parts` を計算する。
+静止探索は既存の `qsearch_pv`（`qsearch_psv` と同じ実装）を使う。トランスポジションテーブルを使うため、
+同じ局面でも探索の状態で `qsearch_moves` が変わることがある。`nodes` などの探索の統計は元に戻す。
+`legacy` / `top` は `go explain` では使えない。`see` `gives_check` は `pv` 行のみ（指す前の局面での値）。
 
-`root.parts` と `after_move` の `parts` は、**静止探索後の局面で学習されたモデルを、素の局面にそのまま当てた参考値**で、
-取り合いの途中では大きく偏る。それが目的で、角を切るような一時的な駒損得を見せるために、あえて静止探索しない。
-読み筋の先（`leaf`）で回復していれば、`after_move` の駒損が一時的なものだと読める。
+### 例 1: 角を切って取り返す読み筋
 
-`qsearch` はトランスポジションテーブルを使うが、`nodes` などの探索の統計は元に戻す。
-`legacy` / `top` は `go explain` では使えない。`see` `gives_check` は `after_move` のみ（指す前の局面での値）。
-
-### 例
-
-`position startpos moves 7g7f 3c3d` に `go explain depth 8 searchmoves 8h2b+`（MultiPV 1）。
-`root` は初期配置に近い静かな局面で、`qsearch_moves` は空、`qsearch_parts` は `parts` と同じ。
-`8h2b+` 直後（`after_move`）は角を取った直後なので `material` が約 +959 と大きくプラスに出る。
-読み筋の最終局面（`leaf`）では取り返されて `material` は 0 に戻る。
+`position sfen lnsgk1snl/6g2/p1pppp2p/2r3R2/9/9/P1SPPPP1P/2G6/LN2KGSNL b B3Pb3p 21` に
+`go explain movetime 1000`（MultiPV 3）。最善手 `3d7d` は飛で角を取る手で、`ply` 1 の
+`material` は +941 と大きくプラスに出る。`ply` 2 の `7c7d`（取り返し）で 0 に戻る。
+`qsearch_moves` が空の `leaf` 行の `parts` は、末尾の `pv` 行と同じ。
+下は multipv 1 の全行（multipv 2、3 は同じ形でそれぞれ 12 手、17 手続く）。
 
 ```json
-{"pov":"black","phase":0,"parts":["material","tempo","speed","king","activity"],"root_sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","multipv":1}
-{"kind":"root","moves_left":87,"parts":{"material":0,"tempo":11,"speed":6,"king":0,"activity":0},"qsearch_parts":{"material":0,"tempo":11,"speed":6,"king":0,"activity":0},"sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","qsearch_sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","qsearch_moves":[]}
-{"kind":"after_move","multipv":1,"ply":1,"move":"8h2b+","see":0,"gives_check":false,"moves_left":78,"parts":{"material":959,"tempo":-18,"speed":-2,"king":-394,"activity":-123},"sfen":"lnsgkgsnl/1r5+B1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL w B 4"}
-{"kind":"leaf","multipv":1,"ply":9,"move":"4i5h","moves_left":83,"parts":{"material":0,"tempo":-14,"speed":-6,"king":-4,"activity":-62},"sfen":"lnsgkg1nl/1r7/p1ppppspp/6p2/1p7/2P4P1/PPSPPPP1P/4G2R1/LN1GK1SNL w Bb 12","qsearch_sfen":"lnsgkg1nl/1r7/p1ppppspp/6p2/1p7/2P4P1/PPSPPPP1P/4G2R1/LN1GK1SNL w Bb 12","qsearch_moves":[]}
-{"done":true,"positions":3}
+{"pov":"black","phase":0.195122,"parts":["material","tempo","threat","king_safety","mobility"],"root_sfen":"lnsgk1snl/6g2/p1pppp2p/2r3R2/9/9/P1SPPPP1P/2G6/LN2KGSNL b B3Pb3p 21","multipv":3}
+{"kind":"root","moves_left":46,"parts":{"material":0,"tempo":53,"threat":66,"king_safety":-19,"mobility":27},"qsearch_parts":{"material":0,"tempo":65,"threat":123,"king_safety":-12,"mobility":11},"sfen":"lnsgk1snl/6g2/p1pppp2p/2r3R2/9/9/P1SPPPP1P/2G6/LN2KGSNL b B3Pb3p 21","qsearch_sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23","qsearch_moves":["3d7d","7c7d"]}
+{"kind":"pv","multipv":1,"ply":1,"move":"3d7d","see":0,"gives_check":false,"moves_left":43,"parts":{"material":941,"tempo":-77,"threat":-6,"king_safety":-89,"mobility":-55},"sfen":"lnsgk1snl/6g2/p1pppp2p/2R6/9/9/P1SPPPP1P/2G6/LN2KGSNL w RB3Pb3p 22"}
+{"kind":"pv","multipv":1,"ply":2,"move":"7c7d","see":990,"gives_check":false,"moves_left":46,"parts":{"material":0,"tempo":65,"threat":123,"king_safety":-12,"mobility":11},"sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23"}
+{"kind":"leaf","multipv":1,"ply":2,"moves_left":46,"parts":{"material":0,"tempo":65,"threat":123,"king_safety":-12,"mobility":11},"sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23","qsearch_sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23","qsearch_moves":[]}
 ```
 
-取り合いの途中の局面の `root` の例（`position sfen lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17`）。
-先手の角が 2 枚とも相手の手にあり、素の `parts.material` は -877 と大きな駒損に出るが、
+### 例 2: 取り合いの途中の root
+
+`position sfen lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17`。
+先手の角が 2 枚とも相手の手にあり、素の `parts.material` は -877 と大きな駒損に出る。
 `7i8h` で馬を取り返せるので、静止探索後の `qsearch_parts.material` は 75 になる。
 
 ```json
-{"kind":"root","moves_left":51,"parts":{"material":-877,"tempo":52,"speed":11,"king":233,"activity":74},"qsearch_parts":{"material":75,"tempo":-50,"speed":20,"king":-66,"activity":-5},"sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17","qsearch_sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1SG6/LN2KGSNL w B3Pb2p 18","qsearch_moves":["7i8h"]}
+{"kind":"root","moves_left":51,"parts":{"material":-877,"tempo":52,"threat":11,"king_safety":233,"mobility":74},"qsearch_parts":{"material":75,"tempo":-50,"threat":20,"king_safety":-66,"mobility":-5},"sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17","qsearch_sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1SG6/LN2KGSNL w B3Pb2p 18","qsearch_moves":["7i8h"]}
 ```

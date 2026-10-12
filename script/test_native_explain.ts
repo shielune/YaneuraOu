@@ -29,7 +29,7 @@ for (const moves of [['7g7f', '3c3d'], ['7g7f', '3c3d', '8h2b+', '3a2b']]) {
   for (const [ply, row] of rows.entries()) {
     assert.equal(row.ply, ply);
     if (ply) assert.equal(row.move, moves[ply - 1]);
-    assert.deepEqual(Object.keys(row.parts).sort(), ['activity', 'king', 'material', 'speed', 'tempo']);
+    assert.deepEqual(Object.keys(row.parts).sort(), ['king_safety', 'material', 'mobility', 'tempo', 'threat']);
     for (const value of Object.values(row.parts)) assert(typeof value === 'number' && Number.isFinite(value));
   }
 }
@@ -51,9 +51,9 @@ for (const moves of [['7g7f', '3c3d'], ['7g7f', '3c3d', '8h2b+', '3a2b']]) {
   };
   const plain = run('explain moves 7g7f 3c3d');
   assert.deepEqual(plain.at(-1), { done: true, positions: 3 });
-  assert.deepEqual(plain[0].parts, ['material', 'tempo', 'speed', 'king', 'activity']);
+  assert.deepEqual(plain[0].parts, ['material', 'tempo', 'threat', 'king_safety', 'mobility']);
   for (const row of plain.filter(r => 'ply' in r))
-    for (const key of ['black_pov', 'material', 'mobility', 'top', 'd_material']) assert(!(key in row), key);
+    for (const key of ['black_pov', 'linear_material', 'linear_mobility', 'top', 'd_linear_material']) assert(!(key in row), key);
   const legacy = run('explain legacy top 3 moves 7g7f 3c3d');
   assert.equal(legacy[0].route, 'linear');
   assert.equal(legacy.at(-1).positions, 3);
@@ -86,27 +86,39 @@ if (process.env.EVAL_DIR) {
   assert(done > 0 && best > done, 'bestmove must come after the done line');
   assert.equal(out.slice(best + 1).filter(l => l.startsWith('{')).length, 0, 'no JSON after the first bestmove');
   const rows = out.slice(0, done + 1).filter(l => l.startsWith('{')).map(l => JSON.parse(l));
-  assert.deepEqual(rows[0].parts, ['material', 'tempo', 'speed', 'king', 'activity']);
+  assert.deepEqual(rows[0].parts, ['material', 'tempo', 'threat', 'king_safety', 'mobility']);
   assert.equal(rows[0].multipv, 3);
   const body = rows.slice(1, -1);
   assert.equal(rows.at(-1).positions, body.length);
-  assert.equal(body.length, 1 + 2 * rows[0].multipv, 'root + (after_move, leaf) per candidate');
+  const keys = ['king_safety', 'material', 'mobility', 'tempo', 'threat'];
   assert.equal(body[0].kind, 'root');
   assert(!('multipv' in body[0]) && !('ply' in body[0]) && Array.isArray(body[0].qsearch_moves));
-  assert.deepEqual(Object.keys(body[0].qsearch_parts).sort(), ['activity', 'king', 'material', 'speed', 'tempo']);
+  assert.deepEqual(Object.keys(body[0].parts).sort(), keys);
+  assert.deepEqual(Object.keys(body[0].qsearch_parts).sort(), keys);
   if (body[0].qsearch_moves.length === 0) {
     assert.equal(body[0].qsearch_sfen, body[0].sfen);
     assert.deepEqual(body[0].qsearch_parts, body[0].parts);
   }
+  let total = 1;
   for (let id = 1; id <= rows[0].multipv; id++) {
     const mine = body.filter(r => r.multipv === id);
-    assert.deepEqual(mine.map(r => r.kind), ['after_move', 'leaf']);
-    const [after, leaf] = mine;
-    assert.equal(after.ply, 1);
-    assert(!('qsearch_sfen' in after) && 'see' in after && 'gives_check' in after);
-    assert(leaf.ply >= 1 && Array.isArray(leaf.qsearch_moves) && typeof leaf.qsearch_sfen === 'string');
-    for (const r of mine) assert.deepEqual(Object.keys(r.parts).sort(), ['activity', 'king', 'material', 'speed', 'tempo']);
+    const pv = mine.filter(r => r.kind === 'pv');
+    const qs = mine.filter(r => r.kind === 'leaf');
+    assert(pv.length >= 1 && qs.length === 1, `multipv ${id}`);
+    assert.deepEqual(pv.map(r => r.ply), pv.map((_, i) => i + 1));
+    assert.equal(mine.at(-1), qs[0], 'leaf row comes last');
+    for (const r of pv) {
+      assert('see' in r && 'gives_check' in r && 'move' in r && !('qsearch_sfen' in r));
+      assert.deepEqual(Object.keys(r.parts).sort(), keys);
+    }
+    assert.equal(qs[0].ply, pv.length);
+    assert.equal(qs[0].sfen, pv.at(-1).sfen);
+    assert(Array.isArray(qs[0].qsearch_moves) && typeof qs[0].qsearch_sfen === 'string');
+    assert.deepEqual(Object.keys(qs[0].parts).sort(), keys);
+    if (qs[0].qsearch_moves.length === 0) assert.deepEqual(qs[0].parts, pv.at(-1).parts);
+    total += mine.length;
   }
+  assert.equal(body.length, total);
   assert.equal(out.filter(l => l.startsWith('{"done"')).length, 1, 'plain go must not explain');
 }
 console.log('native explain: root, quiet moves, capture/promotion, five parts, legacy, top 0 and illegal move passed');
