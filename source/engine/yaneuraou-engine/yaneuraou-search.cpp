@@ -28,6 +28,7 @@
 #include "../../book/book.h"
 #include "../../movepick.h"
 #include "../../usi.h"
+#include "../../evaluate.h"
 #if defined(EVAL_MOBILITY)
 #include "../../eval/humanlike/humanlike_eval.h"
 #endif
@@ -1373,6 +1374,9 @@ SKIP_SEARCH:
         }
     }
 
+    // resign_by_valueで書き換える前の値。go explainで探索結果を使うか決める。
+    const bool explained_search = !search_skipped;
+
     if (resign_by_value)
     {
         // 探索がskipされた扱いにして、resignを積む。
@@ -1380,6 +1384,47 @@ SKIP_SEARCH:
         probeResult    = Book::ProbeResult(Move::resign());
     };
 
+#endif
+
+#if defined(USE_HCE_EXPLAIN)
+    // 🌈 "go explain": 最終PV出力の後、bestmoveの直前に、MultiPV全候補の読み筋を
+    //    根から末尾まで explain する。探索スレッドはすべて停止済みなので、
+    //    ここは探索の完了処理の一部として(bestmoveより前に)同期的に行う。
+    //    共有局面(USIスレッドのPosition)は使わず、rootPosのsfenから専用のPositionを作る。
+    if (limits.explain)
+    {
+        std::vector<std::vector<Move>> explain_pvs;
+        if (explained_search)
+        {
+            const size_t n =
+              std::min(size_t(options["MultiPV"]), bestThread->rootMoves.size());
+            for (size_t i = 0; i < n; ++i)
+            {
+                const auto& pv = bestThread->rootMoves[i].pv;
+                explain_pvs.emplace_back(pv.begin(), pv.end());
+            }
+        }
+        else if (probeResult.bestmove.is_ok())
+        {
+            // 定跡など探索をスキップした場合は、その指し手(とponder)だけ。
+            explain_pvs.emplace_back();
+            explain_pvs.back().push_back(probeResult.bestmove);
+            if (probeResult.pondermove)
+                explain_pvs.back().push_back(probeResult.pondermove);
+        }
+
+        // 静止探索はこのworkerで行うが、nodes等の統計は呼び出し前に戻す。
+        // (TTにはqsearchのエントリが入る。次の"go"のnodes/履歴には影響しない)
+        Eval::hce_explain_pvs(rootPos.sfen(), explain_pvs, [this](Position& p) {
+            const auto savedNodes    = nodes.load(std::memory_order_relaxed);
+            const auto savedSelDepth = selDepth;
+            PVMoves    qpv;
+            qsearch_pv(p, qpv);
+            nodes.store(savedNodes, std::memory_order_relaxed);
+            selDepth = savedSelDepth;
+            return std::vector<Move>(qpv.begin(), qpv.end());
+        });
+    }
 #endif
 
     // デバッグ用に(ギリギリまで思考できているかを確認するために)経過時間を出力してみる。

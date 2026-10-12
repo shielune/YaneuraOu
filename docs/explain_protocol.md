@@ -86,3 +86,82 @@ explain moves 7g7f 3c3d 8h2b+ 3a2b
 ```
 
 上は `HceProgressFile` と `HceExplainFile` を読んだ状態の実出力（値は同梱モデルのもの）。
+
+## go explain
+
+```text
+go explain <通常の go 指定>      例: go explain movetime 300 / go explain depth 18 / go explain infinite
+```
+
+`explain` は `go` の他の指定（`depth` `nodes` `movetime` `byoyomi` `infinite` `ponder` など）と
+併用できる。`explain` を付けない `go` の動作と出力は変わらない。`explain` は HCE_EXPLAIN 版のみ。
+
+探索が終わると、`MultiPV` の全候補の読み筋について、根から末尾まで全局面を explain する。
+手数や候補数の制限はない（explain は静的評価なので安い）。
+
+### 出力の順序
+
+1. 通常の `info ...`（最終 PV を含む）
+2. ヘッダ行 → 局面行（候補順、各候補は ply 昇順） → `{"done":true,...}`
+3. `bestmove ...`（完了通知。これより後に `explain` の出力は出ない）
+
+`stop`、`infinite`、`ponder` でも同じ。探索スレッドがすべて止まった後、`bestmove` を出す前に
+探索を終える側のスレッドが同期的に出力する。USI の主スレッドが持つ局面は使わず、
+探索開始局面の SFEN から作った専用の局面で進める。定跡や宣言勝ちで探索せずに終わる場合は
+その指し手（と ponder 手）だけを読み筋として扱い、合法手が無ければ `root` を含め読み筋が無いので、`root` 行だけ（または空）の後に `done` と `bestmove resign` が出る。
+
+### ヘッダ行と局面行
+
+ヘッダ行は `pov` `phase` `parts` に加え、`root_sfen`（探索開始局面）と `multipv`（読み筋が空でない候補の数）。
+
+局面行は `kind` で区別する 3 種だけ。読み筋の途中の局面は出さない（制限ではなく仕様）。
+空の読み筋の候補は出さない。`done` の `positions` は出した局面行の数。
+
+| kind | 出る回数 | 内容 | キー |
+| --- | --- | --- | --- |
+| `root` | 全体で 1 回 | 現局面。`parts` は**素の局面**（静止探索なし）、`qsearch_parts` は**静止探索後**の値 | `sfen` `moves_left` `parts` `qsearch_sfen` `qsearch_moves` `qsearch_parts` |
+| `after_move` | 候補ごとに 1 回 | 候補の 1 手目を指した直後。**静止探索しない**素の局面 | `multipv` `ply`(=1) `move` `see` `gives_check` `sfen` `moves_left` `parts` |
+| `leaf` | 候補ごとに 1 回 | 読み筋の最終局面。**静止探索の後**の値 | `multipv` `ply`(=読み筋の長さ) `move`(=最終手) `sfen` `qsearch_sfen` `qsearch_moves` `moves_left` `parts` |
+
+読み筋が 1 手のときは `after_move` と `leaf` が同じ局面を指すが、前者は素、後者は静止探索後で意味が違うので両方出す。
+`multipv` と `ply` と `kind` で行を特定できる。`root` に `multipv` と `ply` は無い。
+`qsearch_moves` はすでに静かなら空で、そのとき `qsearch_sfen` は `sfen` と同じ（`root` では `qsearch_parts` も `parts` と同じ）。
+
+`root` の `parts` を素にしているのは、取り合いの途中の局面で「今の駒損」を見せるため。
+`qsearch_parts` と並べると、取り合いの後でどう変わるかが読める。
+
+#### 静止探索の扱いと `after_move` の意味
+
+モデルは「静止探索後の評価値」に合わせて学習されている。`leaf` はこの条件に合わせ、
+`sfen` から既存の `qsearch_pv`（`qsearch_psv` と同じ実装）で静かな局面まで進めた
+`qsearch_sfen` で `parts` を計算する。
+
+`root.parts` と `after_move` の `parts` は、**静止探索後の局面で学習されたモデルを、素の局面にそのまま当てた参考値**で、
+取り合いの途中では大きく偏る。それが目的で、角を切るような一時的な駒損得を見せるために、あえて静止探索しない。
+読み筋の先（`leaf`）で回復していれば、`after_move` の駒損が一時的なものだと読める。
+
+`qsearch` はトランスポジションテーブルを使うが、`nodes` などの探索の統計は元に戻す。
+`legacy` / `top` は `go explain` では使えない。`see` `gives_check` は `after_move` のみ（指す前の局面での値）。
+
+### 例
+
+`position startpos moves 7g7f 3c3d` に `go explain depth 8 searchmoves 8h2b+`（MultiPV 1）。
+`root` は初期配置に近い静かな局面で、`qsearch_moves` は空、`qsearch_parts` は `parts` と同じ。
+`8h2b+` 直後（`after_move`）は角を取った直後なので `material` が約 +959 と大きくプラスに出る。
+読み筋の最終局面（`leaf`）では取り返されて `material` は 0 に戻る。
+
+```json
+{"pov":"black","phase":0,"parts":["material","tempo","speed","king","activity"],"root_sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","multipv":1}
+{"kind":"root","moves_left":87,"parts":{"material":0,"tempo":11,"speed":6,"king":0,"activity":0},"qsearch_parts":{"material":0,"tempo":11,"speed":6,"king":0,"activity":0},"sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","qsearch_sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","qsearch_moves":[]}
+{"kind":"after_move","multipv":1,"ply":1,"move":"8h2b+","see":0,"gives_check":false,"moves_left":78,"parts":{"material":959,"tempo":-18,"speed":-2,"king":-394,"activity":-123},"sfen":"lnsgkgsnl/1r5+B1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL w B 4"}
+{"kind":"leaf","multipv":1,"ply":9,"move":"4i5h","moves_left":83,"parts":{"material":0,"tempo":-14,"speed":-6,"king":-4,"activity":-62},"sfen":"lnsgkg1nl/1r7/p1ppppspp/6p2/1p7/2P4P1/PPSPPPP1P/4G2R1/LN1GK1SNL w Bb 12","qsearch_sfen":"lnsgkg1nl/1r7/p1ppppspp/6p2/1p7/2P4P1/PPSPPPP1P/4G2R1/LN1GK1SNL w Bb 12","qsearch_moves":[]}
+{"done":true,"positions":3}
+```
+
+取り合いの途中の局面の `root` の例（`position sfen lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17`）。
+先手の角が 2 枚とも相手の手にあり、素の `parts.material` は -877 と大きな駒損に出るが、
+`7i8h` で馬を取り返せるので、静止探索後の `qsearch_parts.material` は 75 になる。
+
+```json
+{"kind":"root","moves_left":51,"parts":{"material":-877,"tempo":52,"speed":11,"king":233,"activity":74},"qsearch_parts":{"material":75,"tempo":-50,"speed":20,"king":-66,"activity":-5},"sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17","qsearch_sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1SG6/LN2KGSNL w B3Pb2p 18","qsearch_moves":["7i8h"]}
+```

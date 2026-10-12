@@ -57,6 +57,15 @@ namespace Eval {
 	void hce_explain(Position& pos, const std::vector<Move>& pv, int topn,
 	                 bool legacy = false, const std::string& illegal_move = std::string());
 
+	// "go explain" 用。探索が終わった後、MultiPV の各読み筋 (pvs[i] が multipv i+1、
+	// 空なら飛ばす) を根から末尾まで 1 手ずつ出力する。局面は root_sfen から作る専用の
+	// Position で動かし、探索中の局面には触れない。qsearch は、渡された局面から
+	// 静止探索の読み筋 (葉までの手) を返す関数。parts は葉の局面で計算する。
+	// 最後に必ず {"done":true,...} を 1 行出す。
+	void hce_explain_pvs(const std::string& root_sfen,
+	                     const std::vector<std::vector<Move>>& pvs,
+	                     const std::function<std::vector<Move>(Position&)>& qsearch);
+
 	// explain が使う重みを差し替える "HceWeightsFile" を生やす。
 	void add_hce_explain_options(OptionsMap& options);
 #endif

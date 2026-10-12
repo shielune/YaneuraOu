@@ -179,6 +179,7 @@ struct LimitsType {
         /* movestogo =*/depth = mate = perft = infinite = 0;
         nodes                                           = 0;
         ponderMode                                      = false;
+        explain                                         = false;
 
         // 🌈 将棋用に追加したメンバーの初期化。
 
@@ -240,6 +241,9 @@ struct LimitsType {
     // 💡 ponder探索中であるかのフラグは、別途SearchManager::ponderが持っている。
     //     そちらは、"stop"か"ponderhit"が来るとfalseになるが、こちらは、変化しない。
     bool ponderMode;
+
+    // "go explain": 探索終了時、bestmove の直前に MultiPV 全候補の読み筋を explain する。
+    bool explain;
 
 #if STOCKFISH
 #else
