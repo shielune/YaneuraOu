@@ -3,6 +3,7 @@
 #if defined(USE_HCE_EXPLAIN)
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <cstdlib>
 #include <deque>
@@ -226,11 +227,29 @@ void effective_weights(const Position& pos, const HumanLike::Layout& layout, dou
 // JSON の文字列に出せない字を落とす。列の名前は自前で組んでいるので " と \
 // くらいしか来ないが、SFEN と指し手も同じ道を通すのでまとめて面倒を見る。
 std::string json_quote(const std::string& v) {
+	// 出力は常に ASCII。UTF-8 は \uXXXX に直す (JSON としては同じ文字列)。
 	std::string out = "\"";
-	for (char c : v) {
-		if (c == '"' || c == '\\') { out += '\\'; out += c; }
-		else if ((unsigned char)c < 0x20)  out += ' ';
-		else out += c;
+	const auto esc = [&](unsigned cp) {
+		char buf[8];
+		std::snprintf(buf, sizeof(buf), "\\u%04x", cp);
+		out += buf;
+	};
+	for (size_t i = 0; i < v.size(); ++i) {
+		const unsigned char c = (unsigned char)v[i];
+		if (c == '"' || c == '\\') { out += '\\'; out += (char)c; }
+		else if (c < 0x20) out += ' ';
+		else if (c < 0x80) out += (char)c;
+		else {
+			const int len = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2;
+			unsigned cp = c & (0xFF >> (len + 1));
+			for (int k = 1; k < len && i + 1 < v.size(); ++k)
+				cp = (cp << 6) | ((unsigned char)v[++i] & 0x3F);
+			if (cp >= 0x10000) {
+				cp -= 0x10000;
+				esc(0xD800 + (cp >> 10));
+				esc(0xDC00 + (cp & 0x3FF));
+			} else esc(cp);
+		}
 	}
 	out += '"';
 	return out;
@@ -314,7 +333,7 @@ std::string top_movers(const HumanLike::Layout& layout,
 	for (size_t k = 0; k < order.size(); ++k) {
 		const int i = order[k];
 		// feature_v2_name は static な文字列を使い回すので、その場で写す。
-		const std::string name = i < n ? HumanLike::feature_v2_name(layout, i)
+		const std::string name = i < n ? HumanLike::feature_v2_name_ascii(layout, i)
 		                               : HumanLike::tempo_feature_name(i - n);
 		if (k) out += ",";
 		out += "{\"name\":" + json_quote(name)
@@ -327,7 +346,7 @@ std::string top_movers(const HumanLike::Layout& layout,
 // 一つの節点ぶんの JSON。move が MOVE_NONE なら根の局面。
 void emit_node(Position& pos, const HumanLike::Layout& layout,
                int ply, Move move, int see, bool gives_check,
-               const Snapshot* before, const Snapshot& now, int topn) {
+               const Snapshot* before, const Snapshot& now, int topn, bool legacy) {
 	std::string line = "{\"ply\":" + std::to_string(ply);
 	if (move != Move::none()) {
 		line += ",\"move\":" + json_quote(to_usi_string(move))
@@ -419,8 +438,13 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 			line += std::string(i ? "," : "") + "\"" + kSpeedNames[i] + "\":" + std::to_string(s[i]);
 		line += "}";
 	}
-	line += ",\"sfen\":" + json_quote(pos.sfen())
-	      + ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
+	line += ",\"sfen\":" + json_quote(pos.sfen());
+	if (!legacy) {
+		line += "}";
+		sync_cout << line << sync_endl;
+		return;
+	}
+	line += ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
 	      + ",\"material\":" + num(now.mat)
 	      + ",\"mobility\":" + num(now.mob)
 	      + ",\"king\":" + num(now.kng);
@@ -511,13 +535,24 @@ void add_hce_explain_options(OptionsMap& options) {
 	}));
 }
 
-void hce_explain(Position& pos, const std::vector<Move>& pv, int topn) {
+void hce_explain(Position& pos, const std::vector<Move>& pv, int topn,
+                 bool legacy, const std::string& illegal_move) {
 	using namespace Hce;
+
+	// 局面行の数。終端行 {"done":true,...} に載せる。
+	int positions = 0;
+	bool failed = false;
+	auto finish = [&]() {
+		sync_cout << "{\"done\":true,\"positions\":" << positions
+		          << (failed ? ",\"error\":true" : "") << "}" << sync_endl;
+	};
 
 	if (g_w.dim == 0)
 		use_embedded();
 	if (g_w.dim == 0) {
 		sync_cout << "{\"error\":" << json_quote("no weights loaded") << "}" << sync_endl;
+		failed = true;
+		finish();
 		return;
 	}
 	const HumanLike::Layout layout = g_w.layout;
@@ -530,18 +565,26 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn) {
 	// のは同じ版の中での差分だけ、という断りを出力自体に入れておく。
 	// weights はどちらの重みで計算したか。ファイルが読めないと黙って埋め込みに
 	// 戻るので、出力を見ただけでわかるようにしておく。
-	sync_cout << "{\"route\":\"linear\""
-	          << ",\"weights\":" << json_quote(g_w.source)
-	          << ",\"variant\":" << json_quote(HumanLike::variant_name(layout.variant))
-	          << ",\"pieces\":" << json_quote(HumanLike::pieces_name(layout.pieces))
-	          << ",\"features\":" << (has_tempo() ? layout.with_tempo() : layout.features())
-	          << ",\"phase\":" << HumanLike::game_phase(pos)
-	          << ",\"pov\":\"black\""
-	          << ",\"caveat\":" << json_quote(
-	                 "項の絶対値は版ごとに配り方が違う。読んでよいのは同じ版の中での差分だけ。")
-	          << "}" << sync_endl;
+	if (legacy) {
+		sync_cout << "{\"route\":\"linear\""
+		          << ",\"weights\":" << json_quote(g_w.source)
+		          << ",\"variant\":" << json_quote(HumanLike::variant_name(layout.variant))
+		          << ",\"pieces\":" << json_quote(HumanLike::pieces_name(layout.pieces))
+		          << ",\"features\":" << (has_tempo() ? layout.with_tempo() : layout.features())
+		          << ",\"phase\":" << HumanLike::game_phase(pos)
+		          << ",\"pov\":\"black\""
+		          << ",\"caveat\":" << json_quote(
+		                 "項の絶対値は版ごとに配り方が違う。読んでよいのは同じ版の中での差分だけ。")
+		          << "}" << sync_endl;
+	} else {
+		sync_cout << "{\"pov\":\"black\""
+		          << ",\"phase\":" << HumanLike::game_phase(pos)
+		          << ",\"parts\":[\"material\",\"tempo\",\"speed\",\"king\",\"activity\"]"
+		          << "}" << sync_endl;
+	}
 
-	emit_node(pos, layout, 0, Move::none(), 0, false, nullptr, root, topn);
+	emit_node(pos, layout, 0, Move::none(), 0, false, nullptr, root, topn, legacy);
+	++positions;
 
 	// 指した手は最後に全部戻すので、StateInfo は寿命が要る。deque なら
 	// 足しても前の要素が動かない。
@@ -557,6 +600,7 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn) {
 			sync_cout << "{\"ply\":" << (k + 1)
 			          << ",\"move\":" << json_quote(to_usi_string(m))
 			          << ",\"error\":\"illegal move\"}" << sync_endl;
+			failed = true;
 			break;
 		}
 		// 指す前の局面でないと意味がない二つ。
@@ -569,12 +613,22 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn) {
 
 		Snapshot now;
 		take_snapshot(pos, layout, now);
-		emit_node(pos, layout, (int)k + 1, m, see, check, &before, now, topn);
+		emit_node(pos, layout, (int)k + 1, m, see, check, &before, now, topn, legacy);
+		++positions;
 		before = now;
+	}
+
+	// 呼び出し側が不正手を見つけて打ち切った場合。
+	if (!failed && !illegal_move.empty()) {
+		sync_cout << "{\"ply\":" << (pv.size() + 1)
+		          << ",\"move\":" << json_quote(illegal_move)
+		          << ",\"error\":\"illegal move\"}" << sync_endl;
+		failed = true;
 	}
 
 	for (size_t k = played.size(); k-- > 0; )
 		pos.undo_move(played[k]);
+	finish();
 }
 
 } // namespace Eval
