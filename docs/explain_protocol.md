@@ -63,6 +63,34 @@ promoted_pawn / promoted_lance / promoted_knight / promoted_silver。
 `mover.checks` など）も出る。局面ごとに詰みを探すので既定は偽。`parts.threat` とは別のキー。
 内部の名前（モデルファイルの節名）は旧名のままで、出力キーだけが上の名前になっている。
 
+### 手番を渡した局面（`pass`）と詰めろ（`mate_threat`）
+
+どちらもオプションで有効にしたときだけ出る。既定は偽で、偽のときの出力は今までと一字一句同じ
+（探索の nodes も変わらない）。legacy 形式には出ない。
+
+| オプション | 既定 | 出るキー |
+| --- | --- | --- |
+| `HcePass` | false | `pass` |
+| `HceMateThreat` | false | `mate_threat` |
+| `HceMateThreatNodes` | 1000000 | `mate_threat` の DfPn の探索量の上限（ノード数、1 局面あたり） |
+
+どちらも、その行の `sfen`（`leaf` は `qsearch_sfen`）の盤面で、手番だけを相手に渡した局面について答える。
+root の行は、素の局面の組を `pass` / `mate_threat`、静止探索後の局面の組を
+`qsearch_pass` / `qsearch_mate_threat` に出す（`parts` / `qsearch_parts` と同じ対応）。
+`explain moves` の各 ply と `pv` / `leaf` の行は `pass` / `mate_threat` のみ。
+
+- `pass`: `{"moves_left":N,"parts":{...}}`。`parts` と同じ 5 項目（先手視点）を、手番を渡した局面で
+  計算したもの。モデルを読んでいないときは出ない。手番側に王手がかかっていて手番を渡せないときは `null`。
+- `mate_threat`: `{"moves":["4h7h","7i7h",...],"nodes":N}` または `null`。手番を渡したとき、
+  もとの手番でない側に詰みがある（詰めろ）なら、DfPn が証明した詰みの手順（`moves` の先頭が、
+  手番を渡された側が指す手）と使ったノード数。詰みを証明できなかったとき（不詰、上限、メモリ不足）と
+  王手がかかっているときは `null`。詰めありと答えたときは証明済みだが、`null` は詰めろが無い保証ではない
+  （上限で見逃すことがある）。
+
+`pass.parts.threat`・`parts.threat` は王手と短い詰みから評価に入れた「速さ」の項で、`mate_threat` は
+DfPn で詰みを証明できたかどうかの別の出力。`HceThreat` は `threat` の入力 8 個の数を出すオプションで、
+`HceMateThreat` とは無関係。
+
 ### エラー行と終端行
 
 不正手（その局面で指せない手、解釈できない文字列）に当たると、そこまでの有効な局面を

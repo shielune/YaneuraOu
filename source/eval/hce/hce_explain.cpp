@@ -25,6 +25,7 @@
 #include "hce_model.h"
 #include "hce_progress.h"
 #include "hce_speed.h"
+#include "../../mate/mate.h"
 
 // "explain" コマンドの実体。NNUE 系の edition に、HCE v2 の線形評価を
 // 説明専用の副評価器として持ち込む。
@@ -143,6 +144,15 @@ void warn_if_unpaired() {
 
 // explain に速度の列を付けるか (HceThreat)。局面ごとに詰みを探すので既定は偽。
 bool g_speed = false;
+
+// 各局面に、手番を渡した局面の値 (pass) を付けるか (HcePass)。既定は偽で、偽なら出力は変わらない。
+bool g_pass = false;
+
+// 各局面に、手番を渡したら詰むか (詰めろ) を DfPn で探した結果 (mate_threat) を付けるか (HceMateThreat)。
+// 探索量の上限 (ノード数) は HceMateThreatNodes。既定は 100 万。
+bool g_mate_threat = false;
+constexpr u64 kDefaultMateThreatNodes = 1000000;
+u64 g_mate_threat_nodes = kDefaultMateThreatNodes;
 
 inline double clamp3000(double v) {
 	return v > 3000.0 ? 3000.0 : (v < -3000.0 ? -3000.0 : v);
@@ -354,8 +364,169 @@ struct PvTag {
 	std::string qsearch_moves;    // JSON の配列 (例 ["2b3a","3b3a"])
 	bool        parts_only = false; // 出力せず out_parts に parts の JSON だけ入れる
 	std::string out_parts;
+	std::string out_extra;        // parts_only のとき、pass / mate_threat の JSON 片
 	std::string raw_parts;        // 空でなければ root: parts に素の値、qsearch_parts に葉の値
+	std::string raw_extra;        // root の素の局面の pass / mate_threat (JSON 片)
 };
+
+// 一つの局面の五つの部分 (先手視点)。has_* が偽の部分は、モデルにその部分が無い。
+struct Parts {
+	double material = 0.0, tempo = 0.0, speed = 0.0, king = 0.0, activity = 0.0;
+	bool   has_speed = false, has_king = false, has_activity = false;
+};
+
+// pos の五つの部分。left は pos の残り手数、speed_cols は speed_features の 8 列
+// (pos の手番側から数えた並び)。速度の部分が要らないか、列が無いときは nullptr。
+Parts compute_parts(const Position& pos, float left, const int* speed_cols) {
+	Parts p;
+	int count[NUM_MATERIAL_COLUMNS];
+	material_counts(pos, count);
+
+	// 駒得は、駒の価値の表に枚数を掛けたもの (進行度の倍率の前)。
+	double material = 0.0;
+	for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
+		material += (double)count[i] * (double)g_model.material_values()[i];
+	material *= (double)g_model.curve(Model::MATERIAL, left);
+
+	const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
+	const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
+
+	// 速度、玉の安全度、駒の働きは、それぞれ倍率を掛けたあとの値。
+	double speed = 0.0, king = 0.0, activity = 0.0;
+	if (g_nets.speed.valid() && speed_cols) {
+		float x[NUM_SPEED], y[NUM_SPEED];
+		for (int i = 0; i < NUM_SPEED; ++i) {
+			x[i] = float(speed_cols[i]) * 0.25f;
+			y[i] = -x[i];
+		}
+		const double raw = (double)(g_nets.speed.forward(x) - g_nets.speed.forward(y)) * 500.0;
+		speed = raw * (double)g_model.curve(Model::SPEED, left);
+		p.has_speed = true;
+	}
+	if (g_nets.king.valid() || g_nets.activity.valid()) {
+		uint8_t board[NUM_BOARD];
+		board_features(pos, board);
+		if (g_nets.king.valid()) {
+			std::vector<float> window(size_t(window_width(g_nets.king_radius)));
+			king_window(board, 0, g_nets.king_radius, window.data());
+			const float black = g_nets.king.forward(window.data());
+			king_window(board, 1, g_nets.king_radius, window.data());
+			const float white = g_nets.king.forward(window.data());
+			king = (double)(black - white) * 500.0 * (double)g_model.curve(Model::KING, left);
+			p.has_king = true;
+		}
+		if (g_nets.activity.valid()) {
+			std::vector<float> facts, sign;
+			const int n = piece_facts(board, facts, sign);
+			double sum = 0.0;
+			for (int i = 0; i < n; ++i)
+				sum += (double)g_nets.activity.forward(&facts[size_t(i) * PIECE_FACTS]) * (double)sign[i];
+			activity = sum * 100.0 * (double)g_model.curve(Model::ACTIVITY, left);
+			p.has_activity = true;
+		}
+	}
+
+	// 駒の枚数の差で説明できる部分を、速度・玉・駒の働きから引いて駒得に足す。
+	// 合計は変わらない。駒得は「どの要素から見ても駒の価値」になり、ほかには駒の数では言えない分が残る。
+	auto shift = [&](bool has, double& value, const float* table) {
+		if (!has) return;
+		double moved = 0.0;
+		for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
+			moved += (double)count[i] * (double)table[i];
+		value    -= moved;
+		material += moved;
+	};
+	shift(p.has_speed,    speed,    g_nets.moved_speed);
+	shift(p.has_king,     king,     g_nets.moved_king);
+	shift(p.has_activity, activity, g_nets.moved_activity);
+
+	p.material = material;
+	p.tempo    = tempo;
+	p.speed    = speed;
+	p.king     = king;
+	p.activity = activity;
+	return p;
+}
+
+// 内部名 (model.find("speed") / "activity" など) はモデルファイルの節の名前なので旧名のまま。
+// 出力キーだけを threat / mobility に改名している。
+std::string parts_json(const Parts& p) {
+	std::string out = "\"material\":" + num(p.material) + ",\"tempo\":" + num(p.tempo);
+	if (p.has_speed)    out += ",\"threat\":"      + num(p.speed);
+	if (p.has_king)     out += ",\"king_safety\":" + num(p.king);
+	if (p.has_activity) out += ",\"mobility\":"    + num(p.activity);
+	return out;
+}
+
+// 手番を渡した局面 pos (王手はかかっていない) で、手番側 (= もとの手番でない側) の詰みを DfPn で探す。
+// 詰みを証明できたときだけ読み筋を返す。上限までに解けない、不詰、メモリ不足は、いずれも
+// 見つからなかった扱い (moves は空)。
+struct MateThreat {
+	std::vector<Move> moves;
+	u64               nodes = 0;
+};
+
+MateThreat find_mate_threat(Position& pos, u64 nodes_limit) {
+	MateThreat t;
+#if defined(USE_MATE_DFPN)
+	static Mate::Dfpn::MateDfpnSolver solver(Mate::Dfpn::DfpnSolverType::Node32bit);
+	static u64 allocated = 0;
+	if (allocated != nodes_limit) {
+		solver.alloc_by_nodes_limit((size_t)nodes_limit);
+		allocated = nodes_limit;
+	}
+	solver.set_max_game_ply(0);
+	const Move m = solver.mate_dfpn(pos, nodes_limit);
+	t.nodes = solver.get_nodes_searched();
+	if (m != Move::none() && m != Move::null() && m != Move::resign())
+		t.moves = solver.get_pv();
+#else
+	(void)pos; (void)nodes_limit;
+#endif
+	return t;
+}
+
+// pass / mate_threat の JSON 片 (先頭にカンマ)。key_prefix は root の静止探索後の組に "qsearch_" を付けるため。
+// speed_cols は pos の speed_features の 8 列 (無ければ nullptr)。
+//
+// 手番を渡した局面は盤が同じで手番だけが違う。速度の 8 列は mover と waiter の半分を入れ替えるだけで
+// 求まるので、詰みの探索をやり直さない。王手がかかっていて手番を渡せないときは、どちらも null。
+std::string pass_json(Position& pos, const int* speed_cols, const char* key_prefix) {
+	std::string out;
+	if (!g_pass && !g_mate_threat)
+		return out;
+	const std::string pass_key = std::string(",\"") + key_prefix + "pass\":";
+	const std::string mate_key = std::string(",\"") + key_prefix + "mate_threat\":";
+	if (pos.in_check()) {
+		if (g_pass && model_ready()) out += pass_key + "null";
+		if (g_mate_threat)           out += mate_key + "null";
+		return out;
+	}
+	int swapped[NUM_SPEED];
+	if (speed_cols)
+		for (int i = 0; i < NUM_SPEED; ++i)
+			swapped[i] = speed_cols[(i + NUM_SPEED / 2) % NUM_SPEED];
+	StateInfo st;
+	pos.do_null_move(st);
+	if (g_pass && model_ready()) {
+		const float left = g_progress.moves_left(pos);
+		const Parts passed = compute_parts(pos, left, speed_cols ? swapped : nullptr);
+		out += pass_key + "{\"moves_left\":" + num(left) + ",\"parts\":{" + parts_json(passed) + "}}";
+	}
+	if (g_mate_threat) {
+		const MateThreat t = find_mate_threat(pos, g_mate_threat_nodes);
+		if (t.moves.empty()) {
+			out += mate_key + "null";
+		} else {
+			out += mate_key + "{\"moves\":[";
+			for (size_t i = 0; i < t.moves.size(); ++i)
+				out += (i ? "," : "") + json_quote(to_usi_string(t.moves[i]));
+			out += "],\"nodes\":" + std::to_string(t.nodes) + "}";
+		}
+	}
+	pos.undo_null_move();
+	return out;
+}
 
 // 一つの節点ぶんの JSON。move が MOVE_NONE なら根の局面。
 // tag があれば go explain の行 (pos は静止探索の葉で、parts は葉で計算する)。
@@ -381,87 +552,34 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 	// 進行度のファイルを読んでいるときだけ。無いときの出力は今までと同じ。
 	if (g_progress.loaded())
 		line += ",\"moves_left\":" + num(g_progress.moves_left(pos));
+	// 速度の部分と pass の入れ替えに使う 8 列。要るときだけ求める。HceThreat の出力もこれを使う。
+	int  speed_cols[NUM_SPEED];
+	bool have_speed_cols = false;
+	if ((model_ready() && g_nets.speed.valid()) || g_speed) {
+		speed_features(pos, speed_cols);
+		have_speed_cols = true;
+	}
+	const int* cols = have_speed_cols ? speed_cols : nullptr;
+	// root の静止探索後の行 (raw_parts あり) は、pass / mate_threat に "qsearch_" を付ける。
+	const char* extra_prefix = (tag && !tag->raw_parts.empty()) ? "qsearch_" : "";
 	// モデルを読んでいるときだけ。要素ごとの値で、先手視点。足し合わせるとモデルの評価値になる。
 	if (model_ready()) {
 		const float left = g_progress.moves_left(pos);
-		int count[NUM_MATERIAL_COLUMNS];
-		material_counts(pos, count);
-
-		// 駒得は、駒の価値の表に枚数を掛けたもの (進行度の倍率の前)。
-		double material = 0.0;
-		for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
-			material += (double)count[i] * (double)g_model.material_values()[i];
-		material *= (double)g_model.curve(Model::MATERIAL, left);
-
-		const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
-		const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
-
-		// 速度、玉の安全度、駒の働きは、それぞれ倍率を掛けたあとの値。
-		bool   has_speed = false, has_king = false, has_activity = false;
-		double speed = 0.0, king = 0.0, activity = 0.0;
-		if (g_nets.speed.valid()) {
-			int s[NUM_SPEED];
-			speed_features(pos, s);
-			float x[NUM_SPEED], y[NUM_SPEED];
-			for (int i = 0; i < NUM_SPEED; ++i) {
-				x[i] = float(s[i]) * 0.25f;
-				y[i] = -x[i];
-			}
-			const double raw = (double)(g_nets.speed.forward(x) - g_nets.speed.forward(y)) * 500.0;
-			speed = raw * (double)g_model.curve(Model::SPEED, left);
-			has_speed = true;
-		}
-		if (g_nets.king.valid() || g_nets.activity.valid()) {
-			uint8_t board[NUM_BOARD];
-			board_features(pos, board);
-			if (g_nets.king.valid()) {
-				std::vector<float> window(size_t(window_width(g_nets.king_radius)));
-				king_window(board, 0, g_nets.king_radius, window.data());
-				const float black = g_nets.king.forward(window.data());
-				king_window(board, 1, g_nets.king_radius, window.data());
-				const float white = g_nets.king.forward(window.data());
-				king = (double)(black - white) * 500.0 * (double)g_model.curve(Model::KING, left);
-				has_king = true;
-			}
-			if (g_nets.activity.valid()) {
-				std::vector<float> facts, sign;
-				const int n = piece_facts(board, facts, sign);
-				double sum = 0.0;
-				for (int i = 0; i < n; ++i)
-					sum += (double)g_nets.activity.forward(&facts[size_t(i) * PIECE_FACTS]) * (double)sign[i];
-				activity = sum * 100.0 * (double)g_model.curve(Model::ACTIVITY, left);
-				has_activity = true;
-			}
-		}
-
-		// 駒の枚数の差で説明できる部分を、速度・玉・駒の働きから引いて駒得に足す。
-		// 合計は変わらない。駒得は「どの要素から見ても駒の価値」になり、ほかには駒の数では言えない分が残る。
-		auto shift = [&](bool has, double& value, const float* table) {
-			if (!has) return;
-			double moved = 0.0;
-			for (int i = 0; i < NUM_MATERIAL_COLUMNS; ++i)
-				moved += (double)count[i] * (double)table[i];
-			value    -= moved;
-			material += moved;
-		};
-		shift(has_speed,    speed,    g_nets.moved_speed);
-		shift(has_king,     king,     g_nets.moved_king);
-		shift(has_activity, activity, g_nets.moved_activity);
-
-		// 内部名 (model.find("speed") / "activity" など) はモデルファイルの節の名前なので旧名のまま。
-		// 出力キーだけを threat / mobility に改名している。
-		std::string parts = "\"material\":" + num(material) + ",\"tempo\":" + num(tempo);
-		if (has_speed)    parts += ",\"threat\":"    + num(speed);
-		if (has_king)     parts += ",\"king_safety\":" + num(king);
-		if (has_activity) parts += ",\"mobility\":" + num(activity);
+		const std::string parts = parts_json(compute_parts(pos, left, cols));
 		if (tag && tag->parts_only) {
-			const_cast<PvTag*>(tag)->out_parts = "{" + parts + "}";
+			// root の素の局面。pass / mate_threat もここで求めて、あとで素の parts の隣に置く。
+			PvTag* out = const_cast<PvTag*>(tag);
+			out->out_parts = "{" + parts + "}";
+			out->out_extra = pass_json(pos, cols, "");
 			return;
 		}
 		if (tag && !tag->raw_parts.empty())
-			line += ",\"parts\":" + tag->raw_parts + ",\"qsearch_parts\":{" + parts + "}";
+			line += ",\"parts\":" + tag->raw_parts + tag->raw_extra
+			      + ",\"qsearch_parts\":{" + parts + "}" + pass_json(pos, cols, extra_prefix);
 		else
-			line += ",\"parts\":{" + parts + "}";
+			line += ",\"parts\":{" + parts + "}" + pass_json(pos, cols, extra_prefix);
+	} else {
+		line += pass_json(pos, cols, extra_prefix);
 	}
 	// 王手と短い詰みの 8 つの数。先手視点。重いので HceThreat が真のときだけ。
 	if (g_speed) {
@@ -557,6 +675,21 @@ void add_hce_explain_options(OptionsMap& options) {
 	}));
 	options.add("HceThreat", Option(false, [](const Option& o) {
 		Hce::g_speed = (bool)o;
+		return std::nullopt;
+	}));
+	// 各局面に、手番を渡した局面の parts (pass) を付ける。
+	options.add("HcePass", Option(false, [](const Option& o) {
+		Hce::g_pass = (bool)o;
+		return std::nullopt;
+	}));
+	// 各局面に、手番を渡したら詰むか (mate_threat) を DfPn で探して付ける。上限は HceMateThreatNodes。
+	options.add("HceMateThreat", Option(false, [](const Option& o) {
+		Hce::g_mate_threat = (bool)o;
+		return std::nullopt;
+	}));
+	// mate_threat の DfPn のノード数の上限。メモリは上限に比例する (100 万で 16 MB ほど)。
+	options.add("HceMateThreatNodes", Option((int)Hce::kDefaultMateThreatNodes, 1, 100000000, [](const Option& o) {
+		Hce::g_mate_threat_nodes = (u64)(int)o;
 		return std::nullopt;
 	}));
 	// 空なら進行度を出さない。読めないときも出さず、理由を info string で知らせる。
@@ -663,6 +796,7 @@ void hce_explain_pvs(const std::string& root_sfen,
 		raw.parts_only = true;
 		emit_node(pos, layout, 0, Move::none(), 0, false, nullptr, none, 0, false, &raw);
 		tag.raw_parts = raw.out_parts;
+		tag.raw_extra = raw.out_extra;
 		emit_quiet(tag, 0, Move::none());
 	}
 
