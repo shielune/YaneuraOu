@@ -661,6 +661,12 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
         else if (token == "ponder")
 			limits.ponderMode = true;
 
+#if defined(USE_HCE_EXPLAIN)
+		// 探索のあと、読み筋を"explain"に通して、bestmoveの前に出す。
+		else if (token == "explain")
+			limits.explain = true;
+#endif
+
 	return limits;
 }
 
@@ -1439,8 +1445,13 @@ void USIEngine::explain(std::istringstream& is) {
         if (token == "top")
         {
             int n = 0;
-            if (is >> n && n > 0)
-                topn = n;
+            if (!(is >> n) || n <= 0)
+            {
+                // 数が無い、または0以下。黙って既定値にせず、書き方の誤りとして返す。
+                Eval::hce_explain_usage_error("top needs a positive number", "top");
+                return;
+            }
+            topn = n;
             continue;
         }
         if (token == "moves")
@@ -1450,6 +1461,9 @@ void USIEngine::explain(std::istringstream& is) {
             // おき、hce_explain の手前で一手ずつ直す。
             break;
         }
+        // "moves"を付け忘れて指し手を並べると、以前は黙って無視して根の局面だけを出していた。
+        Eval::hce_explain_usage_error("unexpected token (the moves go after 'moves')", token);
+        return;
     }
 
     // 指し手の解釈は局面を進めながら行う。to_move() はその局面で合法な手しか
@@ -1460,11 +1474,17 @@ void USIEngine::explain(std::istringstream& is) {
 
     std::deque<StateInfo> states;
     std::vector<Move>     played;
+    // 指せなかった手の文字列。パス("pass"、"0000"、"null")、"resign"、"win"、反則手など。
+    // 将棋にパスは無いので、どれもここで止める。止めたことは出力の最後に残す。
+    std::string rejected;
     for (const auto& str : usi_moves)
     {
         Move m = to_move(pos, str);
         if (m == Move::none() || !pos.pseudo_legal(m, true) || !pos.legal(m))
+        {
+            rejected = str;
             break;
+        }
         pv.push_back(m);
         states.emplace_back();
         pos.do_move(m, states.back());
@@ -1473,7 +1493,7 @@ void USIEngine::explain(std::istringstream& is) {
     for (size_t k = played.size(); k-- > 0;)
         pos.undo_move(played[k]);
 
-    Eval::hce_explain(pos, pv, topn);
+    Eval::hce_explain(pos, pv, topn, true, rejected);
 }
 #endif
 

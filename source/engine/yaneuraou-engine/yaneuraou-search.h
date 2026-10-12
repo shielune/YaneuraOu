@@ -438,6 +438,13 @@ class YaneuraOuWorker: public Worker {
     // 返されたPVを進めた局面が、qsearchで到達したleaf nodeになる。
     Value qsearch_pv(Position& pos, PVMoves& pv);
 
+    // 探索で使うMultiPVの本数。オプションのMultiPVが基本だが、"go ... explain"のときは
+    // 候補手を kExplainLines 本まで内訳つきで返すので、それ以上で探索する。
+    size_t multi_pv_option() const;
+#if defined(USE_HCE_EXPLAIN)
+    static constexpr size_t kExplainLines = 5;
+#endif
+
     // 📌 Stockfishのsearch.hで定義されているWorkerが持っているメンバ変数 📌
 
 	// Public because they need to be updatable by the stats
