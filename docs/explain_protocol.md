@@ -100,3 +100,82 @@ explain moves 7g7f 3c3d 8h2b+ 3a2b
 ```
 
 上は `HceProgressFile` と `HceExplainFile` を読んだ状態の実出力（値は同梱モデルのもの）。
+
+## go explain
+
+```text
+go explain <通常の go 指定>      例: go explain movetime 300 / go explain depth 18 / go explain infinite
+```
+
+`explain` は `go` の他の指定（`depth` `nodes` `movetime` `byoyomi` `infinite` `ponder` など）と
+併用できる。`explain` を付けない `go` の動作と出力は変わらない。`explain` は HCE_EXPLAIN 版のみ。
+
+探索が終わると、`MultiPV` の全候補の読み筋について、根から末尾まで全局面を explain する。
+手数や候補数の制限はない（explain は静的評価なので安い）。
+
+### 出力の順序
+
+1. 通常の `info ...`（最終 PV を含む）
+2. ヘッダ行 → `root` → 候補ごとに（`pv` を ply 昇順、最後に `leaf`） → `{"done":true,...}`
+3. `bestmove ...`（完了通知。これより後に `explain` の出力は出ない）
+
+`stop`、`infinite`、`ponder` でも同じ。探索スレッドがすべて止まった後、`bestmove` を出す前に
+探索を終える側のスレッドが同期的に出力する。USI の主スレッドが持つ局面は使わず、
+探索開始局面の SFEN から作った専用の局面で進める。定跡や宣言勝ちで探索せずに終わる場合は
+その指し手（と ponder 手）だけを読み筋として扱い、合法手が無ければ `root` を含め読み筋が無いので、`root` 行だけ（または空）の後に `done` と `bestmove resign` が出る。
+
+### ヘッダ行と局面行
+
+ヘッダ行は `pov` `phase` `parts` に加え、`root_sfen`（探索開始局面）と `multipv`（読み筋が空でない候補の数）。
+空の読み筋の候補は出さない。`done` の `positions` は出した局面行の数。
+
+局面行は `kind` で区別する 3 種。読み筋の各局面は静的評価（静止探索なし）で 1 手ずつ全手出し、
+その末端局面を静止探索した後の局面（`leaf`）の値を候補ごとに 1 行出す。
+**`leaf` は読み筋の末端局面を静止探索した後の局面**で、`sfen` が読み筋の最終局面、`qsearch_sfen` が葉。静止探索の途中の局面は出さず、手順を `qsearch_moves` に入れる。
+
+| kind | 出る回数 | 内容 | キー |
+| --- | --- | --- | --- |
+| `root` | 全体で 1 回 | 現局面（ply 0）。`parts` は素の局面、`qsearch_parts` は root からの静止探索後の値 | `sfen` `moves_left` `parts` `qsearch_sfen` `qsearch_moves` `qsearch_parts` |
+| `pv` | 候補の読み筋の手数ぶん | 読み筋の ply 手目を指した直後の局面。**静止探索しない**素の局面。手数の制限はない | `multipv` `ply`(1..読み筋の長さ) `move` `see` `gives_check` `sfen` `moves_left` `parts` |
+| `leaf` | 候補ごとに 1 回（`pv` の最後の次） | 読み筋の末端局面を静止探索した後の局面（葉）の値 | `multipv` `ply`(=読み筋の長さ) `sfen`(読み筋の最終局面) `qsearch_sfen` `qsearch_moves` `moves_left` `parts`(葉の値) |
+
+`multipv` と `ply` と `kind` で行を特定できる。`root` に `multipv` と `ply` は無い。
+`qsearch_moves` が空なら静かな局面で、`qsearch_sfen` は `sfen` と同じ。`root` では `qsearch_parts` が
+`parts` と同じ、`leaf` では `parts` が末尾の `pv` 行と同じになる。
+
+#### 静止探索の扱い
+
+モデルは「静止探索後の評価値」に合わせて学習されている。`pv` 行と `root.parts` は静止探索をかけない
+**素の局面にモデルをそのまま当てた参考値**で、取り合いの途中なら大きく偏る。それが目的で、
+角を切るような一時的な駒損得をそのまま見せる。取り返した後の値は、`root.qsearch_parts` と
+`leaf` 行（モデルの学習条件に合う値）で読む。
+
+静止探索は既存の `qsearch_pv`（`qsearch_psv` と同じ実装）を使う。トランスポジションテーブルを使うため、
+同じ局面でも探索の状態で `qsearch_moves` が変わることがある。`nodes` などの探索の統計は元に戻す。
+`legacy` / `top` は `go explain` では使えない。`see` `gives_check` は `pv` 行のみ（指す前の局面での値）。
+
+### 例 1: 角を切って取り返す読み筋
+
+`position sfen lnsgk1snl/6g2/p1pppp2p/2r3R2/9/9/P1SPPPP1P/2G6/LN2KGSNL b B3Pb3p 21` に
+`go explain movetime 1000`（MultiPV 3）。最善手 `3d7d` は飛で角を取る手で、`ply` 1 の
+`material` は +941 と大きくプラスに出る。`ply` 2 の `7c7d`（取り返し）で 0 に戻る。
+`qsearch_moves` が空の `leaf` 行の `parts` は、末尾の `pv` 行と同じ。
+下は multipv 1 の全行（multipv 2、3 は同じ形でそれぞれ 12 手、17 手続く）。
+
+```json
+{"pov":"black","phase":0.195122,"parts":["material","tempo","threat","king_safety","mobility"],"root_sfen":"lnsgk1snl/6g2/p1pppp2p/2r3R2/9/9/P1SPPPP1P/2G6/LN2KGSNL b B3Pb3p 21","multipv":3}
+{"kind":"root","moves_left":46,"parts":{"material":0,"tempo":53,"threat":66,"king_safety":-19,"mobility":27},"qsearch_parts":{"material":0,"tempo":65,"threat":123,"king_safety":-12,"mobility":11},"sfen":"lnsgk1snl/6g2/p1pppp2p/2r3R2/9/9/P1SPPPP1P/2G6/LN2KGSNL b B3Pb3p 21","qsearch_sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23","qsearch_moves":["3d7d","7c7d"]}
+{"kind":"pv","multipv":1,"ply":1,"move":"3d7d","see":0,"gives_check":false,"moves_left":43,"parts":{"material":941,"tempo":-77,"threat":-6,"king_safety":-89,"mobility":-55},"sfen":"lnsgk1snl/6g2/p1pppp2p/2R6/9/9/P1SPPPP1P/2G6/LN2KGSNL w RB3Pb3p 22"}
+{"kind":"pv","multipv":1,"ply":2,"move":"7c7d","see":990,"gives_check":false,"moves_left":46,"parts":{"material":0,"tempo":65,"threat":123,"king_safety":-12,"mobility":11},"sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23"}
+{"kind":"leaf","multipv":1,"ply":2,"moves_left":46,"parts":{"material":0,"tempo":65,"threat":123,"king_safety":-12,"mobility":11},"sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23","qsearch_sfen":"lnsgk1snl/6g2/p2ppp2p/2p6/9/9/P1SPPPP1P/2G6/LN2KGSNL b RB3Prb3p 23","qsearch_moves":[]}
+```
+
+### 例 2: 取り合いの途中の root
+
+`position sfen lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17`。
+先手の角が 2 枚とも相手の手にあり、素の `parts.material` は -877 と大きな駒損に出る。
+`7i8h` で馬を取り返せるので、静止探索後の `qsearch_parts.material` は 75 になる。
+
+```json
+{"kind":"root","moves_left":51,"parts":{"material":-877,"tempo":52,"threat":11,"king_safety":233,"mobility":74},"qsearch_parts":{"material":75,"tempo":-50,"threat":20,"king_safety":-66,"mobility":-5},"sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1+bG6/LNS1KGSNL b 3Pb2p 17","qsearch_sfen":"lnsgk1snl/6g2/p1pppp2p/6R2/9/1rP6/P2PPPP1P/1SG6/LN2KGSNL w B3Pb2p 18","qsearch_moves":["7i8h"]}
+```

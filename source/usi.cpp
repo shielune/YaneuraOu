@@ -661,6 +661,10 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
         else if (token == "ponder")
 			limits.ponderMode = true;
 
+		// 探索終了時に読み筋の explain も出す。(HCE_EXPLAIN版のみ)
+		else if (token == "explain")
+			limits.explain = true;
+
 	return limits;
 }
 
