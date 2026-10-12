@@ -26,6 +26,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Every package is built without the explain command (HCE_EXPLAIN=OFF) and,
+        # except mate, with it (ON). The release carries both: the plain tarball
+        # and one ending in -explain. Mate has no evaluation to explain.
+        explain: ['OFF', 'ON']
+        exclude:
+          - package:
+              edition: YANEURAOU_MATE_ENGINE
+            explain: 'ON'
         package:
           - name: kp256-cfworkers
             dir: yaneuraou-wasm-kp256-cfworkers
@@ -310,6 +318,7 @@ jobs:
               EM_MAXIMUM_MEMORY_SIZE=${{ matrix.package.maximum_memory }} \
               EM_STACK_SIZE=2097152 \
               EM_CLOSURE=0 \
+              HCE_EXPLAIN=${{ matrix.explain }} \
               ${{ matrix.package.extra_make_args }}
 
       - name: verify and compress
@@ -333,7 +342,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: steps.gate.outputs.selected == 'true'
         with:
-          name: ${{ matrix.package.dir }}-dist
+          name: ${{ matrix.package.dir }}${{ matrix.explain == 'ON' && '-explain' || '' }}-dist
           path: packages/${{ matrix.package.dir }}/dist/
 
   release-wasm:
@@ -385,17 +394,23 @@ jobs:
           # packages exist. Surface its dirs to the subsequent shell + the
           # action-gh-release step so we don't repeat the list inline.
           python3 - <<'PY'
-          import json, os, yaml
+          import os, yaml
           wf = yaml.safe_load(open('.github/workflows/build-wasm.yml'))
-          pkgs = wf['jobs']['build-wasm']['strategy']['matrix']['package']
-          dirs = [p['dir'] for p in pkgs]
+          m = wf['jobs']['build-wasm']['strategy']['matrix']
+          # Editions the matrix leaves out of the explain build (mate).
+          no_explain = {x['package']['edition'] for x in m.get('exclude', [])
+                        if x.get('explain') == 'ON'}
+          dirs = [p['dir'] for p in m['package']]
+          explain_dirs = [p['dir'] for p in m['package'] if p['edition'] not in no_explain]
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('dirs<<EOF\n' + '\n'.join(dirs) + '\nEOF\n')
+              f.write('explain_dirs<<EOF\n' + '\n'.join(explain_dirs) + '\nEOF\n')
           PY
 
       - name: Stage each package + compile loader + create tar.gz
         env:
           PKG_DIRS: ${{ steps.matrix.outputs.dirs }}
+          EXPLAIN_DIRS: ${{ steps.matrix.outputs.explain_dirs }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Drive directly from the matrix dirs piped through GITHUB_OUTPUT.
@@ -403,6 +418,23 @@ jobs:
           # this loop expands automatically. `d` is the bare package name;
           # the working tree keeps packages under packages/, but tarballs are
           # rooted at the package name so consumer paths don't change.
+          #
+          # Each package is packed twice when the matrix built it with the
+          # explain command: first as it is (-v<version>.tar.gz), then with the
+          # explain build's engine copied over it (-v<version>-explain.tar.gz).
+          pack() {
+            # pack <package dir> <tarball suffix> <extra files>
+            tar czf "$1-v${VERSION}$2.tar.gz" -C packages \
+              "$1/package.json" \
+              "$1/README.md" \
+              "$1/SPEC.md" \
+              "$1/dist/index.js" \
+              "$1/dist/index.d.ts" \
+              "$1/dist/yaneuraou.js" \
+              "$1/dist/yaneuraou.wasm" \
+              "$1/dist/yaneuraou.wasm.br" \
+              $3
+          }
           while IFS= read -r d; do
             [ -n "$d" ] || continue
             # A subset dispatch only produces artifacts for what it built;
@@ -431,16 +463,11 @@ jobs:
                 extra="$d/dist/yaneuraou.worker.js $d/dist/worker_shim.js $d/dist/worker_shim.d.ts"
                 ;;
             esac
-            tar czf "${d}-v${VERSION}.tar.gz" -C packages \
-              "$d/package.json" \
-              "$d/README.md" \
-              "$d/SPEC.md" \
-              "$d/dist/index.js" \
-              "$d/dist/index.d.ts" \
-              "$d/dist/yaneuraou.js" \
-              "$d/dist/yaneuraou.wasm" \
-              "$d/dist/yaneuraou.wasm.br" \
-              $extra
+            pack "$d" "" "$extra"
+            if grep -qxF "$d" <<<"$EXPLAIN_DIRS"; then
+              cp -R "download/${d}-explain-dist/." "$p/dist/"
+              pack "$d" "-explain" "$extra"
+            fi
           done <<EOF
           $PKG_DIRS
           EOF
@@ -469,3 +496,6 @@ jobs:
           # many packages the matrix produces, no per-name listing needed.
           files: |
             yaneuraou-wasm-*-v${{ steps.version.outputs.version }}.tar.gz
+            yaneuraou-wasm-*-v${{ steps.version.outputs.version }}-explain.tar.gz
+            assets/hce-explain/hce-progress.bin
+            assets/hce-explain/hce-explain.bin

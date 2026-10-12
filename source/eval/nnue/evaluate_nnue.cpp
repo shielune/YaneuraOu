@@ -956,6 +956,12 @@ void load_eval() {
 // 手番側から見た評価値を返すので注意。(他の評価関数とは設計がこの点において異なる)
 // なので、この関数の最適化は頑張らない。
 Value compute_eval(const Position& pos) {
+#if defined(USE_HCE_EXPLAIN)
+    // position/explain can be used before isready, without an NNUE file.
+    // Leave the accumulator invalid so a later search still computes NNUE.
+    if (!eval_loaded)
+        return VALUE_ZERO;
+#endif
     return NNUE::ComputeScore(pos, true);
 }
 
