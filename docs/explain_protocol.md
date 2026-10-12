@@ -124,6 +124,12 @@ go explain <通常の go 指定>      例: go explain movetime 300 / go explain 
 探索開始局面の SFEN から作った専用の局面で進める。定跡や宣言勝ちで探索せずに終わる場合は
 その指し手（と ponder 手）だけを読み筋として扱い、合法手が無ければ `root` を含め読み筋が無いので、`root` 行だけ（または空）の後に `done` と `bestmove resign` が出る。
 
+定跡に当たって探索をスキップした場合も、定跡が `info ... multipv i` で列挙した全候補を
+`multipv` 1..N として出す（`MultiPV` の値では切らない。通常の `go` が全候補を出すのに揃える）。
+各候補の読み筋は定跡が `info` に出した PV（指し手と定跡の先読み。`BookPvMoves` で決まる手数）と同じで、
+ヘッダの `multipv` は候補数、`leaf` の本数と一致する。選ばれた手の最後の `info depth 0 multipv 1` は
+候補の重複なので数えない。
+
 ### ヘッダ行と局面行
 
 ヘッダ行は `pov` `phase` `parts` に加え、`root_sfen`（探索開始局面）と `multipv`（読み筋が空でない候補の数）。

@@ -1465,7 +1465,8 @@ namespace Book
     std::string BookMoveSelector::pv_builder(Position&                    pos,
                                                 const Search::UpdateContext& updates,
                                                 Move16                       m16,
-                                                int                          rest_ply) {
+                                                int                          rest_ply,
+                                                std::vector<Move16>*         moves_out) {
         ASSERT_LV3(rest_ply > 0);
 
         std::string result = "";
@@ -1484,6 +1485,8 @@ namespace Book
             pos.do_move(m, si);
 
             result = m16.to_usi_string();
+            if (moves_out)
+                moves_out->push_back(m16);
             // 残り出力するPV長さをデクリメントしておく。
             --rest_ply;
 
@@ -1510,7 +1513,7 @@ namespace Book
                     if (rest_ply >= 1)
                     {
                         // まだ表示すべき手数が残っているので再帰的にさらにbestMoveで指し手を進める。
-                        result2 = pv_builder(pos, updates, bestMove16, rest_ply);
+                        result2 = pv_builder(pos, updates, bestMove16, rest_ply, moves_out);
 
                         // resultの文字がないならそこでPVの末尾なのでponderがあればそれを出力。
                         if (result2.empty())
@@ -1523,6 +1526,8 @@ namespace Book
                             {
                                 add_space_check();
                                 result += " " + ponderMove16.to_usi_string();
+                                if (moves_out)
+                                    moves_out->push_back(ponderMove16);
                             }
                         }
                         else
@@ -1626,6 +1631,7 @@ namespace Book
 
             // PVとして出力する長さ(手数)
             int pv_moves = (int) options["BookPvMoves"];
+            root_candidates.clear();
 
             for (size_t i = 0; i < move_list.size(); ++i)
             {
@@ -1652,7 +1658,8 @@ namespace Book
                 info.multiPV   = i + 1;
                 info.score     = Score::from_internal_value(it.value);
                 info.depth     = it.depth;
-                std::string pv = pv_builder(rootPos, updates, it.move, pv_moves) + prob_str;
+                root_candidates.emplace_back();
+                std::string pv = pv_builder(rootPos, updates, it.move, pv_moves, &root_candidates.back()) + prob_str;
                 info.pv        = pv;
                 info.selDepth  = 0;
                 info.nodes     = 0;
@@ -1837,8 +1844,30 @@ namespace Book
 
 		Move16 bestMove16, ponderMove16;
 		Value value;
+		root_candidates.clear();
 		if (probe_impl(pos, true, updates, bestMove16, ponderMove16, value))
 		{
+            // infoに出した全候補のPVをMoveに直す。(局面を進めながら変換する)
+            for (const auto& cand : root_candidates)
+            {
+                std::vector<Move> moves;
+                std::vector<Move> played;
+                std::deque<StateInfo> states;
+                for (Move16 m16 : cand)
+                {
+                    Move m = pos.to_move(m16);
+                    if (!(pos.pseudo_legal_s<true>(m) && pos.legal(m)))
+                        break;
+                    moves.push_back(m);
+                    states.emplace_back();
+                    pos.do_move(m, states.back());
+                    played.push_back(m);
+                }
+                for (size_t k = played.size(); k-- > 0;)
+                    pos.undo_move(played[k]);
+                result.candidates.push_back(std::move(moves));
+            }
+
             Move bestMove = pos.to_move(bestMove16);
 
             // bestMoveが合法であることは保証されている。(非合法手は除外してから選択を行うので)

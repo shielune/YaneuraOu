@@ -1404,6 +1404,11 @@ SKIP_SEARCH:
                 explain_pvs.emplace_back(pv.begin(), pv.end());
             }
         }
+        else if (!probeResult.candidates.empty())
+        {
+            // 定跡ヒット: 定跡がinfoで列挙した全候補(multipv 1..N)を対象にする。
+            explain_pvs = probeResult.candidates;
+        }
         else if (probeResult.bestmove.is_ok())
         {
             // 定跡など探索をスキップした場合は、その指し手(とponder)だけ。

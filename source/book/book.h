@@ -34,6 +34,11 @@ struct ProbeResult {
     // pondermove(なければMOVE_NONE)
     Move pondermove;
 
+    // 定跡がrootで"info ... multipv i ..."として列挙した全候補の読み筋(指し手+定跡の先読み)。
+    // candidates[i]がmultipv i+1に対応する。infoに出した順序と本数に一致する。(go explain用)
+    // 読み筋が作れなかった候補は空のvectorになる。
+    std::vector<std::vector<Move>> candidates;
+
 	// 通常のコンストラクタ
     ProbeResult() :
         bestmove(Move::none()),
@@ -378,7 +383,11 @@ protected:
 	// 定跡のpv文字列を生成して返す。
 	// m        : 局面posをこの指し手で進める
 	// rest_ply : 残り出力するPVの手数
-    std::string pv_builder(Position& pos, const Search::UpdateContext& updates, Move16 m, int rest_ply);
+    std::string pv_builder(Position& pos, const Search::UpdateContext& updates, Move16 m, int rest_ply,
+                           std::vector<Move16>* moves_out = nullptr);
+
+    // 直近のrootのprobe_impl()がinfoに出した候補ごとのPV(go explain用)。
+    std::vector<std::vector<Move16>> root_candidates;
 
 	AsyncPRNG prng;
 
