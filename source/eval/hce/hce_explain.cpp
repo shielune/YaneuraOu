@@ -141,7 +141,7 @@ void warn_if_unpaired() {
 		             " network than the one in HceProgressFile; the parts are not printed" << sync_endl;
 }
 
-// explain に速度の列を付けるか (HceSpeed)。局面ごとに詰みを探すので既定は偽。
+// explain に速度の列を付けるか (HceThreat)。局面ごとに詰みを探すので既定は偽。
 bool g_speed = false;
 
 inline double clamp3000(double v) {
@@ -423,17 +423,19 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		shift(has_king,     king,     g_nets.moved_king);
 		shift(has_activity, activity, g_nets.moved_activity);
 
+		// 内部名 (model.find("speed") / "activity" など) はモデルファイルの節の名前なので旧名のまま。
+		// 出力キーだけを threat / mobility に改名している。
 		std::string parts = "\"material\":" + num(material) + ",\"tempo\":" + num(tempo);
-		if (has_speed)    parts += ",\"speed\":"    + num(speed);
-		if (has_king)     parts += ",\"king\":"     + num(king);
-		if (has_activity) parts += ",\"activity\":" + num(activity);
+		if (has_speed)    parts += ",\"threat\":"    + num(speed);
+		if (has_king)     parts += ",\"king_safety\":" + num(king);
+		if (has_activity) parts += ",\"mobility\":" + num(activity);
 		line += ",\"parts\":{" + parts + "}";
 	}
-	// 王手と短い詰みの 8 つの数。先手視点。重いので HceSpeed が真のときだけ。
+	// 王手と短い詰みの 8 つの数。先手視点。重いので HceThreat が真のときだけ。
 	if (g_speed) {
 		int s[NUM_SPEED];
 		speed_features(pos, s);
-		line += ",\"speed\":{";
+		line += ",\"threat\":{";
 		for (int i = 0; i < NUM_SPEED; ++i)
 			line += std::string(i ? "," : "") + "\"" + kSpeedNames[i] + "\":" + std::to_string(s[i]);
 		line += "}";
@@ -445,19 +447,19 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		return;
 	}
 	line += ",\"black_pov\":" + num(clamp3000(now.mat + now.mob + now.kng + now.tmp + g_w.bias))
-	      + ",\"material\":" + num(now.mat)
-	      + ",\"mobility\":" + num(now.mob)
-	      + ",\"king\":" + num(now.kng);
+	      + ",\"linear_material\":" + num(now.mat)
+	      + ",\"linear_mobility\":" + num(now.mob)
+	      + ",\"linear_king\":" + num(now.kng);
 	// 手番の列がない重みでは tempo を出さない。そうした重みの出力は、
 	// 手番の列を足す前と一字一句同じになる。
 	if (has_tempo())
-		line += ",\"tempo\":" + num(now.tmp);
+		line += ",\"linear_tempo\":" + num(now.tmp);
 	if (before) {
-		line += ",\"d_material\":" + num(now.mat - before->mat)
-		      + ",\"d_mobility\":" + num(now.mob - before->mob)
-		      + ",\"d_king\":" + num(now.kng - before->kng);
+		line += ",\"d_linear_material\":" + num(now.mat - before->mat)
+		      + ",\"d_linear_mobility\":" + num(now.mob - before->mob)
+		      + ",\"d_linear_king\":" + num(now.kng - before->kng);
 		if (has_tempo())
-			line += ",\"d_tempo\":" + num(now.tmp - before->tmp);
+			line += ",\"d_linear_tempo\":" + num(now.tmp - before->tmp);
 		line += ",\"top\":" + top_movers(layout, *before, now, topn);
 	}
 	line += "}";
@@ -512,7 +514,7 @@ void add_hce_explain_options(OptionsMap& options) {
 		sync_cout << line << sync_endl;
 		return std::nullopt;
 	}));
-	options.add("HceSpeed", Option(false, [](const Option& o) {
+	options.add("HceThreat", Option(false, [](const Option& o) {
 		Hce::g_speed = (bool)o;
 		return std::nullopt;
 	}));
@@ -579,7 +581,7 @@ void hce_explain(Position& pos, const std::vector<Move>& pv, int topn,
 	} else {
 		sync_cout << "{\"pov\":\"black\""
 		          << ",\"phase\":" << HumanLike::game_phase(pos)
-		          << ",\"parts\":[\"material\",\"tempo\",\"speed\",\"king\",\"activity\"]"
+		          << ",\"parts\":[\"material\",\"tempo\",\"threat\",\"king_safety\",\"mobility\"]"
 		          << "}" << sync_endl;
 	}
 

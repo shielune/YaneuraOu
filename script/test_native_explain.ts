@@ -29,7 +29,7 @@ for (const moves of [['7g7f', '3c3d'], ['7g7f', '3c3d', '8h2b+', '3a2b']]) {
   for (const [ply, row] of rows.entries()) {
     assert.equal(row.ply, ply);
     if (ply) assert.equal(row.move, moves[ply - 1]);
-    assert.deepEqual(Object.keys(row.parts).sort(), ['activity', 'king', 'material', 'speed', 'tempo']);
+    assert.deepEqual(Object.keys(row.parts).sort(), ['king_safety', 'material', 'mobility', 'tempo', 'threat']);
     for (const value of Object.values(row.parts)) assert(typeof value === 'number' && Number.isFinite(value));
   }
 }
@@ -51,9 +51,9 @@ for (const moves of [['7g7f', '3c3d'], ['7g7f', '3c3d', '8h2b+', '3a2b']]) {
   };
   const plain = run('explain moves 7g7f 3c3d');
   assert.deepEqual(plain.at(-1), { done: true, positions: 3 });
-  assert.deepEqual(plain[0].parts, ['material', 'tempo', 'speed', 'king', 'activity']);
+  assert.deepEqual(plain[0].parts, ['material', 'tempo', 'threat', 'king_safety', 'mobility']);
   for (const row of plain.filter(r => 'ply' in r))
-    for (const key of ['black_pov', 'material', 'mobility', 'top', 'd_material']) assert(!(key in row), key);
+    for (const key of ['black_pov', 'linear_material', 'linear_mobility', 'top', 'd_linear_material']) assert(!(key in row), key);
   const legacy = run('explain legacy top 3 moves 7g7f 3c3d');
   assert.equal(legacy[0].route, 'linear');
   assert.equal(legacy.at(-1).positions, 3);

@@ -75,8 +75,8 @@ quit
 ```
 
 `explain` は根の局面と各着手後の局面を JSON 行として返す。
-モデルの組が読み込めていれば `parts` に `material`、`tempo`、`speed`、`king`、
-`activity` が入る。上の操作には NNUE の `nn.bin`、`isready`、`go` は不要。
+モデルの組が読み込めていれば `parts` に `material`、`tempo`、`threat`、`king_safety`、
+`mobility` が入る。上の操作には NNUE の `nn.bin`、`isready`、`go` は不要。
 探索を行うときは選んだ network に合う NNUE が別途必要で、`isready` が評価関数を読む。
 出力形式（ヘッダ行、局面行、不正手のエラー行、終端の `done` 行、`legacy` / `top`）は
 [docs/explain_protocol.md](docs/explain_protocol.md) に書いた。
