@@ -49,6 +49,8 @@ jobs:
             edition: YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
           - network: halfka1024
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
+          - network: halfka2304
+            edition: YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
     defaults:
       run:
         shell: bash
