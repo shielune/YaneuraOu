@@ -263,6 +263,9 @@ void extract_tempo_features(const Position& pos, float* z);
 // 各列の名前 (dump の見出しと突き合わせ用)。
 const char* feature_v2_name(const Layout& layout, int index);
 
+// 同じ列の ASCII のみの名前 (explain 用)。駒名が英語で、持ち駒は drop. が付く。
+const char* feature_v2_name_ascii(const Layout& layout, int index);
+
 // 手番の列の名前。k は 0 か 1。manaka-hce-fit.rs の TEMPO_NAMES と同じ。
 const char* tempo_feature_name(int k);
 
