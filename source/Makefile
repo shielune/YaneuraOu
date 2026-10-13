@@ -277,6 +277,14 @@ else
 			LDFLAGS  += -sMEMORY64=1
 		endif
 		CPPFLAGS += -s STRICT=1
+		# Node 向けの pthread ビルドだけ、メインスレッドから Atomics.waitAsync を隠す。
+		# 張りっぱなしの waitAsync が Module と共有メモリを握り続け、dispose() のあとも
+		# 解放されないため (理由は wasm_pre_node.js)。ブラウザ向けと cfworkers は対象外。
+		ifeq ($(EM_PTHREAD),1)
+			ifeq ($(EM_ENVIRONMENT),node)
+				LDFLAGS += --pre-js wasm_pre_node.js
+			endif
+		endif
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
 		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s EXPORT_ES6=1 -s ENVIRONMENT=$(EM_ENVIRONMENT)

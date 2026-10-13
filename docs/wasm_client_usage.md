@@ -186,6 +186,12 @@ engine.dispose();
   HalfKP_768x2_16_64 の 3 系列が **互いに互換性なし**。
 - emscripten 3.1.44 以上で Node が動かないのは下流バグ (本書の §5 参照)。それが
   解決するまで、Node 用バイナリは 3.1.43 で焼き続ける。
+- `engine.dispose()` は pthread worker を止め、エンジンが持つ共有メモリ
+  (`WebAssembly.Memory`) を GC に返す。メインスレッドの `Atomics.waitAsync` が
+  `Module` を掴み続けて返らなかったので、Node 用ビルドだけ
+  `source/wasm_pre_node.js` でそれを隠している。この対策が入る前のバイナリ
+  (9.61.5 以前) では、`dispose()` しても 1 台あたり 175〜210 MB (KP256, USI_Hash 64)
+  が残る。
 
 ### 同等のことを自前でやるなら
 
@@ -632,6 +638,7 @@ module worker かは loader 側の責任。アプリは USI コマンドのシ�
 | `-pthread` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | `PTHREAD_POOL_SIZE` | 32 | 32 | 32 | 32 | — |
 | `--pre-js wasm_pre.js` | 必須 | 必須 | 必須 | 必須 | 必須 |
+| `--pre-js wasm_pre_node.js` | — | — | — | 必須 (pthread のとき) | — |
 | 別 `.worker.js` が出る | ✅ | ❌ | ❌ | ❌ | ❌ |
 | サーバ側 COOP/COEP | 必須 | 必須 | 必須 | N/A | 不要 |
 | アプリ側 `console.log` tap | 不要 | 不要 | 推奨 | 推奨 | 推奨 |

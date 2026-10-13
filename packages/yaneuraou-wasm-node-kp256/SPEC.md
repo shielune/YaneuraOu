@@ -79,6 +79,12 @@ initialization.
 - `eval()` sends `usinewgame` + `isready` before each call (clears TT).
 - `evalBatch()` reuses TT across positions in the batch.
 - Concurrent `eval()` calls are automatically serialized via promise chain.
+- `dispose()` stops the pthread workers and lets the shared `WebAssembly.Memory`
+  be garbage collected. The Node build hides `Atomics.waitAsync` from the
+  emscripten glue on the main thread (`source/wasm_pre_node.js`); the glue
+  otherwise keeps a pending wait on its own mailbox that holds the whole
+  Module (about 175 MB at `USI_Hash` 64) after `dispose()`. The global
+  `Atomics` is not modified.
 - Multi-threaded search can be stopped mid-search via `stop` (raw USI), but
   `eval()` does not currently expose this.
 
