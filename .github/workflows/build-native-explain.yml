@@ -108,7 +108,7 @@ jobs:
           cd assets/hce-explain
           printf '%s  %s\n' \
             6a4ba678cf82e6e90cc677d4f869f2a8529efd1edd9e14a0ea5f11434dea6b00 hce-progress.bin \
-            dbd5e7760406bf6df970c085532a01e2506d4795986bc395c55dc98f92a14ed1 hce-explain.bin \
+            88adc8545a1be6b6ba7d50b207f18ef11e4d37d68adac12a0200866d8cfad28a hce-explain.bin \
             | shasum -a 256 -c -
       - name: Verify native explain without NNUE
         run: |
