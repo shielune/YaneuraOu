@@ -64,6 +64,8 @@ tarball と並べて付ける (`build-wasm.yml` の `release-wasm` の `files:`)
 
 - `hce-progress.bin` (形式 `HCEPRG01`、`HceProgressFile` に渡す): 残り手数を当てる進行度ネット。
 - `hce-explain.bin` (形式 `HCEXPL01`、`HceExplainFile` に渡す): 駒得・速度・玉の安全度・駒の働き・手番のモデル。
+  - 任意の節 `gain` (合計の大きさ 7 点と倍率 7 個) があれば、エンジンは 5 つの要素にその倍率を掛ける。
+    無ければ倍率 1。知らない古いエンジンは節を読み飛ばす。形式の版 (`HCEXPL01` の 1) は変わらない。
 - NAGISA が `nn.bin` の隣に要求する `progress.bin` とは別物。取り違えないよう、名前に `hce-` を付けている。
 - モデルは進行度ファイルとの対で学習してあり、両方の指紋 (進行度ファイル全体の FNV-1a 64) が合わないと
   `explain` は内訳を出さない。差し替えるときは 2 つ一緒に。
