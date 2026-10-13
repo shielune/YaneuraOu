@@ -43,6 +43,11 @@ public:
 	enum Factor { MATERIAL, SPEED, KING, ACTIVITY, TEMPO };
 	float curve(int factor, float moves_left) const;
 
+	// 5 つの要素の合計の大きさ (絶対値) に応じた倍率。5 つの要素すべてに同じ値を掛けるので、
+	// 要素を足すとモデルの評価値になる性質は変わらない。節 "gain" が無いモデルでは常に 1。
+	// 節は 7 つの位置 (昇順) と 7 つの倍率。位置の外側では端の倍率を使う。
+	float gain(float total_abs) const;
+
 	// 駒の価値 (内部単位)。盤上 10 + 持ち駒 7。先手の枚数 - 後手の枚数に掛ける。
 	static constexpr int NUM_MATERIAL = 17;
 	const float* material_values() const { return material_; }
@@ -58,6 +63,10 @@ private:
 	float                      curves_[NUM_FACTORS][5] = {};
 	float                      material_[NUM_MATERIAL] = {};
 	float                      tempo_ = 0.0f;
+	static constexpr int       GAIN_KNOTS = 7;
+	bool                       has_gain_ = false;
+	float                      gain_at_[GAIN_KNOTS] = {};
+	float                      gain_value_[GAIN_KNOTS] = {};
 };
 
 } // namespace Hce
