@@ -7,7 +7,7 @@ only documents what differs.
 ## Package Identity
 
 - npm scope: `@ultemica/yaneuraou-wasm-node-ka4096`
-- Engine: YaneuraOu SFNN ka2 4096x2-7-64 (つようら王11 mini) V9.60, multi-threaded
+- Engine: YaneuraOu SFNN ka2 4096x2-7-64 (つようら王11 mini), multi-threaded
 - Runtime: Node.js 18+ (`node:worker_threads`)
 - License: GPL-3.0
 
@@ -15,9 +15,15 @@ only documents what differs.
 
 - `YANEURAOU_EDITION=YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x`
 - `EM_EXPORT_NAME=YaneuraOu_Tuyoura11Mini`
-- `EM_INITIAL_MEMORY_SIZE=268435456` (256 MB)
-- `EM_MAXIMUM_MEMORY_SIZE=2147483648` (2 GB)
-- Everything else identical to `yaneuraou-wasm-node-kp256`.
+- `EM_INITIAL_MEMORY_SIZE=268435456` (256 MiB)
+- `EM_MAXIMUM_MEMORY_SIZE=4294967296` (4 GiB)
+- `EM_STACK_SIZE=16777216` (16 MiB per thread)
+- `EM_PTHREAD_POOL_SIZE=32` (workflow matrix)
+- `EM_ENVIRONMENT=node`, `EM_PTHREAD=1`
+- `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']`
+- `EM_CLOSURE=0`, Emscripten 3.1.43
+- Other loader and runtime conventions follow `yaneuraou-wasm-node-kp256`;
+  the matrix above overrides its memory and stack profile.
 
 ## Eval-format compatibility
 
@@ -27,7 +33,7 @@ Loading the wrong one triggers `exit(1)` during `isready`.
 
 ## Two-file eval
 
-Unlike every other supported network, this one needs **two** files. The
+This network needs **two** files. The
 layer-stack bucket is derived from progress coefficients that つようら王11 mini
 ships in a separate `progress.bin` rather than inside `nn.bin`.
 
@@ -43,7 +49,14 @@ ships in a separate `progress.bin` rather than inside `nn.bin`.
 Progress only, indices 0-7 (`progress8x`: no entering-king bucket). There is no
 `LS_BUCKET_MODE` option on this edition.
 
-## Memory Budget (2 GB max heap)
+## Memory Budget (4 GiB configured max linear memory)
 
-Same as `yaneuraou-wasm-node-halfkp256` — both pthread variants share the
-256 MB / 2 GB profile.
+- Initial linear-memory capacity: 256 MiB; maximum: 4 GiB.
+- Per-thread stack: 16 MiB. The worker pool is 32; the loader defaults to
+  `Threads=1`. Pool size is not a recommendation to activate all workers.
+- `nn.bin`: 7,711,372 bytes; `progress.bin`: 1,003,104 bytes;
+  combined: 8,714,476 bytes.
+- MEMFS files, decoded NNUE parameters, temporary loading copies, histories,
+  optional books, and the configured hash all consume linear memory.
+  JavaScript-side buffers are additional host memory. Peak usage and
+  remaining headroom have not been measured.

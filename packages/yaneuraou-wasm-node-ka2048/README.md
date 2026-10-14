@@ -3,11 +3,11 @@
 YaneuraOu SFNN ka2 2048x2-7-64 (つようら王11 micro 互換ネットワーク) 将棋エンジンを
 **Node.js から** multi-thread (pthread) で動かすための WASM パッケージ。
 
-- エンジン: YaneuraOu SFNN ka2 2048x2-7-64 / LayerStack 8 (V9.60)
-- スレッド: 可変 (`Threads` USI option、最大 32)
+- エンジン: YaneuraOu SFNN ka2 2048x2-7-64 / LayerStack 8
+- スレッド: 可変 (`Threads` USI option、ビルドの worker pool は 32)
 - WASM SIMD: 有効
-- メモリ: **256 MB initial / 4 GB max** / 2 MB stack
-- 評価関数: ~3.9 MB の `nn.bin` と `progress.bin` を実行時に渡す (**2 ファイル必要**)
+- メモリ: **256 MiB initial / 4 GiB max** / 16 MiB per-thread stack
+- 評価関数: `nn.bin` (3,864,610 bytes) と `progress.bin` (1,003,104 bytes) を実行時に渡す (**2 ファイル必要**)
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン
 
@@ -48,15 +48,16 @@ engine.dispose();
 
 | File | Size | Source |
 |---|---|---|
-| つようら王11 micro nn.bin + progress.bin | ~3.9 MB | やねうら王 FANBOX (MIT ライセンスで公開) |
+| つようら王11 micro nn.bin | 3,864,610 bytes | やねうら王 FANBOX (MIT ライセンスで公開) |
+| progress.bin | 1,003,104 bytes | 同上 |
+| 合計 | 4,867,714 bytes | |
 
 > **この評価関数は 2 ファイル必要。** 他のネットワークと違い、LayerStack の
 > 選択に使う進行度係数が `nn.bin` ではなく別ファイルの `progress.bin` にある。
 > `progressBin` を渡さないと bucket を計算できない。
 
-> 単体配布は無く、リリースページの各プラットフォーム版アーカイブに
-> `eval/nn.bin` と `eval/progress.bin` が同梱されている
-> (3 種のどれでもよい。評価関数の中身は同一)。
+> [公式配布記事](https://yaneurao.fanbox.cc/posts/12761272) の micro 用 `.7z` から
+> `nn.bin` と `progress.bin` を別途取得する。WASM パッケージには同梱しない。
 
 > `FV_SCALE` は **24** を指定すること。このビルドの既定は 28 だが、つようら王11 は 24 前提。
 > `createEngine` の `fvScale` オプション (既定 24) が `setoption name FV_SCALE` を送る。
@@ -70,7 +71,8 @@ engine.dispose();
 
 ## API
 
-`yaneuraou-wasm-node-kp256` と同じ surface に `progressBin` が加わる。
+`yaneuraou-wasm-node-kp256` と同じ surface に `progressBin` と
+`fvScale` (既定 24) が加わる。
 
 ## Files in this package
 
