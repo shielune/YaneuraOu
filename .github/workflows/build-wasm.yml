@@ -141,6 +141,30 @@ jobs:
             category: pthread
             engine_label: "SFNN HalfKA_hm2 2304x2-15-64"
             eval_note: "external (~172 MB + progress.bin)"
+          - name: pthread-ka4096
+            dir: yaneuraou-wasm-pthread-ka4096
+            edition: YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x
+            export_name: YaneuraOu_Tuyoura11Mini
+            environment: web,worker
+            pthread: 1
+            pthread_pool_size: 8
+            initial_memory: 268435456
+            maximum_memory: 4294967296
+            category: pthread
+            engine_label: "SFNN ka2 4096x2-7-64 (Tuyoura 11 mini)"
+            eval_note: "external (~7.7 MB + progress.bin)"
+          - name: pthread-ka2048
+            dir: yaneuraou-wasm-pthread-ka2048
+            edition: YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x
+            export_name: YaneuraOu_Tuyoura11Micro
+            environment: web,worker
+            pthread: 1
+            pthread_pool_size: 8
+            initial_memory: 268435456
+            maximum_memory: 4294967296
+            category: pthread
+            engine_label: "SFNN ka2 2048x2-7-64 (Tuyoura 11 micro)"
+            eval_note: "external (~3.9 MB + progress.bin)"
 
           # Material / Mobility / HumanLike (hlsl) の各 variant はビルド対象から外して
           # いる。packages/ 配下のソースは残してあるので、配布を再開したくなったら
@@ -256,6 +280,34 @@ jobs:
             category: node
             engine_label: "SFNN HalfKA_hm2 2304x2-15-64"
             eval_note: "external (~172 MB + progress.bin)"
+          - name: node-ka4096
+            dir: yaneuraou-wasm-node-ka4096
+            edition: YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x
+            export_name: YaneuraOu_Tuyoura11Mini
+            environment: node
+            pthread: 1
+            pthread_pool_size: 32
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 4294967296
+            category: node
+            engine_label: "SFNN ka2 4096x2-7-64 (Tuyoura 11 mini)"
+            eval_note: "external (~7.7 MB + progress.bin)"
+          - name: node-ka2048
+            dir: yaneuraou-wasm-node-ka2048
+            edition: YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x
+            export_name: YaneuraOu_Tuyoura11Micro
+            environment: node
+            pthread: 1
+            pthread_pool_size: 32
+            exported_runtime_methods: "['FS','ccall','callMain']"
+            emsdk_version: "3.1.43"
+            initial_memory: 268435456
+            maximum_memory: 4294967296
+            category: node
+            engine_label: "SFNN ka2 2048x2-7-64 (Tuyoura 11 micro)"
+            eval_note: "external (~3.9 MB + progress.bin)"
 
     steps:
       # The matrix stays the single source of truth (the release job and
