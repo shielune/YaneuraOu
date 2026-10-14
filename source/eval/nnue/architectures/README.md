@@ -171,8 +171,31 @@ idx = idx * progress_bucket_count + progress_bucket
 progress_bucket = min(progress * progress_bucket_count / 256, progress_bucket_count - 1)
 ```
 
-進行度パラメータは別ファイルではなく、`nn.bin`の中に格納する。SFNNで`progressN`を使う場合、
-`nn.bin`のセクション順は次の通り。
+進行度パラメータの置き場所は2通りある。
+
+- suffixなし(`progress8`など): `nn.bin`の中に格納する。外部ファイルは使わない。
+- 末尾`x`(`progress8x`)または`ek`(`progress8ek`): `nn.bin`には進行度セクションを持たず、
+  外部の`progress.bin`から読む。エンジン側は`LS_PROGRESS_COEFF`オプションで
+  `progress.bin`を指定する。`x`は相入玉bucketなしで係数だけを外部化する指定、
+  `ek`は相入玉bucketを1つ足したうえで外部化する指定(`progress8ek`は9 bucket)。
+
+`progress.bin`は`double[81][1548]`(bias無し)で、`x`/`ek`のarchitectureでは
+`nn.bin`と別に配布される。
+
+#### つようら王11との名前の対応
+
+上流のつようら王11(mini/micro)の名前に含まれる数字(`8_64`の`8`)は`fc_0`の出力数である。
+このフォークの生成器では同じ位置の数字がH1で、`fc_0`の出力は`H1+1`になる。
+そのため同じ形状のarchitectureはH1を1減らして表記する。
+
+| 上流名 | フォーク名 |
+| --- | --- |
+| `SFNN_ka2_4096_8_64_progress8` | `SFNN_ka2_4096_7_64_progress8x` |
+| `SFNN_ka2_2048_8_64_progress8` | `SFNN_ka2_2048_7_64_progress8x` |
+
+`*_8_64_progress8*`は寸法が異なるため、つようら王11の`nn.bin`には使えない。
+
+`suffixなし`の場合、`nn.bin`のセクション順は次の通り。
 
 ```text
 NNUE header
@@ -184,7 +207,7 @@ LayerStack network section 1
 ```
 
 Progress sectionは、section hash、`int32 bias_q16`、`int32 weights_q16[81][1548]`の順に
-little-endianで保存する。`progress.bin`のような外部ファイルは使わない。
+little-endianで保存する。`x`/`ek`ではこのsectionは`nn.bin`に存在しない。
 
 ### Progress 実装上の注意
 

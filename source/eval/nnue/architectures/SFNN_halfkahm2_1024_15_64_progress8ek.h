@@ -34,7 +34,7 @@ namespace Eval::NNUE {
     #define NNUE_SFNN_PROGRESS_ENTERING_KING 1
 
     // 1なら、進行度係数を nn.bin ではなく外部ファイルから読む。
-    // 💡 progress8ek 系は係数を progress.bin として別配布しているのでこちら。
+    // 💡 progress8ek / progress8x 系は係数を progress.bin として別配布しているのでこちら。
     //    このとき nn.bin には進行度セクションが無いので、hashにも含めない。
     #define NNUE_SFNN_PROGRESS_EXTERNAL 1
 

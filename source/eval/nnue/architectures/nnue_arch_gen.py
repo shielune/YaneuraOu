@@ -103,6 +103,8 @@ if len(arches) <= 3 :
 #     SFNN_halfka2_1024_7_64_hand64_k3k3 / hand64_k9k9 / hand64_k21k21 / hand64_k29k29 のように、
 #     hand64と複合できる。
 #     SFNN_halfka2_1024_7_64_k3k3_progress8 のようにprogress2/3/4/8/16/32とも複合できる。
+#     progress8x のように末尾にxを付けると、進行度係数を nn.bin ではなく外部の progress.bin から読む。
+#     (progress8ek は相入玉バケットを足したうえで同じく外部 progress.bin。)
 SFNN = False
 layer_stack_name = ""
 layer_stack_count = ""
@@ -131,6 +133,7 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
     king_buckets = 1
     progress_buckets = 1
     progress_entering_king = 0
+    progress_external = 0
     hand_name = ""
     king_name = ""
     progress_name = ""
@@ -165,11 +168,18 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
             raw = token[len("PROGRESS"):]
             # 📝 末尾の "EK" は相入玉専用バケットを1つ足す指定。
             #     NAGISA_V3 の評価関数がこの形 (progress8ek = 進行度8 + 相入玉1 = 9)。
+            #     "EK" は係数を外部ファイル progress.bin から読む指定を含意する。
+            # 📝 末尾の "X" は相入玉バケット無しで、係数だけを外部ファイル progress.bin から
+            #     読む指定。つようら王11 (SFNN_ka2_4096_8_64_progress8 + 別配布の progress.bin)
+            #     がこの形 (progress8x = 進行度8のみ = 8)。
             entering_king = raw.endswith("EK")
+            external = entering_king or raw.endswith("X")
             if entering_king:
                 raw = raw[:-len("EK")]
+            elif external:
+                raw = raw[:-len("X")]
             if not raw.isdigit() or int(raw) not in progress_values:
-                print(f"Error! : progress bucket must be progress2/3/4/8/16/32 (optionally with 'ek' suffix) , got {token}.")
+                print(f"Error! : progress bucket must be progress2/3/4/8/16/32 (optionally with 'ek' or 'x' suffix) , got {token}.")
                 raise SystemExit(1)
             if progress_buckets != 1:
                 print(f"Error! : duplicate SFNN progress bucket in {layer_stack_spec}.")
@@ -177,9 +187,10 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
             progress_name = token
             progress_buckets = int(raw) + (1 if entering_king else 0)
             progress_entering_king = 1 if entering_king else 0
+            progress_external = 1 if external else 0
         else:
             print(f"Error! : unknown SFNN layer stack token {token} in {layer_stack_spec}.")
-            print("Error! : SFNN layer stack tokens are hand64/256/1024, k3k3/k9k9/k21k21/k29k29, and progress2/3/4/8/16/32 (optionally progressNek).")
+            print("Error! : SFNN layer stack tokens are hand64/256/1024, k3k3/k9k9/k21k21/k29k29, and progress2/3/4/8/16/32 (optionally progressNek / progressNx).")
             raise SystemExit(1)
 
     canonical = "_".join([name for name in [hand_name, king_name, progress_name] if name])
@@ -188,7 +199,7 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
 
     layer_count = hand_buckets * king_buckets * progress_buckets
     return (canonical, str(layer_count), str(hand_buckets), str(king_buckets),
-            str(progress_buckets), str(progress_entering_king))
+            str(progress_buckets), str(progress_entering_king), str(progress_external))
 
 if arches[0].startswith("SFNN"):
     SFNN = True
@@ -220,7 +231,7 @@ if arches[0].startswith("SFNN"):
     layer_stack_spec = "_".join(arches[layer_stack_start:]) if len(arches) > layer_stack_start else ""
     (layer_stack_name, layer_stack_count, layer_stack_hand_buckets,
         layer_stack_king_buckets, layer_stack_progress_buckets,
-        layer_stack_progress_entering_king) = parse_sfnn_layer_stack_spec(layer_stack_spec)
+        layer_stack_progress_entering_king, layer_stack_progress_external) = parse_sfnn_layer_stack_spec(layer_stack_spec)
 
     arches = [arches[1], arches[2], arches[3], arches[4], layer_stack_count]
 
@@ -458,9 +469,9 @@ if SFNN:
         #define NNUE_SFNN_PROGRESS_ENTERING_KING {layer_stack_progress_entering_king}
 
         // 1なら、進行度係数を nn.bin ではなく外部ファイルから読む。
-        // 💡 progress8ek 系は係数を progress.bin として別配布しているのでこちら。
+        // 💡 progress8ek / progress8x 系は係数を progress.bin として別配布しているのでこちら。
         //    このとき nn.bin には進行度セクションが無いので、hashにも含めない。
-        #define NNUE_SFNN_PROGRESS_EXTERNAL {layer_stack_progress_entering_king}
+        #define NNUE_SFNN_PROGRESS_EXTERNAL {layer_stack_progress_external}
 
         // Number of groups for the first affine layer of SFNN.
         // common+shard fc_0でのみ2以上になる。

@@ -120,5 +120,13 @@ template void affine<  30, 64,   32>(const int8_t A[64][  32], const uint8_t x[ 
 // 💡 L1以降は 1024 版と同じ形なので、入力層のぶんだけ足せばよい。
 template void affine<2304, 16, 2304>(const int8_t A[16][2304], const uint8_t x[2304], const int32_t b[16], int32_t y[16]);
 
+// SFNN ka2_4096_7_64_progress8x / ka2_2048_7_64_progress8x (つようら王11 mini / micro)
+// 💡 fc_0 の出力は H1+1 = 8、fc_1 の入力は 2*H1 = 14 (padding後の stride は 32)。
+//    n=14 は 16 の倍数でないので、fc_1 は scalar fallback の経路を通る。
+//    fc_0 (n=4096 or 2048, m=8) は dot4 の経路を通る。
+template void affine<4096,  8, 4096>(const int8_t A[ 8][4096], const uint8_t x[4096], const int32_t b[ 8], int32_t y[ 8]);
+template void affine<2048,  8, 2048>(const int8_t A[ 8][2048], const uint8_t x[2048], const int32_t b[ 8], int32_t y[ 8]);
+template void affine<  14, 64,   32>(const int8_t A[64][  32], const uint8_t x[  14], const int32_t b[64], int32_t y[64]);
+
 } // namespace emscripten_wasm_simd
 #endif
