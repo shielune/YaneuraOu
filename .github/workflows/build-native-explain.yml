@@ -51,6 +51,13 @@ jobs:
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
           - network: halfka2304
             edition: YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
+          # Tuyoura 11 mini / micro (upstream SFNN_ka2_{4096,2048}_8_64_progress8).
+          # The fork spells the same shape with H1 minus one, and reads the
+          # progress coefficients from an external progress.bin ("x").
+          - network: ka4096
+            edition: YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x
+          - network: ka2048
+            edition: YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x
     defaults:
       run:
         shell: bash
