@@ -7,7 +7,7 @@ TypeScript loader, and the consumer code. Sibling spec:
 ## Package Identity
 
 - npm scope: `@ultemica/yaneuraou-wasm-pthread-ka4096`
-- Engine: YaneuraOu SFNN ka2 4096x2-7-64 (つようら王11 mini), multi-threaded
+- Engine: YaneuraOu SFNN ka2 4096x2-8-64 (つようら王11 mini), multi-threaded
 - Runtime: browsers with cross-origin isolation (COOP/COEP)
 - License: GPL-3.0
 
@@ -21,8 +21,8 @@ TypeScript loader, and the consumer code. Sibling spec:
 
 ## Wasm binary
 
-- Source: `source/` (engine: `YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x`)
-- NNUE architecture: `SFNN ka2 4096x2-7-64` / LayerStack 8 (つようら王11 mini 互換)
+- Source: `source/` (engine: `YANEURAOU_ENGINE_SFNN_ka2_4096_8_64_progress8x`)
+- NNUE architecture: `SFNN ka2 4096x2-8-64` / LayerStack 8 (つようら王11 mini 互換)
 - Linker flags (em++):
   - `EM_EXPORT_NAME=YaneuraOu_Tuyoura11Mini`
   - `EM_ENVIRONMENT=web,worker`
@@ -60,7 +60,7 @@ Identical to `yaneuraou-wasm-cfworkers/SPEC.md` except:
 - The configured linear-memory ceiling is 4 GiB, not a guarantee that a
   browser or device can allocate it. Hash size and thread histories consume
   this same memory budget.
-- Eval must follow the `SFNN ka2 4096x2-7-64` layout — HalfKP 系や
+- Eval must follow the `SFNN ka2 4096x2-8-64` layout — HalfKP 系や
   KP256 の重みは互換性なし。やねうら王 FANBOX 公開の
   `nn.bin` を `EvalDir` 配下に書き出して使う。
 - **`progress.bin` も必須。** LayerStack の選択に使う進行度係数が `nn.bin`

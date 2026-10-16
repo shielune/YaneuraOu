@@ -55,9 +55,9 @@ jobs:
           # The fork spells the same shape with H1 minus one, and reads the
           # progress coefficients from an external progress.bin ("x").
           - network: ka4096
-            edition: YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x
+            edition: YANEURAOU_ENGINE_SFNN_ka2_4096_8_64_progress8x
           - network: ka2048
-            edition: YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x
+            edition: YANEURAOU_ENGINE_SFNN_ka2_2048_8_64_progress8x
     defaults:
       run:
         shell: bash

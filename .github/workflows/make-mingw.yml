@@ -39,8 +39,8 @@ jobs:
           - YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
           - YANEURAOU_ENGINE_SFNN_halfkahm2_1024_15_64_progress8ek
           - YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_progress8ek
-          - YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x
-          - YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x
+          - YANEURAOU_ENGINE_SFNN_ka2_4096_8_64_progress8x
+          - YANEURAOU_ENGINE_SFNN_ka2_2048_8_64_progress8x
           - YANEURAOU_MATE_ENGINE
         compiler:
           - x86_64-w64-mingw32-g++-posix

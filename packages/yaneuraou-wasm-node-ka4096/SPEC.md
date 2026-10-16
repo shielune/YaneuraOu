@@ -7,13 +7,13 @@ only documents what differs.
 ## Package Identity
 
 - npm scope: `@ultemica/yaneuraou-wasm-node-ka4096`
-- Engine: YaneuraOu SFNN ka2 4096x2-7-64 (つようら王11 mini), multi-threaded
+- Engine: YaneuraOu SFNN ka2 4096x2-8-64 (つようら王11 mini), multi-threaded
 - Runtime: Node.js 18+ (`node:worker_threads`)
 - License: GPL-3.0
 
 ## Wasm binary
 
-- `YANEURAOU_EDITION=YANEURAOU_ENGINE_SFNN_ka2_4096_7_64_progress8x`
+- `YANEURAOU_EDITION=YANEURAOU_ENGINE_SFNN_ka2_4096_8_64_progress8x`
 - `EM_EXPORT_NAME=YaneuraOu_Tuyoura11Mini`
 - `EM_INITIAL_MEMORY_SIZE=268435456` (256 MiB)
 - `EM_MAXIMUM_MEMORY_SIZE=4294967296` (4 GiB)

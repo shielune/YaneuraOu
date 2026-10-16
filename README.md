@@ -86,7 +86,7 @@ quit
 ### つようら王11 mini / micro (ka4096 / ka2048)
 
 `ka4096` が mini、`ka2048` が micro に対応する。ビルドに使う edition は
-`SFNN_ka2_4096_7_64_progress8x` / `SFNN_ka2_2048_7_64_progress8x` で、上流名との対応は
+`SFNN_ka2_4096_8_64_progress8x` / `SFNN_ka2_2048_8_64_progress8x` で、上流名との対応は
 [source/eval/nnue/architectures/README.md](source/eval/nnue/architectures/README.md) にある。
 Windows 版は `make-mingw.yml` が同じ名前 (`yaneuraou-windows-ka4096-<tag>[-explain].tar.gz`) で作る。
 

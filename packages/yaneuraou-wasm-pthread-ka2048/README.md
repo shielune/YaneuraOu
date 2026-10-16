@@ -3,7 +3,7 @@
 YaneuraOu SFNN ka2 将棋エンジンを multi-thread (pthread) で動かすための
 ブラウザ向け WASM パッケージ。
 
-- エンジン: YaneuraOu SFNN `ka2 2048x2-7-64` / LayerStack 8 (つようら王11 micro 互換)
+- エンジン: YaneuraOu SFNN `ka2 2048x2-8-64` / LayerStack 8 (つようら王11 micro 互換)
 - スレッド: 可変 (`Threads` USI option、ビルドの worker pool は 8)
 - WASM SIMD: 有効
 - メモリ: 256 MiB initial / 4 GiB max / 16 MiB per-thread stack
@@ -103,7 +103,7 @@ interface EvalResult {
 
 | File | Architecture | Size | Note |
 |---|---|---|---|
-| つようら王11 micro nn.bin | SFNN ka2 2048x2-7-64 | 3,864,610 bytes | やねうら王 FANBOX で MIT ライセンス公開された配布物 |
+| つようら王11 micro nn.bin | SFNN ka2 2048x2-8-64 | 3,864,610 bytes | やねうら王 FANBOX で MIT ライセンス公開された配布物 |
 | つようら王11 micro progress.bin | (同上) | 1,003,104 bytes | **必須。** LayerStack 選択に使う進行度係数 |
 | 100T-shock book | - | 4,877,948 bytes | 定跡 (任意) |
 | 700T-shock book | - | 33,340,394 bytes | 定跡 (大、HASH と合わせてヒープ要確認) |

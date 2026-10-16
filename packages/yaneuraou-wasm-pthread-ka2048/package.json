@@ -1,7 +1,7 @@
 {
 	"name": "@ultemica/yaneuraou-wasm-pthread-ka2048",
 	"version": "8.50.0",
-	"description": "YaneuraOu shogi engine for browsers (Wasm, multi-threaded via pthread / SharedArrayBuffer, SFNN ka2 2048x2-7-64 with 8 layer stacks — つようら王11 micro compatible network)",
+	"description": "YaneuraOu shogi engine for browsers (Wasm, multi-threaded via pthread / SharedArrayBuffer, SFNN ka2 2048x2-8-64 with 8 layer stacks — つようら王11 micro compatible network)",
 	"license": "GPL-3.0",
 	"type": "module",
 	"main": "./dist/index.js",

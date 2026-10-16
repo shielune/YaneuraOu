@@ -280,8 +280,8 @@ The WASM bundles do not embed an eval function. Fetch `nn.bin` separately, write
 | suishopetite nn.bin | KP256 | ~873 KB | https://github.com/mizar/YaneuraOu/releases/download/resource/suishopetite_20211123.k_p.nnue.cpp.gz |
 | NAGISA_V3 nn.bin + progress.bin | SFNN HalfKA_hm2 1024x2-15-64 | ~75 MB | https://github.com/keinoda/YaneuraOu/releases/tag/nagisa-v3.1 |
 | NAGISA_V4 nn.bin + progress.bin | SFNN HalfKA_hm2 2304x2-15-64 | ~172 MB | bundled in the NAGISA_V4 distribution archive (no public mirror) |
-| Tuyoura 11 mini nn.bin + progress.bin | SFNN ka2 4096x2-7-64 | ~7.7 MB | https://yaneurao.fanbox.cc/posts/12761272 |
-| Tuyoura 11 micro nn.bin + progress.bin | SFNN ka2 2048x2-7-64 | ~3.9 MB | https://yaneurao.fanbox.cc/posts/12761272 |
+| Tuyoura 11 mini nn.bin + progress.bin | SFNN ka2 4096x2-8-64 | ~7.7 MB | https://yaneurao.fanbox.cc/posts/12761272 |
+| Tuyoura 11 micro nn.bin + progress.bin | SFNN ka2 2048x2-8-64 | ~3.9 MB | https://yaneurao.fanbox.cc/posts/12761272 |
 
 > suisho5 / suishopetite ship as `.cpp.gz` in embedded C++ array form — convert them back to `.bin` with the inverse of `script/eval_bin_to_cpp_literal.py`. AobaNNUE is distributed as a plain `nn.bin`.
 
