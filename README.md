@@ -94,6 +94,8 @@ Windows 版は `make-mingw.yml` が同じ名前 (`yaneuraou-windows-ka4096-<tag>
 から `nn.bin` と `progress.bin` を取得し、`EvalDir` の下に両方置く。
 評価関数は MIT License、エンジン本体は GPLv3。既存の network と互換性がなく、
 エンジンの `FV_SCALE` 既定値は 28 なので、`setoption name FV_SCALE value 24` を送る必要がある。
+探索スレッドのスタックは mini が約 4.5 MiB、micro が約 2.5 MiB 以上必要で、
+Linux は `ulimit -s` の既定 (8 MiB) で足りる。macOS と Windows は 8 MiB 固定で確保する。
 
 ### ネイティブ版の CI 前提
 
