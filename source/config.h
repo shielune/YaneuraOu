@@ -33,6 +33,7 @@
 //#define YANEURAOU_ENGINE_KPP_KKPT        // やねうら王 通常探索部 KPP_KKPT評価関数
 //#define YANEURAOU_ENGINE_MATERIAL        // やねうら王 通常探索部 駒得評価関数
 //#define YANEURAOU_ENGINE_KIKI            // やねうら王 通常探索部 Mobility (MB) 評価関数 (humanlike eval)
+//#define YANEURAOU_ENGINE_MANAKA          // やねうら王 通常探索部 Manaka (token pair) 評価関数 (nn.bin)
 //#define TANUKI_MATE_ENGINE               // tanuki- 詰め将棋solver  (2017/05/06～)
 //#define YANEURAOU_MATE_ENGINE            // やねうら王 詰将棋solver (2020/12/29～)
 //#define USER_ENGINE                      // ユーザーの思考エンジン
@@ -375,14 +376,20 @@ constexpr int MAX_PLY_NUM = 246;
 
 // --- 通常の思考エンジンとして実行ファイルを公開するとき用の設定集
 
-#if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL) || defined(YANEURAOU_ENGINE_KIKI)
+#if defined(YANEURAOU_ENGINE_KPPT) || defined(YANEURAOU_ENGINE_KPP_KKPT) || defined(YANEURAOU_ENGINE_NNUE) || defined(YANEURAOU_ENGINE_MATERIAL) || defined(YANEURAOU_ENGINE_KIKI) || defined(YANEURAOU_ENGINE_MANAKA)
 
 	#define YANEURAOU_ENGINE
 	#define USE_CLASSIC_EVAL
 	#define USE_PARTIAL_KEY
 	#define USE_PIECE_VALUE
 	#define USE_SEE
-	#define USE_EVAL_LIST
+	#if !defined(YANEURAOU_ENGINE_MANAKA)
+		// Manaka は BonaPiece を使わない。トークンは駒種(成駒を区別)、持ち主、升(と持ち駒の
+		// コピー番号)で決まり、BonaPiece では成駒が金に畳まれ玉も入らないので復元できない。
+		// 評価は最も近い計算済みの祖先とのトークン集合の差で更新する(eval/manaka/API.md)。
+		// do_move()/undo_move() で evalList と dirtyPiece を維持する費用も要らない。
+		#define USE_EVAL_LIST
+	#endif
 	#define USE_MATE_1PLY
 	#define USE_MATE_SOLVER
 	#define USE_MATE_DFPN
@@ -438,6 +445,14 @@ constexpr int MAX_PLY_NUM = 246;
 		// MB (Mobility, 164 params Ridge-fit) を embedded weights で動かす
 		// standalone eval。NNUE と違って外部 nn.bin を必要としない。
 		#define EVAL_MOBILITY
+		// 学習機能は持たない。
+		#undef EVAL_LEARN
+	#endif
+
+	#if defined(YANEURAOU_ENGINE_MANAKA)
+		// Manaka (トークン集合の power sum と pair の和) を nn.bin (ModelType=SYM2、仮称) から読んで動かす。
+		// 評価の実体は eval/manaka/。NNUE ではないので EVAL_NNUE は定義しない。
+		#define EVAL_MANAKA
 		// 学習機能は持たない。
 		#undef EVAL_LEARN
 	#endif
@@ -748,6 +763,8 @@ constexpr bool pretty_jp = false;
 	#endif
 #elif defined(EVAL_MOBILITY)
 	#define EVAL_TYPE_NAME "Mobility"
+#elif defined(EVAL_MANAKA)
+	#define EVAL_TYPE_NAME "Manaka"
 #elif defined(EVAL_KPPT)
 	#define EVAL_TYPE_NAME "KPPT"
 #elif defined(EVAL_KPP_KKPT)

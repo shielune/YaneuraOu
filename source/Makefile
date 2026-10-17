@@ -22,6 +22,7 @@
 # YANEURAOU_ENGINE_KPPT          : KPPT型評価関数
 # YANEURAOU_ENGINE_KPP_KKPT      : KPP_KKPT型評価関数
 # YANEURAOU_ENGINE_MATERIAL      : 駒得のみの評価関数(複数変種あり。MATERIAL_LEVELで選択できる)
+# YANEURAOU_ENGINE_MANAKA        : Manaka評価関数(トークン集合のpower sumとpairの和。nn.binを読む。eval/manaka/API.md)
 # TANUKI_MATE_ENGINE             : tanuki- 詰め将棋solver  (2017/05/06～)
 # YANEURAOU_MATE_ENGINE          : やねうら王 詰将棋solver (2020/12/29～)
 # USER_ENGINE                    : USER定義エンジン
@@ -42,6 +43,7 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPP_KKPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIAL
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_MANAKA
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_DEEP_TENSOR_RT_UBUNTU
 #YANEURAOU_EDITION = TANUKI_MATE_ENGINE
 #YANEURAOU_EDITION = YANEURAOU_MATE_ENGINE
@@ -430,6 +432,13 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
 		eval/hce/evaluate_hce.cpp                                              \
 		eval/hce/mobility_weights_embedded.cpp                                 \
 		eval/humanlike/humanlike_eval.cpp                                      \
+		engine/yaneuraou-engine/yaneuraou-search.cpp
+endif
+
+ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MANAKA)
+	# Manaka edition: nn.bin (ModelType=SYM2) を読むトークン集合の評価。NNUE も humanlike も使わない。
+	SOURCES  +=                                                                \
+		eval/manaka/evaluate_manaka.cpp                                        \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
 endif
 
