@@ -352,6 +352,28 @@ function resolveWorkerPath(target: unknown): string {
 // -------------------------------------------------------------------
 
 export async function createEngine(opts: CreateEngineOptions): Promise<Engine> {
+  // The module is built inside `opts.factory`, but the only handle that can
+  // `dispose()` it is the Engine returned at the very end. If anything in
+  // between throws (usiok / readyok timeout, an eval file the engine
+  // rejects, ...) the caller never gets that handle, so the module is torn
+  // down here instead of keeping its pthread workers and memory forever.
+  let built: YaneuraOuInstance | undefined;
+  try {
+    return await buildEngine({
+      ...opts,
+      factory: async (args) => (built = await opts.factory(args)),
+    });
+  } catch (e) {
+    try {
+      built?.terminate();
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
+}
+
+async function buildEngine(opts: CreateEngineOptions): Promise<Engine> {
   const usiHash = opts.usiHash ?? 64;
   const threads = opts.threads ?? 1;
   const handshakeTimeout = opts.handshakeTimeoutMs ?? 10_000;

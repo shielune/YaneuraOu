@@ -109,3 +109,7 @@ Hard limits:
   emscripten prints a `locateFile` warning to stderr; `createEngine`
   hangs on `usi -> usiok timeout`. Fix: install the package from npm
   rather than copying only `dist/yaneuraou.js` / `dist/yaneuraou.wasm`.
+- `createEngine` throws part-way (`usi -> usiok` / `isready -> readyok`
+  timeout, or an eval file the engine rejects): the half-built module is
+  terminated before the error is rethrown, so its pooled pthread workers do
+  not stay alive. The caller has no `Engine` to `dispose()` in this case.
