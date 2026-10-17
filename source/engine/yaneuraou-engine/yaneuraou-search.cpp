@@ -32,6 +32,9 @@
 #if defined(EVAL_MOBILITY)
 #include "../../eval/humanlike/humanlike_eval.h"
 #endif
+#if defined(EVAL_MANAKA)
+#include "../../eval/manaka/evaluate_manaka.h"
+#endif
 #include "../../mate/mate.h"
 #include "../../tune.h"
 
@@ -624,6 +627,11 @@ void YaneuraOuEngine::trace_eval() const {
 	}
 	// 駒得・利き・玉の安全度の内訳。線形の経路ならこの三つの和が評価値になる。
 	Eval::print_eval_stat(p);
+#endif
+#if defined(EVAL_MANAKA)
+	// "manaka pre <f32> internal <整数>" を 1 行。f32 の参照値と突き合わせるための行で、
+	// p は SFEN から作り直したので、ここへ来るのは常に全計算の経路になる。
+	Eval::Manaka::trace(p);
 #endif
 	sync_cout << "eval " << Eval::evaluate(p) << sync_endl;
 }
