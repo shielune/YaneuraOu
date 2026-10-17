@@ -450,7 +450,7 @@ constexpr int MAX_PLY_NUM = 246;
 	#endif
 
 	#if defined(YANEURAOU_ENGINE_MANAKA)
-		// Manaka (トークン集合の power sum と pair の和) を nn.bin (ModelType=SYM2、仮称) から読んで動かす。
+		// Manaka (トークン集合の power sum と pair の和) を nn.bin (SYMq16c または旧 SYMq16) から読む。
 		// 評価の実体は eval/manaka/。NNUE ではないので EVAL_NNUE は定義しない。
 		#define EVAL_MANAKA
 		// 学習機能は持たない。

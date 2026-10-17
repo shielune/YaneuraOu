@@ -34,6 +34,11 @@ void trace(const Position& pos);
 // 骨組みでは未実装と言って返るだけ。
 void test_walk(IEngine& engine, std::istringstream& is);
 
+// "test manaka_bench stats [reset]"
+// 全スレッドが評価した経路 (取ってある値、評価だけ、差分更新、作り直し、失敗) の回数の合計。
+// normal_test_cmd.cpp に manaka_stats の入口は無いので、test manaka_bench の最初の引数 stats として受ける。
+void test_stats(IEngine& engine, std::istringstream& is);
+
 // "test manaka_bench <局面ファイル> <回数> [warm|cold]"
 // 評価 1 回あたりの時間と、全計算と差分更新の回数を測る。
 // 骨組みでは未実装と言って返るだけ。

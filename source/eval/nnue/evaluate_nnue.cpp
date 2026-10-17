@@ -477,7 +477,7 @@ namespace {
 		std::string architecture;
 		Tools::Result result = ReadHeader(stream, &hash_value, &architecture, nullptr);
 		if (result.is_not_ok()) return result;
-		// Manaka のネットワーク (ModelType=SYM、ModelType=SYM2) は NNUE ではない。
+		// Manaka のネットワーク (ModelType=SYM で始まるもの。SYMq16c、SYMq16、不採用の SYM2 を含む) は NNUE ではない。
 		// ヘッダー (version、hash、アーキテクチャ文字列) が NNUE と同じ形で、上の ReadHeader も
 		// version の不一致も hash の不一致も警告で済ませるので、ここで名前を見て拒否しないと、
 		// 本文を NNUE のパラメータとして読み進める。消費したバイト数が偶然合えば受理されうる。
