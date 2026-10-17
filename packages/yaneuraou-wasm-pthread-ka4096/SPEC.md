@@ -31,7 +31,7 @@ TypeScript loader, and the consumer code. Sibling spec:
   - `EM_PTHREAD_POOL_SIZE=8` (workflow matrix; passed to `PTHREAD_POOL_SIZE`)
   - `EM_INITIAL_MEMORY_SIZE=268435456` (256 MiB)
   - `EM_MAXIMUM_MEMORY_SIZE=4294967296` (4 GiB)
-  - `EM_STACK_SIZE=16777216` (16 MiB per thread)
+  - `EM_STACK_SIZE=8388608` (8 MiB per thread)
   - `EM_CLOSURE=0`
 - Emscripten: 5.0.5 (docker image `emscripten/emsdk:5.0.5`)
 
@@ -104,7 +104,7 @@ Identical to `yaneuraou-wasm-cfworkers/SPEC.md` except:
 | progress.bin | 1,003,104 bytes |
 | Evaluation files combined | 8,714,476 bytes |
 | `USI_Hash` example | 64 MiB |
-| Per-thread stack | 16 MiB × active pthreads |
+| Per-thread stack | 8 MiB × active pthreads (measured minimum 4.5 MiB) |
 
 MEMFS files, decoded NNUE parameters, temporary loading copies, thread-local
 and shared histories, optional books, and other engine allocations consume

@@ -143,7 +143,7 @@ jobs:
             eval_note: "external (~172 MB + progress.bin)"
           - name: pthread-ka4096
             dir: yaneuraou-wasm-pthread-ka4096
-            stack_size: 16777216
+            stack_size: 8388608
             edition: YANEURAOU_ENGINE_SFNN_ka2_4096_8_64_progress8x
             export_name: YaneuraOu_Tuyoura11Mini
             environment: web,worker
@@ -156,7 +156,7 @@ jobs:
             eval_note: "external (~7.7 MB + progress.bin)"
           - name: pthread-ka2048
             dir: yaneuraou-wasm-pthread-ka2048
-            stack_size: 16777216
+            stack_size: 8388608
             edition: YANEURAOU_ENGINE_SFNN_ka2_2048_8_64_progress8x
             export_name: YaneuraOu_Tuyoura11Micro
             environment: web,worker
@@ -284,7 +284,7 @@ jobs:
             eval_note: "external (~172 MB + progress.bin)"
           - name: node-ka4096
             dir: yaneuraou-wasm-node-ka4096
-            stack_size: 16777216
+            stack_size: 8388608
             edition: YANEURAOU_ENGINE_SFNN_ka2_4096_8_64_progress8x
             export_name: YaneuraOu_Tuyoura11Mini
             environment: node
@@ -299,7 +299,7 @@ jobs:
             eval_note: "external (~7.7 MB + progress.bin)"
           - name: node-ka2048
             dir: yaneuraou-wasm-node-ka2048
-            stack_size: 16777216
+            stack_size: 8388608
             edition: YANEURAOU_ENGINE_SFNN_ka2_2048_8_64_progress8x
             export_name: YaneuraOu_Tuyoura11Micro
             environment: node

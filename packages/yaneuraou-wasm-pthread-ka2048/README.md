@@ -6,7 +6,7 @@ YaneuraOu SFNN ka2 将棋エンジンを multi-thread (pthread) で動かすた�
 - エンジン: YaneuraOu SFNN `ka2 2048x2-8-64` / LayerStack 8 (つようら王11 micro 互換)
 - スレッド: 可変 (`Threads` USI option、ビルドの worker pool は 8)
 - WASM SIMD: 有効
-- メモリ: 256 MiB initial / 4 GiB max / 16 MiB per-thread stack
+- メモリ: 256 MiB initial / 4 GiB max / 8 MiB per-thread stack
 - 評価関数は同梱せず外部ロード (やねうら王 FANBOX で MIT ライセンス公開された `nn.bin` と `progress.bin`)
 - **`SharedArrayBuffer` を要求 — ホストは COOP/COEP ヘッダを返す必要**
 

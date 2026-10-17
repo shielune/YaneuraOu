@@ -6,7 +6,7 @@ YaneuraOu SFNN ka2 4096x2-8-64 (つようら王11 mini 互換ネットワーク)
 - エンジン: YaneuraOu SFNN ka2 4096x2-8-64 / LayerStack 8
 - スレッド: 可変 (`Threads` USI option、ビルドの worker pool は 32)
 - WASM SIMD: 有効
-- メモリ: **256 MiB initial / 4 GiB max** / 16 MiB per-thread stack
+- メモリ: **256 MiB initial / 4 GiB max** / 8 MiB per-thread stack
 - 評価関数: `nn.bin` (7,711,372 bytes) と `progress.bin` (1,003,104 bytes) を実行時に渡す (**2 ファイル必要**)
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン
