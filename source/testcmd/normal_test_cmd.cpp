@@ -15,6 +15,9 @@
 #include "../search.h"
 #include "../movegen.h"
 #include "../evaluate.h"
+#if defined(EVAL_MANAKA)
+#include "../eval/manaka/evaluate_manaka.h"
+#endif
 
 namespace YaneuraOu {
 namespace {
@@ -380,6 +383,10 @@ namespace Test
 		else if (token == "autoplay")         auto_play(engine, is);       // 連続自己対局を行う。
 #if defined(YANEURAOU_ENGINE)
 		else if (token == "eval_accuracy")    eval_accuracy(engine, is);   // PSV に対し evaluate() の sign 一致率を測る。
+#endif
+#if defined(EVAL_MANAKA)
+		else if (token == "manaka_walk")      Eval::Manaka::test_walk(engine, is);   // Manaka の差分更新と全計算の一致検査。
+		else if (token == "manaka_bench")     Eval::Manaka::test_bench(engine, is);  // Manaka の評価の速度と、全計算・差分更新の回数。
 #endif
 		else return false;									               // どのコマンドも処理することがなかった
 			
