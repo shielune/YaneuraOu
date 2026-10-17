@@ -182,7 +182,8 @@ Node で正しく動かせることを確認できている唯一のバージョ
 | 文書 | 内容 |
 |---|---|
 | [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) | WASM パッケージの利用ガイド (最初に読む) |
-| [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike) |
+| [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike / Manaka) |
+| [`docs/manaka.md`](docs/manaka.md) | Manaka エディションのビルドと SYMq16c / SYMq16 の読み込み (フォーク専用) |
 | [`docs/wasm_release_workflow.md`](docs/wasm_release_workflow.md) | WASM パッケージのリリース手順 |
 | [`docs/releases/`](docs/releases/README.md) | 各リリースのリリースノート (本文の生成元) |
 | [`docs/wasm_upgrade_changelog.md`](docs/wasm_upgrade_changelog.md) | emscripten / upstream 追従作業の記録 |
