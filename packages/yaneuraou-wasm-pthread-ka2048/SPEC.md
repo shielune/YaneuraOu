@@ -7,7 +7,7 @@ TypeScript loader, and the consumer code. Sibling spec:
 ## Package Identity
 
 - npm scope: `@ultemica/yaneuraou-wasm-pthread-ka2048`
-- Engine: YaneuraOu SFNN ka2 2048x2-7-64 (つようら王11 micro), multi-threaded
+- Engine: YaneuraOu SFNN ka2 2048x2-8-64 (つようら王11 micro), multi-threaded
 - Runtime: browsers with cross-origin isolation (COOP/COEP)
 - License: GPL-3.0
 
@@ -21,8 +21,8 @@ TypeScript loader, and the consumer code. Sibling spec:
 
 ## Wasm binary
 
-- Source: `source/` (engine: `YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x`)
-- NNUE architecture: `SFNN ka2 2048x2-7-64` / LayerStack 8 (つようら王11 micro 互換)
+- Source: `source/` (engine: `YANEURAOU_ENGINE_SFNN_ka2_2048_8_64_progress8x`)
+- NNUE architecture: `SFNN ka2 2048x2-8-64` / LayerStack 8 (つようら王11 micro 互換)
 - Linker flags (em++):
   - `EM_EXPORT_NAME=YaneuraOu_Tuyoura11Micro`
   - `EM_ENVIRONMENT=web,worker`
@@ -31,7 +31,7 @@ TypeScript loader, and the consumer code. Sibling spec:
   - `EM_PTHREAD_POOL_SIZE=8` (workflow matrix; passed to `PTHREAD_POOL_SIZE`)
   - `EM_INITIAL_MEMORY_SIZE=268435456` (256 MiB)
   - `EM_MAXIMUM_MEMORY_SIZE=4294967296` (4 GiB)
-  - `EM_STACK_SIZE=16777216` (16 MiB per thread)
+  - `EM_STACK_SIZE=8388608` (8 MiB per thread)
   - `EM_CLOSURE=0`
 - Emscripten: 5.0.5 (docker image `emscripten/emsdk:5.0.5`)
 
@@ -60,7 +60,7 @@ Identical to `yaneuraou-wasm-cfworkers/SPEC.md` except:
 - The configured linear-memory ceiling is 4 GiB, not a guarantee that a
   browser or device can allocate it. Hash size and thread histories consume
   this same memory budget.
-- Eval must follow the `SFNN ka2 2048x2-7-64` layout — HalfKP 系や
+- Eval must follow the `SFNN ka2 2048x2-8-64` layout — HalfKP 系や
   KP256 の重みは互換性なし。やねうら王 FANBOX 公開の
   `nn.bin` を `EvalDir` 配下に書き出して使う。
 - **`progress.bin` も必須。** LayerStack の選択に使う進行度係数が `nn.bin`
@@ -104,7 +104,7 @@ Identical to `yaneuraou-wasm-cfworkers/SPEC.md` except:
 | progress.bin | 1,003,104 bytes |
 | Evaluation files combined | 4,867,714 bytes |
 | `USI_Hash` example | 64 MiB |
-| Per-thread stack | 16 MiB × active pthreads |
+| Per-thread stack | 8 MiB × active pthreads (measured minimum 2.5 MiB) |
 
 MEMFS files, decoded NNUE parameters, temporary loading copies, thread-local
 and shared histories, optional books, and other engine allocations consume

@@ -201,6 +201,17 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
     return (canonical, str(layer_count), str(hand_buckets), str(king_buckets),
             str(progress_buckets), str(progress_entering_king), str(progress_external))
 
+def sfnn_uses_shortcut(hidden1_dims: int) -> bool:
+    if hidden1_dims % 8 == 7:
+        return True
+    if hidden1_dims % 8 == 0:
+        return False
+    print(f"Error : SFNN H1 must be 8n with no shortcut, or 8n-1 with shortcut. H1={hidden1_dims}.")
+    raise SystemExit(1)
+
+def sfnn_hidden1_output_dims(hidden1_dims: int) -> int:
+    return hidden1_dims + (1 if sfnn_uses_shortcut(hidden1_dims) else 0)
+
 if arches[0].startswith("SFNN"):
     SFNN = True
     if len(arches) < 5:
@@ -427,13 +438,17 @@ if SFNN:
         print(f"Error : layers must be like 1536-15-32-k3k3 , layers = {layers}.")
         raise SystemExit(1)
 
+    hidden1_dims = int(layers[1])
+    hidden1_output_dims = sfnn_hidden1_output_dims(hidden1_dims)
+    hidden1_uses_shortcut = sfnn_uses_shortcut(hidden1_dims)
+
     if not sfnn_group_count.isdigit():
         print(f"Error : SFNN group count must be an integer , group = {sfnn_group_count}.")
         raise SystemExit(1)
 
     if sfnn_common_shard:
         transformed_dims = int(layers[0])
-        hidden1_out_dims = int(layers[1]) + 1
+        hidden1_out_dims = hidden1_output_dims
         common_dims = int(sfnn_common_dims)
         shard_dims = int(sfnn_shard_dims)
         group_count = int(sfnn_group_count)
@@ -441,7 +456,7 @@ if SFNN:
             print(f"Error : common+shard SFNN requires common + shard * group == transformed dimensions. common={common_dims}, shard={shard_dims}, group={group_count}, dims={transformed_dims}.")
             raise SystemExit(1)
         if hidden1_out_dims % group_count != 0:
-            print(f"Error : common+shard SFNN requires hidden1+1 divisible by group count. hidden1+1={hidden1_out_dims}, group={group_count}.")
+            print(f"Error : common+shard SFNN requires fc0 output dimensions divisible by group count. fc0_output={hidden1_out_dims}, group={group_count}.")
             raise SystemExit(1)
         if common_dims % 64 != 0:
             print(f"Error : common+shard SFNN requires common dimensions to be a multiple of 64. common={common_dims}.")
@@ -485,6 +500,8 @@ if SFNN:
         // 各層の次元数
         constexpr IndexType kInputDims   = kTransformedFeatureDimensions;
         constexpr IndexType kHidden1Dims = {layers[1]};
+        constexpr bool kUseShortcut = {"true" if hidden1_uses_shortcut else "false"};
+        constexpr IndexType kHidden1OutputDims = kHidden1Dims + (kUseShortcut ? 1 : 0);
         constexpr IndexType kHidden2Dims = {layers[2]};                              
     """
 
@@ -520,12 +537,11 @@ else:
 # ============================================================
 
 if SFNN:
-    fc_0_type = "Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1Dims + 1>"
+    fc_0_type = "Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1OutputDims>"
     group_count = int(sfnn_group_count)
     if sfnn_common_shard:
-        fc_0_type = "Layers::AffineTransformCommonShardInputExplicit<kInputDims, kHidden1Dims + 1, kHidden1CommonDimensions, kHidden1ShardDimensions, kHidden1GroupCount>"
+        fc_0_type = "Layers::AffineTransformCommonShardInputExplicit<kInputDims, kHidden1OutputDims, kHidden1CommonDimensions, kHidden1ShardDimensions, kHidden1GroupCount>"
     group_input_dims = int(sfnn_shard_dims) if sfnn_common_shard else 0
-    hidden1_output_dims = int(layers[1]) + 1
     enable_common_shard_sfnn_accumulator_propagate = (
         sfnn_common_shard and group_count % 2 == 0 and group_input_dims % 64 == 0
     )
@@ -553,7 +569,7 @@ if SFNN:
         {sfnn_accumulator_propagate_macro}
 
         using Fc0Layer = {fc_0_type};
-        using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims>;
+        using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims, kUseShortcut>;
 
         struct Network : NetworkBase {{
             static std::string GetStructureString() {{

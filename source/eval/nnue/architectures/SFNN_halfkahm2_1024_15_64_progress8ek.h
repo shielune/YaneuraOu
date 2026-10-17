@@ -50,12 +50,14 @@ namespace Eval::NNUE {
     // 各層の次元数
     constexpr IndexType kInputDims   = kTransformedFeatureDimensions;
     constexpr IndexType kHidden1Dims = 15;
+    constexpr bool kUseShortcut = true;
+    constexpr IndexType kHidden1OutputDims = kHidden1Dims + (kUseShortcut ? 1 : 0);
     constexpr IndexType kHidden2Dims = 64;                              
 
     
 
-    using Fc0Layer = Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1Dims + 1>;
-    using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims>;
+    using Fc0Layer = Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1OutputDims>;
+    using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims, kUseShortcut>;
 
     struct Network : NetworkBase {
         static std::string GetStructureString() {

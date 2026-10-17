@@ -7,17 +7,17 @@ only documents what differs.
 ## Package Identity
 
 - npm scope: `@ultemica/yaneuraou-wasm-node-ka2048`
-- Engine: YaneuraOu SFNN ka2 2048x2-7-64 (つようら王11 micro), multi-threaded
+- Engine: YaneuraOu SFNN ka2 2048x2-8-64 (つようら王11 micro), multi-threaded
 - Runtime: Node.js 18+ (`node:worker_threads`)
 - License: GPL-3.0
 
 ## Wasm binary
 
-- `YANEURAOU_EDITION=YANEURAOU_ENGINE_SFNN_ka2_2048_7_64_progress8x`
+- `YANEURAOU_EDITION=YANEURAOU_ENGINE_SFNN_ka2_2048_8_64_progress8x`
 - `EM_EXPORT_NAME=YaneuraOu_Tuyoura11Micro`
 - `EM_INITIAL_MEMORY_SIZE=268435456` (256 MiB)
 - `EM_MAXIMUM_MEMORY_SIZE=4294967296` (4 GiB)
-- `EM_STACK_SIZE=16777216` (16 MiB per thread)
+- `EM_STACK_SIZE=8388608` (8 MiB per thread)
 - `EM_PTHREAD_POOL_SIZE=32` (workflow matrix)
 - `EM_ENVIRONMENT=node`, `EM_PTHREAD=1`
 - `EM_EXPORTED_RUNTIME_METHODS=['FS','ccall','callMain']`
@@ -52,7 +52,8 @@ Progress only, indices 0-7 (`progress8x`: no entering-king bucket). There is no
 ## Memory Budget (4 GiB configured max linear memory)
 
 - Initial linear-memory capacity: 256 MiB; maximum: 4 GiB.
-- Per-thread stack: 16 MiB. The worker pool is 32; the loader defaults to
+- Per-thread stack: 8 MiB (measured minimum 2.5 MiB: with `STACK_OVERFLOW_CHECK=2` the search aborts
+  below it, at `go depth 14` from the start position). The worker pool is 32; the loader defaults to
   `Threads=1`. Pool size is not a recommendation to activate all workers.
 - `nn.bin`: 3,864,610 bytes; `progress.bin`: 1,003,104 bytes;
   combined: 4,867,714 bytes.

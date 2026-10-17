@@ -41,11 +41,19 @@ struct alignas(kCacheLineSize) SfnnNetworkBuffer<Fc0Layer, Hidden1Dims, Hidden2D
 	alignas(kCacheLineSize) typename Layers::AffineTransformExplicit<Hidden2Dims, 1>::OutputBuffer fc_2_out;
 };
 
-template <typename Fc0Layer, IndexType InputDims, IndexType Hidden1Dims, IndexType Hidden2Dims>
+template <typename Fc0Layer, IndexType InputDims, IndexType Hidden1Dims, IndexType Hidden2Dims,
+          bool UseShortcut = (Hidden1Dims % 8 == 7)>
 struct SfnnNetwork {
+	static_assert(Hidden1Dims % 8 == 0 || Hidden1Dims % 8 == 7,
+	              "SFNN H1 must be 8n without shortcut, or 8n-1 with shortcut.");
+	static_assert(UseShortcut == (Hidden1Dims % 8 == 7),
+	              "SFNN shortcut is enabled only when H1 is 8n-1.");
+	static constexpr bool kUseShortcut = UseShortcut;
+	static constexpr IndexType kHidden1OutputDims = Hidden1Dims + (UseShortcut ? 1 : 0);
+
 	Fc0Layer fc_0;
-	Layers::ClippedReLUExplicit<Hidden1Dims + 1> ac_0;
-	Layers::SqrClippedReLU<Hidden1Dims + 1> ac_sqr_0;
+	Layers::ClippedReLUExplicit<kHidden1OutputDims> ac_0;
+	Layers::SqrClippedReLU<kHidden1OutputDims> ac_sqr_0;
 	Layers::AffineTransformExplicit<Hidden1Dims * 2, Hidden2Dims> fc_1;
 	Layers::ClippedReLUExplicit<Hidden2Dims> ac_1;
 	Layers::AffineTransformExplicit<Hidden2Dims, 1> fc_2;
@@ -155,7 +163,8 @@ struct SfnnNetwork {
 			fc_2.Propagate(buf.ac_1_out, buf.fc_2_out);
 		}
 
-		buf.fc_2_out[0] += buf.fc_0_out[kHidden1Dims];
+		if constexpr (kUseShortcut)
+			buf.fc_2_out[0] += buf.fc_0_out[kHidden1Dims];
 		return buf.fc_2_out;
 	}
 
