@@ -99,19 +99,27 @@ sparse input features
   -> FeatureTransformer
   -> transformed features
   -> selected LayerStack network
-       fc_0: FT -> H1 + 1
+       fc_0: FT -> H1 + 1   (shortcut項がなければ H1)
        ClippedReLU(fc_0[0..H1))
        SqrClippedReLU(fc_0[0..H1))
        concat: H1 * 2
        fc_1: H1 * 2 -> H2
        ClippedReLU
        fc_2: H2 -> 1
-       output += fc_0[H1]
+       output += fc_0[H1]   (shortcut項があるときだけ)
 ```
 
-`H1 + 1`の最後の1次元は、`fc_2`の出力に加算されるshortcut項である。
+`fc_0`の`H1 + 1`番目の1次元は、`fc_2`の出力に加算されるshortcut項である。
+shortcut項を持つかどうかはH1だけで決まる。
+
+- H1が`8n - 1`(7, 15, ...): shortcut項がある。`fc_0`の出力はH1 + 1。
+  `halfka2_1024_7_64`やNAGISA系の`15_64`がこれにあたる。
+- H1が`8n`(8, 16, ...): shortcut項がない。`fc_0`の出力はH1。
+  つようら王11の`8_64`がこれにあたる。
+- それ以外のH1: 生成器がエラーにする。
+
 `SFNNwoPSQT`という古い名前が残っている箇所があるが、このarchitecture headerでは
-このshortcut項を含む。
+H1が`8n - 1`のときにこのshortcut項を含む。
 
 SFNNでは`LayerStacks`個の後段networkを`nn.bin`に持ち、局面ごとに1つを選んで使う。
 例えば`k3k3`なら9個、`k21k21`なら441個、`k29k29`なら841個、`hand64_k3k3`なら576個、
@@ -184,16 +192,15 @@ progress_bucket = min(progress * progress_bucket_count / 256, progress_bucket_co
 
 #### つようら王11との名前の対応
 
-上流のつようら王11(mini/micro)の名前に含まれる数字(`8_64`の`8`)は`fc_0`の出力数である。
-このフォークの生成器では同じ位置の数字がH1で、`fc_0`の出力は`H1+1`になる。
-そのため同じ形状のarchitectureはH1を1減らして表記する。
+上流のつようら王11(mini/micro)の名前の`8_64`の`8`はH1で、8の倍数なのでshortcut項を持たない。
+フォークでも同じ数字を使い、上流との違いは進行度の置き場所を表す末尾の`x`だけである。
 
 | 上流名 | フォーク名 |
 | --- | --- |
-| `SFNN_ka2_4096_8_64_progress8` | `SFNN_ka2_4096_7_64_progress8x` |
-| `SFNN_ka2_2048_8_64_progress8` | `SFNN_ka2_2048_7_64_progress8x` |
+| `SFNN_ka2_4096_8_64_progress8` | `SFNN_ka2_4096_8_64_progress8x` |
+| `SFNN_ka2_2048_8_64_progress8` | `SFNN_ka2_2048_8_64_progress8x` |
 
-`*_8_64_progress8*`は寸法が異なるため、つようら王11の`nn.bin`には使えない。
+`SFNN_ka2_*_7_64_progress8x`はshortcut項を持つ別の形状で、つようら王11の`nn.bin`には使えない。
 
 `suffixなし`の場合、`nn.bin`のセクション順は次の通り。
 
@@ -261,7 +268,7 @@ total  = 1024 + 256 * 8 = 3072
 ```
 
 全ての`fc_0`出力はcommon 1024次元を見る。一方、各出力groupは対応するshard
-256次元だけを見る。`H1 + 1 = 8`、`G = 8`なら、各出力は
+256次元だけを見る。`fc_0`の出力数が8(H1 = 7でshortcut項あり)、`G = 8`なら、各出力は
 `common 1024 + shard 256 = 1280`次元だけを使う。
 
 `c0_s1024x8`のように`common = 0`も指定できる。この場合は、共通入力なしで、
@@ -271,7 +278,7 @@ total  = 1024 + 256 * 8 = 3072
 
 ```text
 C + S * G == FT
-(H1 + 1) % G == 0
+(fc_0の出力数) % G == 0   (出力数はshortcut項があればH1 + 1、なければH1)
 C は64の倍数
 S は64の倍数
 G > 1

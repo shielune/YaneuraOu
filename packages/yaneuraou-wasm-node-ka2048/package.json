@@ -1,7 +1,7 @@
 {
 	"name": "@ultemica/yaneuraou-wasm-node-ka2048",
 	"version": "8.50.0",
-	"description": "YaneuraOu SFNN ka2 2048x2-7-64 (つようら王11 micro) shogi engine for Node.js (Wasm, multi-threaded via node:worker_threads). Built with emscripten 3.1.43 — the only toolchain confirmed Node-compatible.",
+	"description": "YaneuraOu SFNN ka2 2048x2-8-64 (つようら王11 micro) shogi engine for Node.js (Wasm, multi-threaded via node:worker_threads). Built with emscripten 3.1.43 — the only toolchain confirmed Node-compatible.",
 	"license": "GPL-3.0",
 	"type": "module",
 	"main": "./dist/index.js",
