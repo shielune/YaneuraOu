@@ -4,9 +4,12 @@
 #ifndef CLASSIC_NNUE_ARCHITECTURE_H_INCLUDED
 #define CLASSIC_NNUE_ARCHITECTURE_H_INCLUDED
 
+#include <cstdint>
+#include <type_traits>
+
 #include "../../config.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 // Defines the network structure
 // 入力特徴量とネットワーク構造が定義されたヘッダをincludeする
@@ -70,16 +73,29 @@
 #if !defined(NNUE_SFNN_PROGRESS_ENTERING_KING)
 	#define NNUE_SFNN_PROGRESS_ENTERING_KING 0
 #endif
-#if !defined(NNUE_SFNN_PROGRESS_EXTERNAL)
-	#define NNUE_SFNN_PROGRESS_EXTERNAL 0
-#endif
 
 namespace YaneuraOu {
 namespace Eval::NNUE {
 
 	static_assert(kTransformedFeatureDimensions % kMaxSimdWidth == 0, "");
 	static_assert(Network::kOutputDimensions == 1, "");
-	static_assert(std::is_same<Network::OutputType, std::int32_t>::value, "");
+#if defined(ENABLE_SFNN_16BIT_WEIGHT)
+	static_assert(std::is_same<Network::OutputType, i64>::value, "");
+#else
+	static_assert(std::is_same<Network::OutputType, i32>::value, "");
+#endif
+
+#if defined(USE_LAZY_EVALUATE) && USE_LAZY_EVALUATE > 1
+    namespace Features {
+    template<Side AssociatedKing> class HalfKA_hm2;
+    }
+    // Multi-ply updates currently support this single feature set only.
+    // 複数手の差分更新は、現在この単一特徴量の組み合わせに対応する。
+    inline constexpr bool kUseMultiPly = std::is_same_v<
+      RawFeatures, Features::FeatureSet<Features::HalfKA_hm2<Features::Side::kFriend>>>;
+#else
+    inline constexpr bool kUseMultiPly = false;
+#endif
 
 	// Trigger for full calculation instead of difference calculation
 	// 差分計算の代わりに全計算を行うタイミングのリスト
@@ -88,6 +104,6 @@ namespace Eval::NNUE {
 } // namespace Eval::NNUE
 } // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif // #ifndef NNUE_ARCHITECTURE_H_INCLUDED

@@ -1,26 +1,32 @@
 ﻿#include "search.h"
+
+#include <algorithm>
+#include <cstdint>
 #include "evaluate.h"
+#include "misc.h"
+#include "types.h"
 
 namespace YaneuraOu {
 
 Search::Worker::Worker(SharedState& sharedState,
 #if STOCKFISH
-                       std::unique_ptr<ISearchManager> sm,
-                       size_t                          threadIdx,
-                       size_t                          numaThreadId,
-                       size_t                          numaTotalThreads,
+                       std::unique_ptr<SearchManager> sm,
+                       usize                           threadId,
+                       usize                           numaThreadId,
+                       usize                           numaTotalThreads,
                        NumaReplicatedAccessToken       token
 #else
                        const ThreadIds& ids
 #endif
 ) : 
     // Unpack the SharedState struct into member variables
+    // SharedState構造体の内容を各メンバー変数へ展開する。
 	// 🌈 これは、やねうら王ではYaneuraOuWorkerのほうが持っている。
     //sharedHistory(sharedState.sharedHistories.at(token.get_numa_index())),
 	options(sharedState.options),
 	threads(sharedState.threads),
 #if STOCKFISH
-	threadIdx(threadIdx),
+	threadIdx(threadId),
     numaThreadIdx(numaThreadId),
     numaTotal(numaTotalThreads),
     numaAccessToken(token),
@@ -32,8 +38,8 @@ Search::Worker::Worker(SharedState& sharedState,
     numaAccessToken(ids.numaAccessToken),
 #endif
 	tt(sharedState.tt)
-    //networks(sharedState.networks),
-	//refreshTable(networks[token])
+    //network(sharedState.network),
+	//refreshTable(network[token])
 {
     //clear();
 
@@ -48,7 +54,9 @@ Search::Worker::Worker(SharedState& sharedState,
 void Search::Worker::ensure_network_replicated() {
     // Access once to force lazy initialization.
     // We do this because we want to avoid initialization during search.
-    (void) (networks[numaAccessToken]);
+    // 一度アクセスして、遅延初期化を実行しておく。
+    // 探索中に初期化が発生するのを避けるため。
+    (void) (network[numaAccessToken]);
 }
 #endif
 
@@ -56,6 +64,7 @@ void Search::Worker::ensure_network_replicated() {
 // 💡　エンジン実装部で定義する。
 
 // Reset histories, usually before a new game
+// 通常、新しい対局の前に履歴をリセットする。
 //void Search::Worker::clear()
 // 💡　エンジン実装部で定義する。
 

@@ -1,4 +1,5 @@
 ﻿#include "nn_onnx_runtime.h"
+#include "../../extra/tools.h"
 
 #if defined(YANEURAOU_ENGINE_DEEP) && defined(ONNXRUNTIME)
 
@@ -41,12 +42,8 @@ namespace Eval::dlshogi {
 #else
 	    Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CPU(session_options, true));
 #endif
-#if defined(_WIN32)
-		// Windows環境ではwstringでファイル名を渡す必要があるようだが？
-		std::wstring onnx_filename = MultiByteToWideChar(model_filename);
-#else
-		std::string onnx_filename(model_filename);
-#endif
+        // ONNX RuntimeはWindowsでワイド文字列、それ以外で通常の文字列を受け取る。
+        const auto onnx_filename = path_from_utf8(model_filename);
 
 		session.reset(new Ort::Session(env, onnx_filename.c_str(), session_options));
 

@@ -1,8 +1,10 @@
-﻿#ifndef __NODE_H_INCLUDED__
-#define __NODE_H_INCLUDED__
+﻿#ifndef NODE_H_INCLUDED
+#define NODE_H_INCLUDED
 #include "../../config.h"
 
 #if defined(YANEURAOU_ENGINE_DEEP)
+
+#include <mutex>
 
 #include <thread>
 #include "../../position.h"
@@ -370,4 +372,4 @@ class NodeGarbageCollector {
 
 #endif // defined(YANEURAOU_ENGINE_DEEP)
 
-#endif // ndef __NODE_H_INCLUDED__
+#endif // ndef NODE_H_INCLUDED

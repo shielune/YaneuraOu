@@ -1,8 +1,12 @@
 ﻿#include "../../config.h"
+#include "../../misc.h"
 
 #if defined(YANEURAOU_ENGINE_DEEP)
 
 #include "Node.h"
+#if defined(ENABLE_NN_CACHE)
+#include "PolicyValueCache.h"
+#endif
 #include "UctSearch.h"
 #include "dlshogi_searcher.h"
 #include "PrintInfo.h"
@@ -98,6 +102,15 @@ using namespace YaneuraOu::Eval::dlshogi;
 
 namespace dlshogi
 {
+#if defined(ENABLE_NN_CACHE)
+static PolicyValueCache policy_value_cache;
+
+void SetDnnCacheSize(size_t capacity)
+{
+	policy_value_cache.SetCapacity(capacity);
+}
+#endif
+
 // atomicな加算。
 template <typename T>
 inline void atomic_fetch_add(std::atomic<T>* obj, T arg) {
@@ -247,7 +260,7 @@ UCTSearcherGroup::Term()
 NodeTree* UctSearcher::get_node_tree() const { return grp->get_dlsearcher()->get_node_tree(); }
 
 // Evaluateを呼び出すリスト(queue)に追加する。
-void UctSearcher::QueuingNode(const Position *pos, Node* node, float* value_win)
+bool UctSearcher::QueuingNode(const Position *pos, Node* node, float* value_win)
 {
 #if defined(LOG_PRINT)
 	logger.print("sfen "+pos->sfen(0));
@@ -260,6 +273,22 @@ void UctSearcher::QueuingNode(const Position *pos, Node* node, float* value_win)
 		std::cout << "error" << std::endl;
 	}*/
 
+#if defined(ENABLE_NN_CACHE) && !defined(USE_POLICY_BOOK) && !defined(MAKE_BOOK)
+	HASH_KEY policy_value_cache_key = 0;
+	if (policy_value_cache.IsEnabled()) {
+		policy_value_cache_key = pos->key();
+		PolicyValueCache::ResultPtr cached;
+		if (policy_value_cache.Lookup(policy_value_cache_key, node->child_num, cached)) {
+			ChildNode* uct_child = node->child.get();
+			for (ChildNumType i = 0; i < node->child_num; ++i)
+				uct_child[i].nnrate = cached->policy[i];
+			*value_win = cached->value;
+			node->SetEvaled();
+			return true;
+		}
+	}
+#endif
+
 	// 現在の局面に出現している特徴量を設定する。
 	// current_policy_value_batch_indexは、UctSearchThreadごとに持っているのでlock不要
 
@@ -270,6 +299,9 @@ void UctSearcher::QueuingNode(const Position *pos, Node* node, float* value_win)
 #if defined(USE_POLICY_BOOK)
 		pos->hash_key() ,
 #endif
+#if defined(ENABLE_NN_CACHE)
+		policy_value_cache_key,
+#endif
 		value_win};
 
 #ifdef MAKE_BOOK
@@ -278,6 +310,7 @@ void UctSearcher::QueuingNode(const Position *pos, Node* node, float* value_win)
 
 	current_policy_value_batch_index++;
 	// これが、policy_value_batch_maxsize分だけ溜まったら、nn->forward()を呼び出す。
+	return false;
 }
 
 // leaf node用の詰め将棋ルーチンの初期化(alloc)を行う。
@@ -452,42 +485,48 @@ void UctSearcher::ParallelUctSearch(const Position& rootPos) {
         trajectories_batch_discarded.clear();
         current_policy_value_batch_index = 0;
 
-        // バッチサイズ分探索を繰り返す
-        // stop()になったらなるべく早く終わりたいので終了判定のところに "&& !stop"を書いておく。
-        // ※　VirtualLossを無くすなどして、stop()になったら直ちにリターンすべきだが、
-        //    1回のbatch sizeはGPU側で0.1秒程度で完了できる量にすると思うので、普通のGPUでは誤差か。
-        for (int i = 0; i < policy_value_batch_maxsize && !stop(); i++)
         {
+            // 同じデバイスのバッチ収集を直列化する。推論とバックアップはロック外で行う。
+            auto gather_lock = grp->acquire_gather_lock();
 
-            // 盤面のコピー
-
-            // rootPosはスレッドごとに用意されたもので、呼び出し元にインスタンスが存在しているので、
-            // 単純なコピーで問題ない。
-            Position pos;
-            std::memcpy(&pos, &rootPos, sizeof(Position));
-
-            // 1回プレイアウトする
-            visitor_batch.emplace_back();
-            const float result = UctSearch(&pos, nullptr, current_root, visitor_batch.back());
-
-            if (result != DISCARDED)
+            // バッチサイズ分探索を繰り返す
+            // stop()になったらなるべく早く終わりたいので終了判定のところに "&& !stop"を書いておく。
+            // ※　VirtualLossを無くすなどして、stop()になったら直ちにリターンすべきだが、
+            //    1回のbatch sizeはGPU側で0.1秒程度で完了できる量にすると思うので、普通のGPUでは誤差か。
+            for (int i = 0; i < policy_value_batch_maxsize && !stop(); i++)
             {
-                atomic_fetch_add(&search_limits.nodes_searched, (NodeCountType) 1);
-                //  →　ここで加算するとnpsの計算でまだEvalNodeしてないものまで加算されて
-                // 大きく見えてしまうのでもう少しあとで加算したいところだが…。
-            }
-            else
-            {
-                // 破棄した探索経路を保存
-                trajectories_batch_discarded.emplace_back(
-                  std::move(visitor_batch.back().trajectories));
+
+                // 盤面のコピー
+
+                // rootPosはスレッドごとに用意されたもので、呼び出し元にインスタンスが存在しているので、
+                // 単純なコピーで問題ない。
+                Position pos;
+                std::memcpy(&pos, &rootPos, sizeof(Position));
+
+                // 1回プレイアウトする
+                visitor_batch.emplace_back();
+                const float result = UctSearch(&pos, nullptr, current_root, visitor_batch.back());
+
+                if (result != DISCARDED)
+                {
+                    atomic_fetch_add(&search_limits.nodes_searched, (NodeCountType) 1);
+                    //  →　ここで加算するとnpsの計算でまだEvalNodeしてないものまで加算されて
+                    // 大きく見えてしまうのでもう少しあとで加算したいところだが…。
+                }
+                else
+                {
+                    // 破棄した探索経路を保存
+                    trajectories_batch_discarded.emplace_back(
+                      std::move(visitor_batch.back().trajectories));
+                }
+
+                // 評価中の末端ノードに達した、もしくはバックアップ済みため破棄する
+                if (result == DISCARDED || result != QUEUING)
+                {
+                    visitor_batch.pop_back();
+                }
             }
 
-            // 評価中の末端ノードに達した、もしくはバックアップ済みため破棄する
-            if (result == DISCARDED || result != QUEUING)
-            {
-                visitor_batch.pop_back();
-            }
         }
 
         // 評価
@@ -709,19 +748,21 @@ float UctSearcher::UctSearch(Position* pos, ChildNode* parent , Node* current, N
 					else
 					{
 						// ノードをキューに追加
-						QueuingNode(pos, child_node , &visitor.value_win);
-
-						// このとき、まだEvalNodeが完了していないのでchild_node->evaledはまだfalseのまま
-						// にしておく必要がある。
-
-						return QUEUING;
+						if (QueuingNode(pos, child_node, &visitor.value_win))
+							result = 1.0f - visitor.value_win;
+						else
+						{
+							// このとき、まだEvalNodeが完了していないのでchild_node->evaledはまだfalseのまま
+							// にしておく必要がある。
+							return QUEUING;
+						}
 					}
 				}
 
 				break;
 			}
 
-			default: UNREACHABLE;
+			default: ASSERT_LV3(false); sf_unreachable();
 		}
 
 		// ノードの展開は終わって、詰みであるなら、SetWin()/SetLose()等でそれがChildNodeに反映されている。
@@ -1088,7 +1129,7 @@ void UctSearcher::EvalNode() {
 #ifdef MAKE_BOOK
         // 定跡作成時は、事前確率に定跡の遷移確率も使用する
         constexpr float alpha = 0.5f;
-        const Key&      key   = policy_value_book_key[i];
+        const HASH_KEY&      key   = policy_value_book_key[i];
         const auto      itr   = bookMap.find(key);
         if (itr != bookMap.end())
         {
@@ -1111,6 +1152,16 @@ void UctSearcher::EvalNode() {
             }
         }
 #endif
+#if defined(ENABLE_NN_CACHE) && !defined(USE_POLICY_BOOK) && !defined(MAKE_BOOK)
+		if (policy_value_cache.IsEnabled()) {
+			std::vector<float> policy(child_num);
+			for (ChildNumType j = 0; j < child_num; ++j)
+				policy[j] = uct_child[j].nnrate;
+			policy_value_cache.Store(policy_value_batch[i].policy_value_cache_key,
+			                         *policy_value_batch[i].value_win, std::move(policy));
+		}
+#endif
+
         node->SetEvaled();
     }
 }

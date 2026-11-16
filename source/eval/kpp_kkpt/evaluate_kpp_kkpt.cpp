@@ -1,4 +1,5 @@
 ﻿#include "../../config.h"
+#include "../../extra/tools.h"
 
 // KPP+KKPTの実験用コード。
 // ほとんどevaluate_kppt.cppと同じ。
@@ -19,9 +20,6 @@
 #include "../evaluate_io.h"
 #include "evaluate_kpp_kkpt.h"
 
-#if defined (USE_EVAL_HASH)
-#include "../evalhash.h"
-#endif
 
 using namespace std;
 
@@ -31,22 +29,19 @@ using namespace std;
 
 #if defined(USE_CLASSIC_EVAL)
 using namespace YaneuraOu;
-void add_options_(OptionsMap& options, ThreadPool& threads);
+void add_options_(OptionsMap& options);
 
 namespace {
 YaneuraOu::OptionsMap* options_ptr;
-YaneuraOu::ThreadPool* threads_ptr;
 }
 
-// 📌 旧Options、旧Threadsとの互換性のための共通のマクロ 📌
+// 📌 旧Optionsとの互換性のためのマクロ 📌
 #define Options (*options_ptr)
-#define Threads (*threads_ptr)
 
 namespace YaneuraOu::Eval {
-void add_options(OptionsMap& options, ThreadPool& threads) {
+void add_options(OptionsMap& options, ThreadPool&) {
     options_ptr = &options;
-    threads_ptr = &threads;
-    add_options_(options, threads);
+    add_options_(options);
 }
 }
 // ============================================================
@@ -56,7 +51,7 @@ bool        eval_loaded   = false;
 std::string last_eval_dir = "None";
 
 // 📌 この評価関数で追加したいエンジンオプションはここで追加する。
-void add_options_(OptionsMap& options, ThreadPool& threads) {
+void add_options_(OptionsMap& options) {
 
     const char* default_eval_dir = "eval";
     Options.add("EvalDir", Option(default_eval_dir, [](const Option& o) {
@@ -123,8 +118,8 @@ namespace Eval {
 		// また、eval_convert()に渡している引数のinputとoutputを入れ替えるとファイルに書き出すことが出来る。EvalIOマジ、っょぃ。
         auto make_name = [&](std::string filename) {
             auto eval_dir      = Options["EvalDir"];
-            auto abs_eval_path = Path::Combine(Directory::GetBinaryFolder(), eval_dir);
-            return Path::Combine(abs_eval_path, filename);
+            auto abs_eval_path = CommandLine::get_binary_directory() / path_from_utf8(std::string(eval_dir));
+            return (abs_eval_path / path_from_utf8(filename)).u8string();
         };
 
 		auto input = EvalIO::EvalInfo::build_kpp_kkpt32(make_name(KK_BIN), make_name(KKP_BIN), make_name(KPP_BIN));
@@ -449,24 +444,6 @@ namespace Eval {
         return sum;
     }
 
-
-#if defined (USE_EVAL_HASH)
-	// evaluateしたものを保存しておくHashTable(俗にいうehash)
-
-	struct EvaluateHashTable : HashTable<EvalSum> {};
-	EvaluateHashTable g_evalTable;
-
-	void EvalHash_Resize(size_t mbSize) { g_evalTable.resize(Threads, mbSize); }
-	void EvalHash_Clear() { g_evalTable.clear(Threads); };
-
-	// prefetchする関数も用意しておく。
-	void prefetch_evalhash(const Key key)
-	{
-		prefetch(g_evalTable[key]);
-	}
-
-#endif
-
 #if !defined(USE_EVAL_MAKE_LIST_FUNCTION)
 	void evaluateBody(const Position& pos)
 	{
@@ -737,47 +714,8 @@ namespace Eval {
 			return Value(sum.sum(pos.side_to_move()) / FV_SCALE);
 		// ここで未初期化な値が返っているなら、それはPosition::do_move()のところでVALUE_NOT_EVALUATEDを代入していないからだ。
 
-#if defined(USE_GLOBAL_OPTIONS)
-		// GlobalOptionsでeval hashを用いない設定になっているなら
-		// eval hashへの照会をskipする。
-		if (!GlobalOptions.use_eval_hash)
-		{
-			evaluateBody(pos);
-			ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
-			return Value(sum.sum(pos.side_to_move()) / FV_SCALE);
-		}
-#endif
-
-#if defined ( USE_EVAL_HASH )
-		// 局面のhash key
-		const Key key = pos.key();
-
-		// evaluate hash tableにはあるかも。
-
-		//		cout << "EvalSum " << hex << g_evalTable[key] << endl;
-		EvalSum entry = *g_evalTable[key];   // atomic にデータを取得する必要がある。
-		entry.decode();
-		if (entry.key == key)
-		{
-			//	dbg_hit_on(true);
-
-			// あった！
-			sum = entry;
-			return Value(entry.sum(pos.side_to_move()) / FV_SCALE);
-		}
-		//		dbg_hit_on(false);
-
-#endif
-
 		// 評価関数本体を呼び出して求める。
 		evaluateBody(pos);
-
-#if defined(USE_EVAL_HASH)
-		// せっかく計算したのでevaluate hash tableに保存しておく。
-		sum.key = key;
-		sum.encode();
-		*g_evalTable[key] = sum;
-#endif
 
 		ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
 		// 差分計算と非差分計算との計算結果が合致するかのテスト。(さすがに重いのでコメントアウトしておく)

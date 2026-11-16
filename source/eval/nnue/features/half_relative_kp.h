@@ -1,11 +1,11 @@
 ﻿// NNUE評価関数の入力特徴量HalfRelativeKPの定義
 
-#ifndef CLASSIC_NNUE_FEATURES_HALF_RELATIVE_KP_H
-#define CLASSIC_NNUE_FEATURES_HALF_RELATIVE_KP_H
+#ifndef CLASSIC_NNUE_FEATURES_HALF_RELATIVE_KP_H_INCLUDED
+#define CLASSIC_NNUE_FEATURES_HALF_RELATIVE_KP_H_INCLUDED
 
 #include "../../../config.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../../../evaluate.h"
 #include "features_common.h"
@@ -21,7 +21,7 @@ class HalfRelativeKP {
   static constexpr const char* kName = (AssociatedKing == Side::kFriend) ?
       "HalfRelativeKP(Friend)" : "HalfRelativeKP(Enemy)";
   // 評価関数ファイルに埋め込むハッシュ値
-  static constexpr std::uint32_t kHashValue =
+  static constexpr u32 kHashValue =
       0xF9180919u ^ (AssociatedKing == Side::kFriend);
   // 玉を除いた駒種
   static constexpr IndexType kNumPieceKinds = (fe_end - fe_hand_end) / SQ_NB;
@@ -45,7 +45,7 @@ class HalfRelativeKP {
 
   // 特徴量のうち、一手前から値が変化したインデックスのリストを取得する
   static void AppendChangedIndices(const Position& pos, Color perspective,
-                                   IndexList* removed, IndexList* added);
+                                   IndexList* removed, IndexList* added, const Eval::DirtyPiece& dp);
 
   // 玉の位置とBonaPieceから特徴量のインデックスを求める
   static IndexType MakeIndex(Square sq_k, BonaPiece p);
@@ -59,6 +59,6 @@ class HalfRelativeKP {
 } // namespace Eval::NNUE::Features
 } // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif

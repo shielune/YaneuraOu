@@ -2,20 +2,25 @@
 #define MEMORY_H_INCLUDED
 
 #include <algorithm>
-#include <cstddef>
+#include <cassert>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
 #include <memory>
 #include <new>
 #include <type_traits>
 #include <utility>
 
 #include "types.h"
+#include "misc.h"
 
 #if defined(_WIN64)
 
     #if _WIN32_WINNT < 0x0601
         #undef _WIN32_WINNT
         #define _WIN32_WINNT 0x0601  // Force to include needed API prototypes
+        // 必要なAPIのプロトタイプ宣言が読み込まれるようにする。
     #endif
 
     #if !defined(NOMINMAX)
@@ -47,19 +52,32 @@ using AdjustTokenPrivileges_t =
 }
 #endif
 
+#if defined(__linux__) && !defined(__ANDROID__)
+    #include <sys/mman.h>
+    #include <unistd.h>
+#endif
 
 namespace YaneuraOu {
 
+constexpr usize HugePageSize = usize(1) << 30;
+
+[[noreturn]] inline void report_failed_allocation(usize bytes) {
+    std::cerr << "Failed to allocate " << bytes << " bytes." << std::endl;
+    std::exit(EXIT_FAILURE);
+}
+
+
 // 通常のメモリ確保。alignmentされたsize[byte]のメモリを確保する。
 // 💡 AlignedPtrから内部的に呼び出して使うために用意されている。この関数は直接呼び出されない。
-void* std_aligned_alloc(size_t alignment, size_t size);
+void* std_aligned_alloc(usize alignment, usize size);
 void  std_aligned_free(void* ptr);
 
 // Memory aligned by page size, min alignment: 4096 bytes
 // 大きなメモリの確保用のalloc/free。4096 bytes単位でalignmentされていることは保証されている。
 // ⇨ この関数は置換表のメモリ確保のために使われる。
 // 💡 Windowsのlarge pages allocの機能が使えるなら、それを用いる。
-void* aligned_large_pages_alloc(size_t size);
+void* aligned_large_pages_alloc_with_hint(usize size, bool hugePageHint);
+void* aligned_large_pages_alloc(usize size);
 void  aligned_large_pages_free(void* mem);
 
 // 現環境でlarge pagesが使えるか判定して返す。
@@ -98,15 +116,15 @@ void memory_deleter_array(T* ptr, FREE_FUNC free_func) {
     // Move back on the pointer to where the size is allocated
 	// 配列サイズが格納されている位置までポインタを戻します
 
-	const size_t array_offset = std::max(sizeof(size_t), alignof(T));
+	const usize array_offset = std::max(sizeof(usize), alignof(T));
     char*        raw_memory   = reinterpret_cast<char*>(ptr) - array_offset;
 
     if constexpr (!std::is_trivially_destructible_v<T>)
     {
-        const size_t size = *reinterpret_cast<size_t*>(raw_memory);
+        const usize size = *reinterpret_cast<usize*>(raw_memory);
 
         // Explicitly call the destructor for each element in reverse order
-        for (size_t i = size; i-- > 0;)
+        for (usize i = size; i-- > 0;)
             ptr[i].~T();
     }
 
@@ -120,6 +138,8 @@ template<typename T, typename ALLOC_FUNC, typename... Args>
 inline std::enable_if_t<!std::is_array_v<T>, T*> memory_allocator(ALLOC_FUNC alloc_func,
                                                                   Args&&... args) {
     void* raw_memory = alloc_func(sizeof(T));
+    if (raw_memory == nullptr)
+        report_failed_allocation(sizeof(T));
     ASSERT_ALIGNED(raw_memory, alignof(T));
     return new (raw_memory) T(std::forward<Args>(args)...);
 }
@@ -129,19 +149,23 @@ inline std::enable_if_t<!std::is_array_v<T>, T*> memory_allocator(ALLOC_FUNC all
 
 template<typename T, typename ALLOC_FUNC>
 inline std::enable_if_t<std::is_array_v<T>, std::remove_extent_t<T>*>
-memory_allocator(ALLOC_FUNC alloc_func, size_t num) {
+memory_allocator(ALLOC_FUNC alloc_func, usize num) {
     using ElementType = std::remove_extent_t<T>;
 
-    const size_t array_offset = std::max(sizeof(size_t), alignof(ElementType));
+    const usize array_offset = std::max(sizeof(usize), alignof(ElementType));
 
     // Save the array size in the memory location
-    char* raw_memory =
-      reinterpret_cast<char*>(alloc_func(array_offset + num * sizeof(ElementType)));
+    // 確保した領域の先頭に配列の要素数を保存する。
+    // 配列の要素数と要素本体に必要なバイト数を合わせて確保する。
+    const usize bytes      = array_offset + num * sizeof(ElementType);
+    char*       raw_memory = reinterpret_cast<char*>(alloc_func(bytes));
+    if (raw_memory == nullptr)
+        report_failed_allocation(bytes);
     ASSERT_ALIGNED(raw_memory, alignof(T));
 
-    new (raw_memory) size_t(num);
+    new (raw_memory) usize(num);
 
-    for (size_t i = 0; i < num; ++i)
+    for (usize i = 0; i < num; ++i)
         new (raw_memory + array_offset + i * sizeof(ElementType)) ElementType();
 
     // Need to return the pointer at the start of the array so that
@@ -192,7 +216,7 @@ std::enable_if_t<!std::is_array_v<T>, LargePagePtr<T>> make_unique_large_page(Ar
 // サイズが不明な配列用の make_unique_large_page
 
 template<typename T>
-std::enable_if_t<std::is_array_v<T>, LargePagePtr<T>> make_unique_large_page(size_t num) {
+std::enable_if_t<std::is_array_v<T>, LargePagePtr<T>> make_unique_large_page(usize num) {
     using ElementType = std::remove_extent_t<T>;
 
     static_assert(alignof(ElementType) <= 4096,
@@ -231,7 +255,7 @@ using AlignedPtr =
 
 template<typename T, typename... Args>
 std::enable_if_t<!std::is_array_v<T>, AlignedPtr<T>> make_unique_aligned(Args&&... args) {
-    const auto func = [](size_t size) { return std_aligned_alloc(alignof(T), size); };
+    const auto func = [](usize size) { return std_aligned_alloc(alignof(T), size); };
     T*         obj  = memory_allocator<T>(func, std::forward<Args>(args)...);
 
     return AlignedPtr<T>(obj);
@@ -241,10 +265,10 @@ std::enable_if_t<!std::is_array_v<T>, AlignedPtr<T>> make_unique_aligned(Args&&.
 // サイズが不明な配列用の make_unique_aligned
 
 template<typename T>
-std::enable_if_t<std::is_array_v<T>, AlignedPtr<T>> make_unique_aligned(size_t num) {
+std::enable_if_t<std::is_array_v<T>, AlignedPtr<T>> make_unique_aligned(usize num) {
     using ElementType = std::remove_extent_t<T>;
 
-    const auto   func   = [](size_t size) { return std_aligned_alloc(alignof(ElementType), size); };
+    const auto   func   = [](usize size) { return std_aligned_alloc(alignof(ElementType), size); };
     ElementType* memory = memory_allocator<T>(func, num);
 
     return AlignedPtr<T>(memory);
@@ -268,10 +292,57 @@ T* align_ptr_up(T* ptr) {
       reinterpret_cast<char*>((ptrint + (Alignment - 1)) / Alignment * Alignment));
 }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+
+// Allocate size bytes aligned to a 2 MB boundary using mmap.
+// On success the returned pointer can be freed with munmap(ptr, size).
+// mmapを使って2MiB境界に整列した領域を確保する。
+// 成功時のポインターはmunmap(ptr, size)で解放する。
+inline void* mmap_huge_aligned(usize size, int flags, int fd = -1, off_t offset = 0) {
+    constexpr usize Alignment = 2 * 1024 * 1024;
+    const long      pageSize  = sysconf(_SC_PAGESIZE);
+
+    if (size >= Alignment && pageSize > 0)
+    {
+        const usize mappingSize =
+          ((size + static_cast<usize>(pageSize) - 1) / static_cast<usize>(pageSize))
+          * static_cast<usize>(pageSize);
+        const usize reservationSize = mappingSize + Alignment;
+        void*       reservation =
+          mmap(nullptr, reservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+        if (reservation != MAP_FAILED)
+        {
+            char* const base        = static_cast<char*>(reservation);
+            char* const alignedBase = align_ptr_up<Alignment>(base);
+
+            void* mapped =
+              mmap(alignedBase, size, PROT_READ | PROT_WRITE, flags | MAP_FIXED, fd, offset);
+
+            if (mapped != MAP_FAILED)
+            {
+                const usize prefixSize = static_cast<usize>(alignedBase - base);
+                const usize suffixSize = reservationSize - prefixSize - mappingSize;
+                if (prefixSize)
+                    munmap(reservation, prefixSize);
+                if (suffixSize)
+                    munmap(alignedBase + mappingSize, suffixSize);
+                return mapped;
+            }
+
+            munmap(reservation, reservationSize);
+        }
+    }
+
+    return mmap(nullptr, size, PROT_READ | PROT_WRITE, flags, fd, offset);
+}
+
+#endif
+
 #if defined(_WIN32)
 
 template<typename FuncYesT, typename FuncNoT>
-auto windows_try_with_large_page_priviliges([[maybe_unused]] FuncYesT&& fyes, FuncNoT&& fno) {
+auto windows_try_with_large_page_privileges([[maybe_unused]] FuncYesT&& fyes, FuncNoT&& fno) {
 
     #if !defined(_WIN64)
     return fno();
@@ -280,11 +351,12 @@ auto windows_try_with_large_page_priviliges([[maybe_unused]] FuncYesT&& fyes, Fu
     HANDLE hProcessToken{};
     LUID   luid{};
 
-    const size_t largePageSize = GetLargePageMinimum();
+    const usize largePageSize = GetLargePageMinimum();
     if (!largePageSize)
         return fno();
 
     // Dynamically link OpenProcessToken, LookupPrivilegeValue and AdjustTokenPrivileges
+    // OpenProcessToken、LookupPrivilegeValue、AdjustTokenPrivilegesを動的にリンクする。
 
     HMODULE hAdvapi32 = GetModuleHandle(TEXT("advapi32.dll"));
 
@@ -305,6 +377,7 @@ auto windows_try_with_large_page_priviliges([[maybe_unused]] FuncYesT&& fyes, Fu
         return fno();
 
     // We need SeLockMemoryPrivilege, so try to enable it for the process
+    // プロセスでSeLockMemoryPrivilegeを有効にする。
 
     if (!OpenProcessToken_f(  // OpenProcessToken()
           GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hProcessToken))
@@ -324,6 +397,8 @@ auto windows_try_with_large_page_priviliges([[maybe_unused]] FuncYesT&& fyes, Fu
     // Try to enable SeLockMemoryPrivilege. Note that even if AdjustTokenPrivileges()
     // succeeds, we still need to query GetLastError() to ensure that the privileges
     // were actually obtained.
+    // AdjustTokenPrivileges()の成功だけでは権限を取得できたとは限らないため、
+    // GetLastError()も確認する。
 
     if (!AdjustTokenPrivileges_f(hProcessToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), &prevTp,
                                  &prevTpLen)
@@ -333,6 +408,7 @@ auto windows_try_with_large_page_priviliges([[maybe_unused]] FuncYesT&& fyes, Fu
     auto&& ret = fyes(largePageSize);
 
     // Privilege no longer needed, restore previous state
+    // 不要になった権限を元の状態に戻す。
     AdjustTokenPrivileges_f(hProcessToken, FALSE, &prevTp, 0, nullptr, nullptr);
 
     CloseHandle(hProcessToken);
@@ -343,6 +419,27 @@ auto windows_try_with_large_page_priviliges([[maybe_unused]] FuncYesT&& fyes, Fu
 }
 
 #endif
+
+// Read a value from an aligned byte buffer without violating strict aliasing.
+// strict aliasingに違反せず、整列したバイト列から値を読み出す。
+template<typename T, typename ByteT>
+T load_as(const ByteT* buffer) {
+    static_assert(std::is_trivially_copyable<T>::value, "Type must be trivially copyable");
+    static_assert(sizeof(ByteT) == 1);
+
+    if (reinterpret_cast<uintptr_t>(buffer) % alignof(T) != 0)
+    {
+        assert(false);
+#ifdef __GNUC__
+        __builtin_unreachable();
+#endif
+    }
+
+    T value;
+    std::memcpy(&value, buffer, sizeof(T));
+
+    return value;
+}
 
 } // namespace YaneuraOu
 

@@ -1,4 +1,5 @@
 ﻿#include "../../config.h"
+#include "../../extra/tools.h"
 #if defined(TANUKI_MATE_ENGINE)
 
 #include <unordered_set>
@@ -78,18 +79,11 @@ struct MovePicker
 	// or_node == trueなら攻め方の手番である。王手となる指し手をすべて生成する。
 	// or_node == falseなら受け方の手番である。王手回避の指し手だけをすべて生成する。
 	MovePicker(Position& pos, bool or_node) {
-		// たぬき詰めであれば段階的に指し手を生成する必要はない。
-		// 自分の手番なら王手の指し手(CHECKS)、
-		// 相手の手番ならば回避手(EVASIONS)を生成。
-		endMoves = or_node ?
-			generateMoves<CHECKS_ALL>(pos, moves) :
-			generateMoves<EVASIONS_ALL>(pos, moves);
-
-		// 非合法手が交じるとempty()でそのnodeが詰みかどうかが判定できなくなりややこしいので、
-		// ここで除外しておく。
-		endMoves = std::remove_if(moves, endMoves, [&pos](const auto& move) {
-			return !pos.legal(move);
-		});
+		// 攻め方は王手、受け方は王手回避の候補を生成する。
+		if (or_node)
+			generate_legal<CHECKS_ALL>(pos);
+		else
+			generate_legal<EVASIONS_ALL>(pos);
 	}
 
 	// 生成された指し手が空であるかの判定
@@ -97,13 +91,20 @@ struct MovePicker
 		return moves == endMoves;
 	}
 
-	ExtMove* begin() { return moves; }
-	ExtMove* end() { return endMoves; }
-	const ExtMove* begin() const { return moves; }
-	const ExtMove* end() const { return endMoves; }
+	const Move* begin() const { return moves; }
+	const Move* end() const { return endMoves; }
 
 private:
-	ExtMove moves[MAX_MOVES], *endMoves = moves;
+	template<GenType Type>
+	void generate_legal(const Position& pos)
+	{
+		// empty() で詰みを判定できるよう、合法手だけを格納する。
+		for (Move move : MoveList<Type>(pos))
+			if (pos.legal(move))
+				*endMoves++ = move;
+	}
+
+	Move moves[MAX_MOVES], *endMoves = moves;
 };
 
 // 置換表
@@ -177,7 +178,7 @@ struct TranspositionTable {
 	}
 
 	// 指定したKeyのTTEntryを返す。見つからなければ初期化された新規のTTEntryを返す。
-	TTEntry& LookUp(Key key, Color root_color) {
+	TTEntry& LookUp(HASH_KEY key, Color root_color) {
 		auto& entries = tt[key & clusters_mask];
 		uint32_t hash_high = ((key >> 32) & ~1) | root_color;
 
@@ -347,7 +348,7 @@ public:
 
 		std::vector<Move> moves;
 		if (options[kMorePreciseMatePv]) {
-			std::unordered_map<Key, MateState> memo;
+			std::unordered_map<HASH_KEY, MateState> memo;
 			SearchMatePvMorePrecise(true, root_color, r, memo);
 
 			// 探索メモから詰み手順を再構築する
@@ -378,7 +379,7 @@ public:
 			}
 		}
 		else {
-			std::unordered_set<Key> visited;
+			std::unordered_set<HASH_KEY> visited;
 			SearchMatePvFast(true, root_color, r, moves, visited);
 		}
 
@@ -795,7 +796,7 @@ public:
 
 	// 詰み手順を1つ返す
 	// 最短の詰み手順である保証はない
-	bool SearchMatePvFast(bool or_node, Color root_color, Position& pos, std::vector<Move>& moves, std::unordered_set<Key>& visited) {
+	bool SearchMatePvFast(bool or_node, Color root_color, Position& pos, std::vector<Move>& moves, std::unordered_set<HASH_KEY>& visited) {
 		// 一度探索したノードを探索しない
 		if (visited.find(pos.key()) != visited.end()) {
 			return false;
@@ -864,7 +865,7 @@ public:
 	// pos 盤面
 	// memo 過去に探索した盤面のキーと探索状況のmap
 	// return 詰みまでの手数、詰みの局面は0、ループがある場合はkLoop、不詰みの場合はkNotMated
-	int SearchMatePvMorePrecise(bool or_node, Color root_color, Position& pos, std::unordered_map<Key, MateState>& memo) {
+	int SearchMatePvMorePrecise(bool or_node, Color root_color, Position& pos, std::unordered_map<HASH_KEY, MateState>& memo) {
 		// 過去にこのノードを探索していないか調べる
 		auto key = pos.key();
 		if (memo.find(key) != memo.end()) {
@@ -1094,7 +1095,7 @@ public:
 			return LargePagePtr<Worker>(p.release());  // Worker* に upcast
 		};
 
-        threads.set(numaContext.get_numa_config(), {options, threads, tt, sharedHists /*, networks*/ },
+        threads.set(numaContext.get_numa_config(), {options, threads, tt, sharedHists /*, network*/ },
 					updateContext, options["Threads"], worker_factory);
 
 		// 📌 NUMAの設定
@@ -1136,13 +1137,14 @@ namespace {
 		usi->set_engine(*engine);  // エンジン実装を差し替える。
 		usi->enqueue_startup_commands(CommandLine::g);
 
+#if defined(__EMSCRIPTEN__)
+		// 🌈 wasmではloop()が即座にreturnするので、インスタンスを保持したうえでJS側に制御を返す。
+		//     以後のコマンドはusi_command()経由で実行される。
+		wasm_keep_alive(std::move(engine), std::move(usi));
+#else
 		// USIコマンドの応答のためのループ
 		usi->loop();
-
-		#if defined(__EMSCRIPTEN__)
-		// yaneuraou.wasm: loop()は即returnするので、ここで解体させない。
-		wasm_retain_engine(engine, usi);
-		#endif
+#endif
 	}
 
 	// このentry pointを登録しておく。

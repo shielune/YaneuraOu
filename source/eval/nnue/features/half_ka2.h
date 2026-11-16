@@ -1,11 +1,11 @@
 ﻿// NNUE評価関数の入力特徴量HalfKAの定義
 
-#ifndef _NNUE_FEATURES_HALF_KA2_H_
-#define _NNUE_FEATURES_HALF_KA2_H_
+#ifndef NNUE_FEATURES_HALF_KA2_H_INCLUDED
+#define NNUE_FEATURES_HALF_KA2_H_INCLUDED
 
 #include "../../../config.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../../../evaluate.h"
 #include "features_common.h"
@@ -21,7 +21,7 @@ namespace Eval::NNUE::Features {
 		static constexpr const char* kName =
 			(AssociatedKing == Side::kFriend) ? "HalfKA2(Friend)" : "HalfKA(Enemy)";
 		// 評価関数ファイルに埋め込むハッシュ値
-		static constexpr std::uint32_t kHashValue =
+		static constexpr u32 kHashValue =
 			0x5f234cb9u ^ (AssociatedKing == Side::kFriend);
 		// 特徴量の次元数
 		static constexpr IndexType kDimensions =
@@ -39,7 +39,7 @@ namespace Eval::NNUE::Features {
 
 		// 特徴量のうち、一手前から値が変化したインデックスのリストを取得する
 		static void AppendChangedIndices(const Position& pos, Color perspective,
-			IndexList* removed, IndexList* added);
+			IndexList* removed, IndexList* added, const Eval::DirtyPiece& dp);
 
 		// 玉の位置とBonaPieceから特徴量のインデックスを求める
 		static IndexType MakeIndex(Square sq_k, BonaPiece p);
@@ -53,6 +53,6 @@ namespace Eval::NNUE::Features {
 }  // namespace Eval::NNUE::Features
 }  // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif

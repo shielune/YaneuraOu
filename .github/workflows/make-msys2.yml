@@ -62,13 +62,13 @@ jobs:
           C:\msys64\usr\bin\bash.exe -lc 'pacman --needed --noconfirm -Syuu'
           C:\msys64\usr\bin\bash.exe -lc 'pacman --needed --noconfirm -Syuu'
           C:\msys64\usr\bin\bash.exe -lc 'pacman --needed --noconfirm -Syuu pactoys'
-          C:\msys64\usr\bin\bash.exe -lc 'pacboy --needed --noconfirm -Syuu clang:x lld:x toolchain:x base-devel:'
+          C:\msys64\usr\bin\bash.exe -lc 'pacboy --needed --noconfirm -Syuu clang:x lld:x toolchain:x make:x base-devel:'
           $ErrorActionPreference = 'Stop'
 
       - name: make
         run: |
           $env:PATH+=';C:\msys64';
-          .\main\script\msys2_build.ps1 -Edition ${{ matrix.edition }} -Compiler ${{ matrix.compiler }} -Target ${{ matrix.target }} -Cpu ${{ matrix.archcpu }}
+          .\main\tools\build\msys2_build.ps1 -Edition ${{ matrix.edition }} -Compiler ${{ matrix.compiler }} -Target ${{ matrix.target }} -Cpu ${{ matrix.archcpu }}
         shell: pwsh
 
       # - uses: actions/upload-artifact@v7

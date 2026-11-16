@@ -1,4 +1,5 @@
 ﻿#include "dlshogi_searcher.h"
+#include "../../extra/tools.h"
 
 #if defined(YANEURAOU_ENGINE_DEEP)
 
@@ -91,7 +92,7 @@ void DlshogiSearcher::InitGPU(const std::string& model_path, const std::string& 
 	// 探索の終了条件を満たしたかを監視するためのスレッド数
 	const int search_interruption_check_thread_num = 1;
 
-    engine.threads.set(engine.numaContext.get_numa_config(), {engine.options, engine.threads, engine.tt, engine.sharedHists /*, networks*/ },
+    engine.threads.set(engine.numaContext.get_numa_config(), {engine.options, engine.threads, engine.tt, engine.sharedHists /*, network*/ },
 					engine.updateContext, total_thread_num + search_interruption_check_thread_num , worker_factory);
 
 	// このタイミングで確保しなおす。
@@ -105,7 +106,10 @@ void DlshogiSearcher::InitGPU(const std::string& model_path, const std::string& 
 
 	// モデルの読み込み
     ElapsedTimer time;
-        
+#if defined(ENABLE_NN_CACHE)
+	SetDnnCacheSize(search_options.dnn_cache_size);
+#endif
+	        
 	for (size_t i = 0; i < search_groups_size ; i++)
 		if (thread_settings[i] > 0)
 			search_groups[i].Initialize(model_path, model_architecture,
@@ -592,7 +596,7 @@ void DlshogiSearcher::OutputPvCheck() {
 // posからply先のpvのhash keyを返す。
 // ply = 残り手数(3を設定すると現局面と合わせて4手分をkeysに出力)
 // keys には keys[0]がply手後、keys[1]がply-1手後 .. keys[ply-1]に0手後のhash keyが返る。
-void pv_key(Position& pos, Node* node, int ply, Key64 keys[]) {
+void pv_key(Position& pos, Node* node, int ply, u64 keys[]) {
     if (ply == 0)
         keys[ply] = pos.key();
     else if (node == nullptr || node->child_num == 0)
@@ -882,7 +886,7 @@ void DlshogiSearcher::InterruptionCheck(const Position& rootPos) {
                     //sync_cout << to_usi_string(m2) << sync_endl;
 
                     pos.do_move(m1, si);
-                    Key64 k1[4] = {}, k2[4] = {};
+                    u64 k1[4] = {}, k2[4] = {};
                     pv_key(pos, node1, 3, k1);  // 4手先までのhash key
                     pos.undo_move(m1);
                     pos.do_move(m2, si);

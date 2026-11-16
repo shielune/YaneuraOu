@@ -91,6 +91,15 @@
     <ClInclude Include="extra\bitop.h">
       <Filter>リソース ファイル\extra</Filter>
     </ClInclude>
+    <ClInclude Include="extra\tools.h">
+      <Filter>リソース ファイル\extra</Filter>
+    </ClInclude>
+    <ClInclude Include="extra\system_io.h">
+      <Filter>リソース ファイル\extra</Filter>
+    </ClInclude>
+    <ClInclude Include="extra\parser.h">
+      <Filter>リソース ファイル\extra</Filter>
+    </ClInclude>
     <ClInclude Include="extra\long_effect.h">
       <Filter>リソース ファイル\extra</Filter>
     </ClInclude>
@@ -199,10 +208,7 @@
     <ClInclude Include="movepick.h">
       <Filter>リソース ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="eval\evalhash.h">
-      <Filter>リソース ファイル\eval</Filter>
-    </ClInclude>
-    <ClInclude Include="thread_win32_osx.h">
+    <ClInclude Include="thread_native.h">
       <Filter>リソース ファイル</Filter>
     </ClInclude>
     <ClInclude Include="eval\nnue\features\half_kpe9.h">
@@ -319,6 +325,9 @@
     <ClInclude Include="engine\dlshogi-engine\Node.h">
       <Filter>リソース ファイル\engine\dlshogi-engine</Filter>
     </ClInclude>
+    <ClInclude Include="engine\dlshogi-engine\PolicyValueCache.h">
+      <Filter>リソース ファイル\engine\dlshogi-engine</Filter>
+    </ClInclude>
     <ClInclude Include="engine\dlshogi-engine\PrintInfo.h">
       <Filter>リソース ファイル\engine\dlshogi-engine</Filter>
     </ClInclude>
@@ -328,10 +337,9 @@
     <ClInclude Include="shm.h">
       <Filter>リソース ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="shm_linux.h">
+    <ClInclude Include="shm_unix.h">
       <Filter>リソース ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="tracer.h" />
     <ClInclude Include="eval\nnue\architectures\sfnn-1536.h">
       <Filter>リソース ファイル\eval\nnue\architectures</Filter>
     </ClInclude>
@@ -383,6 +391,15 @@
       <Filter>リソース ファイル</Filter>
     </ClCompile>
     <ClCompile Include="extra\bitop.cpp">
+      <Filter>リソース ファイル\extra</Filter>
+    </ClCompile>
+    <ClCompile Include="extra\tools.cpp">
+      <Filter>リソース ファイル\extra</Filter>
+    </ClCompile>
+    <ClCompile Include="extra\system_io.cpp">
+      <Filter>リソース ファイル\extra</Filter>
+    </ClCompile>
+    <ClCompile Include="extra\parser.cpp">
       <Filter>リソース ファイル\extra</Filter>
     </ClCompile>
     <ClCompile Include="eval\evaluate_bona_piece.cpp">
@@ -567,24 +584,15 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="..\script\readme.txt">
+    <Text Include="..\tools\script\README.md">
       <Filter>script</Filter>
     </Text>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\script\calc_rating.py">
+    <None Include="..\tools\script\engine_invoker1.py">
       <Filter>script</Filter>
     </None>
-    <None Include="..\script\analyze_result_log.py">
-      <Filter>script</Filter>
-    </None>
-    <None Include="..\script\engine_invoker1.py">
-      <Filter>script</Filter>
-    </None>
-    <None Include="..\script\analyze_yane_log.py">
-      <Filter>script</Filter>
-    </None>
-    <None Include="..\script\engine_invoker5.py">
+    <None Include="..\tools\script\engine_invoker5.py">
       <Filter>script</Filter>
     </None>
     <None Include="Makefile">
@@ -594,7 +602,7 @@
     <None Include="..\.editorconfig" />
     <None Include="..\.gitattributes" />
     <None Include="..\.gitignore" />
-    <None Include="..\script\bench.py">
+    <None Include="..\tools\script\bench.py">
       <Filter>script</Filter>
     </None>
     <None Include=".clang-format" />
