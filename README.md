@@ -43,7 +43,8 @@
 
 `build-native-explain.yml` は explain 対応のタグから、Linux amd64 / arm64 と
 macOS Intel / Apple Silicon の実行ファイルを作り、同じタグの Release に追加する。
-各環境で KP256、HalfKP128、HalfKP256、HalfKP768、HalfKA1024、HalfKA2304 を用意する。
+各環境で KP256、HalfKP128、HalfKP256、HalfKP768、HalfKA1024、HalfKA2304 に加えて、
+つようら王11 mini / micro 用の KA4096、KA2048 を用意する。
 詰み専用エンジンは対象外。
 
 | 環境 | ファイル名の環境部分 | Makefile の CPU 対象 |
@@ -55,15 +56,16 @@ macOS Intel / Apple Silicon の実行ファイルを作り、同じタグの Rel
 
 取得するアーカイブは
 `yaneuraou-<環境>-<network>-<tag>-explain.tar.gz`。
-例えば `yaneuraou-linux-amd64-kp256-v9.61.1-explain.tar.gz` に入る実行ファイルは
-`yaneuraou-linux-amd64-kp256-explain`。この名前は新しいワークフローの出力規則であり、
-v9.61.1 の既存 Release にネイティブ版が追加済みという意味ではない。
+例えば `yaneuraou-linux-amd64-kp256-v9.61.6-explain.tar.gz` に入る実行ファイルは
+`yaneuraou-linux-amd64-kp256-explain`。
 アーカイブには GPL ライセンスとソースのタグへのリンクを含める。
 Linux 版は動的リンクなので、ビルド用 runner と互換性のある glibc / libstdc++ が必要。
 
-`hce-progress.bin` と `hce-explain.bin` は既存の v9.61.1 Release から別途取得して、
-展開した実行ファイルと同じディレクトリに置く。モデルの再配布条件を変更せず、
-アーカイブには同梱しない。そのディレクトリで実行ファイルを起動し、標準入力に送る。
+`hce-progress.bin` と `hce-explain.bin` は、取得したアーカイブと同じタグの Release に
+別の資産として載っている。その 2 つを取得して、展開した実行ファイルと同じディレクトリに置く。
+2 つは同じ Release のものを組で使う（進行度ファイルとの指紋が合わないと内訳は出ない）。
+モデルの再配布条件を変更せず、アーカイブには同梱しない。
+そのディレクトリで実行ファイルを起動し、標準入力に送る。
 
 ```text
 usi
@@ -81,6 +83,20 @@ quit
 出力形式（ヘッダ行、局面行、不正手のエラー行、終端の `done` 行、`legacy` / `top`）は
 [docs/explain_protocol.md](docs/explain_protocol.md) に書いた。
 
+### つようら王11 mini / micro (ka4096 / ka2048)
+
+`ka4096` が mini、`ka2048` が micro に対応する。ビルドに使う edition は
+`SFNN_ka2_4096_8_64_progress8x` / `SFNN_ka2_2048_8_64_progress8x` で、上流名との対応は
+[source/eval/nnue/architectures/README.md](source/eval/nnue/architectures/README.md) にある。
+Windows 版は `make-mingw.yml` が同じ名前 (`yaneuraou-windows-ka4096-<tag>[-explain].tar.gz`) で作る。
+
+評価関数はアーカイブに含まれない。[やねうら王の公式配布記事](https://yaneurao.fanbox.cc/posts/12761272)
+から `nn.bin` と `progress.bin` を取得し、`EvalDir` の下に両方置く。
+評価関数は MIT License、エンジン本体は GPLv3。既存の network と互換性がなく、
+エンジンの `FV_SCALE` 既定値は 28 なので、`setoption name FV_SCALE value 24` を送る必要がある。
+探索スレッドのスタックは mini が約 4.5 MiB、micro が約 2.5 MiB 以上必要で、
+Linux は `ulimit -s` の既定 (8 MiB) で足りる。macOS と Windows は 8 MiB 固定で確保する。
+
 ### ネイティブ版の CI 前提
 
 既存のリリースワークフローと同じ GitHub-hosted runner を使う。
@@ -93,7 +109,7 @@ python3 を使い、検証用の Node.js は 22.18.0 に固定する。
 タグのソースに `HCE_EXPLAIN` と HCE の実装が必要で、無い場合は通常版を誤って公開せず失敗する。
 手動実行は選んだブランチのソースを検証して Actions artifact に保存するだけで、
 Release を作成・変更しない。手動実行のアーカイブ名ではタグの代わりに `dev-<commit>` を使う。
-タグ push では全 20 組のビルドとネイティブ動作確認が成功してからアーカイブを追加し、
+タグ push では全 32 組のビルドとネイティブ動作確認が成功してからアーカイブを追加し、
 既存の WASM / Windows アセットとリリース本文は変更しない。
 ビルドは `HCE_EXPLAIN=ON` と組み合わせ別の `OBJDIR` を使い、通常版のオブジェクトを再利用しない。
 検証は SHA-256 を固定した既存のモデルを読み、NNUE 無しで通常の着手・捕獲・成りと

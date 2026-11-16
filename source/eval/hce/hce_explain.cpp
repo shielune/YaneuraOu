@@ -394,7 +394,7 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		material *= (double)g_model.curve(Model::MATERIAL, left);
 
 		const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
-		const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
+		double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
 
 		// 速度、玉の安全度、駒の働きは、それぞれ倍率を掛けたあとの値。
 		bool   has_speed = false, has_king = false, has_activity = false;
@@ -447,6 +447,16 @@ void emit_node(Position& pos, const HumanLike::Layout& layout,
 		shift(has_speed,    speed,    g_nets.moved_speed);
 		shift(has_king,     king,     g_nets.moved_king);
 		shift(has_activity, activity, g_nets.moved_activity);
+
+		// 合計の大きさに応じた倍率を、5 つの要素すべてに同じだけ掛ける。足した値が合計の倍率倍になる。
+		// 倍率は掛ける前の合計から求める (節 "gain" が無ければ 1)。
+		{
+			const double before = material + tempo + (has_speed ? speed : 0.0)
+			                    + (has_king ? king : 0.0) + (has_activity ? activity : 0.0);
+			const double g = (double)g_model.gain((float)std::fabs(before));
+			material *= g; tempo *= g;
+			speed *= g; king *= g; activity *= g;
+		}
 
 		// 内部名 (model.find("speed") / "activity" など) はモデルファイルの節の名前なので旧名のまま。
 		// 出力キーだけを threat / mobility に改名している。

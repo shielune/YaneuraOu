@@ -103,6 +103,8 @@ if len(arches) <= 3 :
 #     SFNN_halfka2_1024_7_64_hand64_k3k3 / hand64_k9k9 / hand64_k21k21 / hand64_k29k29 のように、
 #     hand64と複合できる。
 #     SFNN_halfka2_1024_7_64_k3k3_progress8 のようにprogress2/3/4/8/16/32とも複合できる。
+#     progress8x のように末尾にxを付けると、進行度係数を nn.bin ではなく外部の progress.bin から読む。
+#     (progress8ek は相入玉バケットを足したうえで同じく外部 progress.bin。)
 SFNN = False
 layer_stack_name = ""
 layer_stack_count = ""
@@ -131,6 +133,7 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
     king_buckets = 1
     progress_buckets = 1
     progress_entering_king = 0
+    progress_external = 0
     hand_name = ""
     king_name = ""
     progress_name = ""
@@ -165,11 +168,18 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
             raw = token[len("PROGRESS"):]
             # 📝 末尾の "EK" は相入玉専用バケットを1つ足す指定。
             #     NAGISA_V3 の評価関数がこの形 (progress8ek = 進行度8 + 相入玉1 = 9)。
+            #     "EK" は係数を外部ファイル progress.bin から読む指定を含意する。
+            # 📝 末尾の "X" は相入玉バケット無しで、係数だけを外部ファイル progress.bin から
+            #     読む指定。つようら王11 (SFNN_ka2_4096_8_64_progress8 + 別配布の progress.bin)
+            #     がこの形 (progress8x = 進行度8のみ = 8)。
             entering_king = raw.endswith("EK")
+            external = entering_king or raw.endswith("X")
             if entering_king:
                 raw = raw[:-len("EK")]
+            elif external:
+                raw = raw[:-len("X")]
             if not raw.isdigit() or int(raw) not in progress_values:
-                print(f"Error! : progress bucket must be progress2/3/4/8/16/32 (optionally with 'ek' suffix) , got {token}.")
+                print(f"Error! : progress bucket must be progress2/3/4/8/16/32 (optionally with 'ek' or 'x' suffix) , got {token}.")
                 raise SystemExit(1)
             if progress_buckets != 1:
                 print(f"Error! : duplicate SFNN progress bucket in {layer_stack_spec}.")
@@ -177,9 +187,10 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
             progress_name = token
             progress_buckets = int(raw) + (1 if entering_king else 0)
             progress_entering_king = 1 if entering_king else 0
+            progress_external = 1 if external else 0
         else:
             print(f"Error! : unknown SFNN layer stack token {token} in {layer_stack_spec}.")
-            print("Error! : SFNN layer stack tokens are hand64/256/1024, k3k3/k9k9/k21k21/k29k29, and progress2/3/4/8/16/32 (optionally progressNek).")
+            print("Error! : SFNN layer stack tokens are hand64/256/1024, k3k3/k9k9/k21k21/k29k29, and progress2/3/4/8/16/32 (optionally progressNek / progressNx).")
             raise SystemExit(1)
 
     canonical = "_".join([name for name in [hand_name, king_name, progress_name] if name])
@@ -188,7 +199,18 @@ def parse_sfnn_layer_stack_spec(layer_stack_spec):
 
     layer_count = hand_buckets * king_buckets * progress_buckets
     return (canonical, str(layer_count), str(hand_buckets), str(king_buckets),
-            str(progress_buckets), str(progress_entering_king))
+            str(progress_buckets), str(progress_entering_king), str(progress_external))
+
+def sfnn_uses_shortcut(hidden1_dims: int) -> bool:
+    if hidden1_dims % 8 == 7:
+        return True
+    if hidden1_dims % 8 == 0:
+        return False
+    print(f"Error : SFNN H1 must be 8n with no shortcut, or 8n-1 with shortcut. H1={hidden1_dims}.")
+    raise SystemExit(1)
+
+def sfnn_hidden1_output_dims(hidden1_dims: int) -> int:
+    return hidden1_dims + (1 if sfnn_uses_shortcut(hidden1_dims) else 0)
 
 if arches[0].startswith("SFNN"):
     SFNN = True
@@ -220,7 +242,7 @@ if arches[0].startswith("SFNN"):
     layer_stack_spec = "_".join(arches[layer_stack_start:]) if len(arches) > layer_stack_start else ""
     (layer_stack_name, layer_stack_count, layer_stack_hand_buckets,
         layer_stack_king_buckets, layer_stack_progress_buckets,
-        layer_stack_progress_entering_king) = parse_sfnn_layer_stack_spec(layer_stack_spec)
+        layer_stack_progress_entering_king, layer_stack_progress_external) = parse_sfnn_layer_stack_spec(layer_stack_spec)
 
     arches = [arches[1], arches[2], arches[3], arches[4], layer_stack_count]
 
@@ -416,13 +438,17 @@ if SFNN:
         print(f"Error : layers must be like 1536-15-32-k3k3 , layers = {layers}.")
         raise SystemExit(1)
 
+    hidden1_dims = int(layers[1])
+    hidden1_output_dims = sfnn_hidden1_output_dims(hidden1_dims)
+    hidden1_uses_shortcut = sfnn_uses_shortcut(hidden1_dims)
+
     if not sfnn_group_count.isdigit():
         print(f"Error : SFNN group count must be an integer , group = {sfnn_group_count}.")
         raise SystemExit(1)
 
     if sfnn_common_shard:
         transformed_dims = int(layers[0])
-        hidden1_out_dims = int(layers[1]) + 1
+        hidden1_out_dims = hidden1_output_dims
         common_dims = int(sfnn_common_dims)
         shard_dims = int(sfnn_shard_dims)
         group_count = int(sfnn_group_count)
@@ -430,7 +456,7 @@ if SFNN:
             print(f"Error : common+shard SFNN requires common + shard * group == transformed dimensions. common={common_dims}, shard={shard_dims}, group={group_count}, dims={transformed_dims}.")
             raise SystemExit(1)
         if hidden1_out_dims % group_count != 0:
-            print(f"Error : common+shard SFNN requires hidden1+1 divisible by group count. hidden1+1={hidden1_out_dims}, group={group_count}.")
+            print(f"Error : common+shard SFNN requires fc0 output dimensions divisible by group count. fc0_output={hidden1_out_dims}, group={group_count}.")
             raise SystemExit(1)
         if common_dims % 64 != 0:
             print(f"Error : common+shard SFNN requires common dimensions to be a multiple of 64. common={common_dims}.")
@@ -458,9 +484,9 @@ if SFNN:
         #define NNUE_SFNN_PROGRESS_ENTERING_KING {layer_stack_progress_entering_king}
 
         // 1なら、進行度係数を nn.bin ではなく外部ファイルから読む。
-        // 💡 progress8ek 系は係数を progress.bin として別配布しているのでこちら。
+        // 💡 progress8ek / progress8x 系は係数を progress.bin として別配布しているのでこちら。
         //    このとき nn.bin には進行度セクションが無いので、hashにも含めない。
-        #define NNUE_SFNN_PROGRESS_EXTERNAL {layer_stack_progress_entering_king}
+        #define NNUE_SFNN_PROGRESS_EXTERNAL {layer_stack_progress_external}
 
         // Number of groups for the first affine layer of SFNN.
         // common+shard fc_0でのみ2以上になる。
@@ -474,6 +500,8 @@ if SFNN:
         // 各層の次元数
         constexpr IndexType kInputDims   = kTransformedFeatureDimensions;
         constexpr IndexType kHidden1Dims = {layers[1]};
+        constexpr bool kUseShortcut = {"true" if hidden1_uses_shortcut else "false"};
+        constexpr IndexType kHidden1OutputDims = kHidden1Dims + (kUseShortcut ? 1 : 0);
         constexpr IndexType kHidden2Dims = {layers[2]};                              
     """
 
@@ -509,12 +537,11 @@ else:
 # ============================================================
 
 if SFNN:
-    fc_0_type = "Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1Dims + 1>"
+    fc_0_type = "Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1OutputDims>"
     group_count = int(sfnn_group_count)
     if sfnn_common_shard:
-        fc_0_type = "Layers::AffineTransformCommonShardInputExplicit<kInputDims, kHidden1Dims + 1, kHidden1CommonDimensions, kHidden1ShardDimensions, kHidden1GroupCount>"
+        fc_0_type = "Layers::AffineTransformCommonShardInputExplicit<kInputDims, kHidden1OutputDims, kHidden1CommonDimensions, kHidden1ShardDimensions, kHidden1GroupCount>"
     group_input_dims = int(sfnn_shard_dims) if sfnn_common_shard else 0
-    hidden1_output_dims = int(layers[1]) + 1
     enable_common_shard_sfnn_accumulator_propagate = (
         sfnn_common_shard and group_count % 2 == 0 and group_input_dims % 64 == 0
     )
@@ -542,7 +569,7 @@ if SFNN:
         {sfnn_accumulator_propagate_macro}
 
         using Fc0Layer = {fc_0_type};
-        using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims>;
+        using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims, kUseShortcut>;
 
         struct Network : NetworkBase {{
             static std::string GetStructureString() {{
