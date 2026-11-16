@@ -190,7 +190,7 @@ engine.dispose();
   (`WebAssembly.Memory`) を GC に返す。メインスレッドの `Atomics.waitAsync` が
   `Module` を掴み続けて返らなかったので、Node 用ビルドだけ
   `source/wasm_pre_node.js` でそれを隠している。この対策が入る前のバイナリ
-  (9.61.5 以前) では、`dispose()` しても 1 台あたり 175〜210 MB (KP256, USI_Hash 64)
+  (9.61.8 以前) では、`dispose()` しても 1 台あたり 175〜210 MB (KP256, USI_Hash 64)
   が残る。
 
 ### 同等のことを自前でやるなら
