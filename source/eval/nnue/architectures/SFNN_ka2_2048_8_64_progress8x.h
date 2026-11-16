@@ -1,7 +1,7 @@
 // SFNN without PSQT architecture
 
-#ifndef CLASSIC_NNUE_SFNN_SFNN_KA2_4096_7_64_PROGRESS8X_H_INCLUDED
-#define CLASSIC_NNUE_SFNN_SFNN_KA2_4096_7_64_PROGRESS8X_H_INCLUDED
+#ifndef CLASSIC_NNUE_SFNN_SFNN_KA2_2048_8_64_PROGRESS8X_H_INCLUDED
+#define CLASSIC_NNUE_SFNN_SFNN_KA2_2048_8_64_PROGRESS8X_H_INCLUDED
 
 #include "../features/feature_set.h"
 
@@ -20,7 +20,7 @@ namespace Eval::NNUE {
 
     // Number of input feature dimensions after conversion
     // 変換後の入力特徴量の次元数
-    constexpr IndexType kTransformedFeatureDimensions = 4096;
+    constexpr IndexType kTransformedFeatureDimensions = 2048;
 
     // 小幅SFNN専用。従来幅のSFNNでは定義せず、既存の高速経路をそのまま使う。
     
@@ -49,8 +49,8 @@ namespace Eval::NNUE {
 
     // 各層の次元数
     constexpr IndexType kInputDims   = kTransformedFeatureDimensions;
-    constexpr IndexType kHidden1Dims = 7;
-    constexpr bool kUseShortcut = true;
+    constexpr IndexType kHidden1Dims = 8;
+    constexpr bool kUseShortcut = false;
     constexpr IndexType kHidden1OutputDims = kHidden1Dims + (kUseShortcut ? 1 : 0);
     constexpr IndexType kHidden2Dims = 64;                              
 
@@ -67,11 +67,11 @@ namespace Eval::NNUE {
 
     struct Network : NetworkBase {
         static std::string GetStructureString() {
-            return "SFNN_KA2_4096_7_64_PROGRESS8X";
+            return "SFNN_KA2_2048_8_64_PROGRESS8X";
         }
     };
 
 }  // namespace Eval::NNUE
 }  // namespace YaneuraOu
 
-#endif // CLASSIC_NNUE_SFNN_KA2_4096_7_64_PROGRESS8X_H_INCLUDED
+#endif // CLASSIC_NNUE_SFNN_KA2_2048_8_64_PROGRESS8X_H_INCLUDED

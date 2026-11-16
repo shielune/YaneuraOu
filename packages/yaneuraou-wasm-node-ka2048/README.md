@@ -1,12 +1,12 @@
 # @ultemica/yaneuraou-wasm-node-ka2048
 
-YaneuraOu SFNN ka2 2048x2-7-64 (つようら王11 micro 互換ネットワーク) 将棋エンジンを
+YaneuraOu SFNN ka2 2048x2-8-64 (つようら王11 micro 互換ネットワーク) 将棋エンジンを
 **Node.js から** multi-thread (pthread) で動かすための WASM パッケージ。
 
-- エンジン: YaneuraOu SFNN ka2 2048x2-7-64 / LayerStack 8
+- エンジン: YaneuraOu SFNN ka2 2048x2-8-64 / LayerStack 8
 - スレッド: 可変 (`Threads` USI option、ビルドの worker pool は 32)
 - WASM SIMD: 有効
-- メモリ: **256 MiB initial / 4 GiB max** / 16 MiB per-thread stack
+- メモリ: **256 MiB initial / 4 GiB max** / 8 MiB per-thread stack
 - 評価関数: `nn.bin` (3,864,610 bytes) と `progress.bin` (1,003,104 bytes) を実行時に渡す (**2 ファイル必要**)
 - ランタイム: **Node.js 18+ 専用** (`node:worker_threads`)
 - emscripten: **3.1.43 固定** — Node 互換性が確認できている唯一のバージョン

@@ -120,6 +120,7 @@ H1 が 8n    : shortcutなし。fc_0出力は H1。
 
 例えば`SFNN_halfka2_1024_7_64_k3k3`は`7`個のhidden出力と`1`個のshortcut出力を持つ。
 一方、`SFNN_halfka2_1024_8_64_k3k3`は`8`個のhidden出力だけを持ち、shortcutは使わない。
+NAGISA系の`15_64`はshortcutあり、つようら王11の`8_64`はshortcutなしにあたる。
 shortcutの有無はこの`H1`規則で決まる。
 
 SFNNでは`LayerStacks`個の後段networkを`nn.bin`に持ち、局面ごとに1つを選んで使う。
