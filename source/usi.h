@@ -1,21 +1,37 @@
 ﻿#ifndef USI_H_INCLUDED
 #define USI_H_INCLUDED
 
-#include <cstddef>
-#include <iosfwd>
-#include <map>
+#include <iostream>
 #include <string>
+#include <string_view>
 
-#include "types.h"
 #include "engine.h"
-#include "position.h"
-#include "testcmd/unit_test.h"
+#include "misc.h"
+#include "search.h"
+
+#if !STOCKFISH
+#if defined(__EMSCRIPTEN__)
+#include <memory>
+#endif
+#include <queue>
+#endif
 
 namespace YaneuraOu {
 
 // --------------------
 //     USI関連
 // --------------------
+
+#if STOCKFISH
+class Position;
+class Move;
+class Score;
+enum Square : u8;
+using Value = int;
+
+constexpr auto StartFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+#endif
 
 // USIEngine本体。
 // このclassがEngineを内包していて、USIメッセージのハンドラを処理して
@@ -26,7 +42,7 @@ public:
 #if STOCKFISH
 	// 📝 やねうら王では、CommandLine::gを見れば良いので、argc,argvは引数として渡さないことにした。
 	//     また、ここでやっている初期化は不要になったのでコンストラクタ自体を削除。
-	USIEngine(int argc, char** argv);
+	USIEngine(CommandLine cli);
 #else
 	 // USIEngine classから使うEngine。
 	 // 📌 やねうら王独自。エンジンの実装を変更できるように、
@@ -37,6 +53,8 @@ public:
 
 	// main threadをUSIメッセージの受信のために待機させる。
 	// "quit"コマンドが送られてくるまでこのループは抜けない。
+	// 📝 wasmではブラウザのメインスレッドをブロックできないため、この関数は何もしない。
+	//     代わりにwasm_pre.jsからusi_command()経由でexec_command_from_js()が呼び出される。
 	void loop();
 
 	// --------------------
@@ -58,7 +76,11 @@ public:
     static std::string square(Square s);
 
     // USIプロトコルで使う指し手文字列に変換する。
-    static std::string move(Move m /*, bool chess960*/);
+#if STOCKFISH
+    static std::string move(Move m, bool chess960 = false);
+#else
+    static std::string move(Move m);
+#endif
 
 #if STOCKFISH
     // 勝率文字列に変換する。
@@ -81,19 +103,10 @@ public:
 #endif
 
 	// "go"の後続文字列を解析して、それを反映させたSearch::LimitsTypeを返す。
-    /*
-	   📓 やねうら王のほうはoptions["DepthLimit"], options["NodesLimit"] を
-	       参照したいので、OptionsMap&が必要になり、これはUSIEngineが持っているので
-	       このmethodをstaticにできない。
-	*/
-#if STOCKFISH
-    static Search::LimitsType parse_limits(std::istream& is);
-#else
     Search::LimitsType parse_limits(std::istream& is);
-#endif
 
     // エンジンオプション設定を取得する
-    OptionsMap& engine_options() { return engine.get_options(); }
+    auto& engine_options() { return engine.get_options(); }
 
 #if !STOCKFISH
     // --------------------
@@ -107,7 +120,6 @@ public:
 	// MATEではないスコアなら"cp x"のように出力する。
 	// MATEのスコアなら、"mate x"のように出力する。
 	// 
-	// ⚠ USE_PIECE_VALUEが定義されていない時は正規化しようがないのでこの関数は呼び出せない。
 	static std::string value(Value v);
 
     // USIの指し手文字列などに使われている盤上の升を表す文字列をSquare型に変換する
@@ -124,45 +136,37 @@ public:
     // vector<Move>をUSIプロトコルで使う文字列に変換する。
     static std::string move(const std::vector<Move>& moves);
 
-	// USIコマンドを積むことができる標準入力
-	// 💡 ここにUSIコマンドを積むとそれが実行される。
-	StandardInput std_input;
-
-    // コマンドラインに書かれているUSIコマンドをstd_inputに積む。
+    // コマンドラインに書かれているUSIコマンドをコマンドキューに積む。
     // マルチインスタンス時に注入先を選べるよう、USIEngine::loop()からは呼び出さない。
     void enqueue_command_line_commands(const CommandLine& cli);
 
-    // startup.txtなどのファイルに書かれているUSIコマンドをstd_inputに積む。
+    // startup.txtなどのファイルに書かれているUSIコマンドをコマンドキューに積む。
     void enqueue_startup_file_commands(const std::string& filename);
 
-    // 単一エンジン起動用に、コマンドラインとstartup.txtのUSIコマンドをstd_inputに積む。
+    // 単一エンジン起動用に、コマンドラインとstartup.txtのUSIコマンドをコマンドキューに積む。
     void enqueue_startup_commands(const CommandLine& cli);
 
 	// このclassのUnitTest。
 	static void UnitTest(Test::UnitTester& tester, IEngine& engine);
 
 #if defined(__EMSCRIPTEN__)
-	// --------------------
-	// yaneuraou.wasm のためのbridge
-	// --------------------
-	/*
-		📓 wasmでは標準入力が無いので、USIコマンドはJavaScript側から
-		    ccall("usi_command", ...) で1行ずつ流し込まれる。
-		    その受け口(usi.cppのusi_command())が使うためのpublic API。
-	*/
-
-	// 全ての探索スレッドが起動し、workerの生成まで終わっているか。
-	// 📝 falseの間にコマンドを実行すると、まだ生成されていないworkerを
-	//     参照して落ちるので、JS側に「あとで再送してくれ」と返す必要がある。
+	// 全ての探索スレッドが起動し、idle_loop()で待機状態になっているか。(フォーク独自)
+	// 📝 falseの間にjobを投げると、run_custom_job()がスレッドの待機を
+	//     ブラウザのメインスレッド上で待ってしまい固まるので、
+	//     JS側に「あとで再送してくれ」と返す必要がある。
+	//     workerはThreadのコンストラクタで生成済み。(thread.cpp)
 	bool wasm_threads_ready() const;
 
-	// USIコマンドを1行実行する。"quit"が来たらtrueを返す。
-	// 💡 usi_cmdexec()がprivateなので、bridgeのために公開する薄いwrapper。
-	bool wasm_exec(const std::string& cmd) { return usi_cmdexec(cmd); }
+	// yaneuraou.wasm : JS側から渡されたUSIコマンドを1つ実行する。
+	// 戻り値はそのままwasm_pre.jsに返る。
+	//   0 : 受理した。
+	//   1 : まだ実行できない(スレッドの起動待ち)。あとで再送してもらう。
+	int exec_command_from_js(const std::string& cmd);
 #endif
 #endif
 
 private:
+
 	// 内包している思考エンジン
 #if STOCKFISH
 	// main関数にコマンドラインから渡された引数
@@ -174,7 +178,16 @@ private:
 	// 🌈 やねうら王ではengineを切り替えられるようにIEngineをくるんだ
 	//     EngineWrapperというclassを用いる。
 	EngineWrapper engine;
+
+    // 先行入力されたUSIコマンド。尽きれば標準入力から入力する。
+    std::queue<std::string> pending_commands;
+
+    // キューを優先して1行取得する。標準入力がEOFならquitを返す。
+    std::string read_command();
+
 #endif
+
+    std::string currentCmd;
 
 	// string_viewを"\n"で複数行に分割して、それを"info string .."の形で出力する。
 	static void print_info_string(std::string_view str);
@@ -191,7 +204,7 @@ private:
 	void          benchmark(std::istream& args);
 	void          position(std::istringstream& is);
 	void          setoption(std::istringstream& is);
-	std::uint64_t perft(const Search::LimitsType&);
+	u64 perft(const Search::LimitsType&);
 
 #if !STOCKFISH
 	// 🌈 やねうら王独自拡張 🌈
@@ -213,7 +226,12 @@ private:
 	// 🌈 on_update_info_string()はやねうら王独自拡張。
 
 	static void on_update_no_moves(const Engine::InfoShort& info);
+#if STOCKFISH
+	static void on_update_full(const Engine::InfoFull& info, bool showWDL);
+#else
     static void on_update_full(const Engine::InfoFull& info /*, bool showWDL*/);
+#endif
+
 	static void on_iter(const Engine::InfoIter& info);
 	static void on_bestmove(std::string_view bestmove, std::string_view ponder);
 #if !STOCKFISH
@@ -228,21 +246,21 @@ private:
     void init_search_update_listeners();
 
     // 致命的なエラーが出たときにその内容を出力してプログラムを終了する。
-    [[noreturn]] void terminate_on_critical_error(const std::string& fullCommand,
-                                                  const std::string& message);
+    [[noreturn]] void terminate_on_critical_error(const std::string& message);
 
 #if !STOCKFISH
+
 	// 🌈 やねうら王独自拡張 🌈
 
-	// ファイルからUSIコマンドをstd_inputに積む。
+    // USIコマンドを1行実行する。
+    // "quit"が来たら、trueを返す。
+    bool usi_cmdexec(const std::string& cmd);
+
+	// ファイルからUSIコマンドをコマンドキューに積む。
 	void enqueue_command_from_file(std::istringstream& is);
 
 	// option名とvalueを指定して、そのoption名があるなら、そのoptionの値を変更する。
 	void set_option_if_exists(const std::string& option_name, const std::string& option_value);
-
-	// USIコマンドを1行実行する。
-	// "quit"が来たら、trueを返す。
-	bool usi_cmdexec(const std::string& cmd);
 
 	/*
 		📓 Stochastic Ponderの実装について
@@ -252,7 +270,8 @@ private:
 
 		1. GUIから送られてきた"position"コマンドのコマンドラインを丸ごと保存しておく。
 		2. GUIから送られてきた"go ponder"コマンドのコマンドラインを丸ごと保存しておく。
-		3. GUIから"go ponder"が送られてきたときに、1.で保存した局面の1手前の局面をrootとして、そこから探索する。
+		3. GUIから"go ponder"が送られてきたときに、1.のmoves節にある最後の指し手を除き、その局面から探索する。
+		   指し手履歴がない場合は、元の局面で通常のponderを行う。
 		4. GUIから"ponderhit"が送られてきたときに、2.で保存しておいたコマンド列から"ponder"の文字列を取り除き(無視して)実行する。
 	*/
 
@@ -262,26 +281,31 @@ private:
 	// 上記2.
 	std::string last_go_cmd_string;
 
+    // 今回のponderで実際に1手戻した場合だけ、ponderhit時に元の局面へ戻す。
+    bool stochastic_ponder_rewound = false;
 #endif
 };
 
+#if !STOCKFISH
 #if defined(__EMSCRIPTEN__)
+// --------------------
+// 🌈 yaneuraou.wasm 用のヘルパー 🌈
+// --------------------
+
 /*
-	📓 yaneuraou.wasm では USIEngine::loop() が即座に return する
-	   (標準入力が無く、ループするとブラウザのメインスレッドを止めてしまうため)。
+	📝 wasmではUSIEngine::loop()が即座にreturnするので、各エンジンのentry pointである
+	    engine_main()もすぐに抜ける。engine_main()はEngineとUSIEngineを
+	    std::unique_ptrのlocal変数として持っているため、そのまま抜けると両者が解体され、
+	    以後JS側からusi_command()を呼んでも実体が無い。
+	    (解体時にThread::~Thread()がjoinするため、メインスレッドが停止する危険もある。)
 
-	   このため entry point (engine_main) のローカルである engine / usi の
-	   unique_ptr が、JavaScript から最初のコマンドが来る前に解体されてしまう。
-	   そこで wasm では意図的に所有権を手放し、プロセス終了まで生かしておく。
-
-	   ⚠ 解体しないのは意図的。EXIT_RUNTIME=0 なので main() を抜けても
-	     ランタイムは生き続け、以降 JS からの ccall がこのインスタンスを叩く。
+	    そこでengine_main()の末尾でこの関数にmoveし、プロセス終了までインスタンスを保持する。
 */
-template<typename EnginePtr, typename UsiPtr>
-inline void wasm_retain_engine(EnginePtr& engine, UsiPtr& usi) {
-	engine.release();
-	usi.release();
-}
+void wasm_keep_alive(std::unique_ptr<IEngine> engine, std::unique_ptr<USIEngine> usi);
+
+// wasm_keep_alive()で保持しているUSIEngineを返す。未登録ならnullptr。
+USIEngine* wasm_usi_instance();
+#endif
 #endif
 
 } // namespace YaneuraOu

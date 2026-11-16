@@ -102,7 +102,7 @@ jobs:
         if: steps.gate.outputs.selected == 'true'
         # SFNN 系は make 中に nnue_arch_gen.py でアーキヘッダを生成するが、
         # Makefile の既定は PYTHON=python で、ubuntu には python3 しか無い。
-        run: ./main/script/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3 HCE_EXPLAIN=${{ matrix.explain }}"
+        run: ./main/tools/build/mingw_gcc.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -x "PYTHON=python3 HCE_EXPLAIN=${{ matrix.explain }}"
 
       - uses: actions/upload-artifact@v7
         if: steps.gate.outputs.selected == 'true'

@@ -3,6 +3,7 @@
 
 # normal     : 通常使用版(配布用の実行ファイルはこちら)
 # tournament : 大会で使う用(通常版よりややEloが高いが使える機能に制限がある)
+# pgo        : tournamentをPGOで最適化(Clang/GCC、生成エンジンを実行できる環境用)
 
 # === ビルドオプション (build options) ===
 
@@ -112,6 +113,13 @@ COMPILER = clang++
 # ※ NNUEの未知なarchitectureの時にarchitecture headerを動的に生成するのに用いる。
 PYTHON = python
 
+# PGOの訓練設定。パスはsource/からの相対パスでも指定できる。
+PGO_EVAL_DIR ?= ../eval
+PGO_BENCH    ?= 1024 1 14 default depth
+PGO_TIMEOUT  ?= 600
+# llvm-profdataはClangと同じディレクトリやバージョン付きの名前から自動検索する。
+PGO_PROFDATA ?=
+
 # YANEURAOU_ENGINE_ 以降を architecture 名として扱う。
 # NNUE_ prefix は任意で、SFNN_* もNNUE系のarchitectureとして解釈する。
 ENGINE_ARCH       := $(patsubst YANEURAOU_ENGINE_%,%,$(YANEURAOU_EDITION))
@@ -143,6 +151,9 @@ WCPPFLAGS     =
 LDFLAGS       = 
 LIBS          =
 INCLUDE       = # -I../include
+
+# 再帰makeに渡すフラグ内の空白や引用符を保持する。
+shell_quote = '$(subst ','"'"',$(1))'
 
 # makeするときにCPPFLAGS,LDFLAGSを追加で指定したいときはこれを用いる。
 EXTRA_CPPFLAGS =
@@ -269,11 +280,21 @@ else
 		# 💡 バイナリは1割ほど大きくなり、速度はおおむね同等。
 		EM_MEMORY64 ?= 0
 		CPPFLAGS += -Wno-unused-parameter
-		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
+		# 🚧 ワークアラウンド : USE_WASM_SIMDは定義しない。
+		#     eval/nnue/wasm_simd.cppのカーネルは重みを行優先の配置で読むが、
+		#     USE_SSE42からUSE_SSSE3が有効になるため、AffineTransform::GetWeightIndex()は
+		#     重みをSSSE3向けに並べ替えて格納する。この不整合により、AffineTransformの
+		#     出力が正しくならない。
+		#     定義しなくても-msse4.2と-msimd128により、SSSE3向けの実装が
+		#     wasm simd128にコンパイルされる。
+		CPPFLAGS += -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
 		ifeq ($(EM_PTHREAD),1)
 			CPPFLAGS += -pthread
 		endif
+		# Stockfish同様、WASMではRelaxedAtomicの軽量経路を使う。
+		# ただしポインター幅より大きな型などは、RelaxedAtomic側の判定でatomicを維持する。
+		CPPFLAGS += -DUSE_SLOPPY_ATOMICS
 		ifeq ($(EM_MEMORY64),1)
 			CPPFLAGS += -sMEMORY64=1
 			LDFLAGS  += -sMEMORY64=1
@@ -358,6 +379,9 @@ ifeq "$(strip $(OBJDIR))" ""
 	OBJDIR = ..
 endif
 
+# 各実行で新しい作業ディレクトリを作り、通常ビルドや古いプロファイルと分離する。
+PGO_DIR ?= $(OBJDIR)/pgo
+
 #SOURCES  = $(wildcard *.cpp)
 SOURCES  = \
 	main.cpp                                                                   \
@@ -382,6 +406,9 @@ SOURCES  = \
 	book/apery_book.cpp                                                        \
 	book/policybook.cpp                                                        \
 	extra/bitop.cpp                                                            \
+	extra/tools.cpp                                                            \
+	extra/system_io.cpp                                                            \
+	extra/parser.cpp                                                            \
 	extra/long_effect.cpp                                                      \
 	extra/sfen_packer.cpp                                                      \
 	mate/mate.cpp                                                              \
@@ -521,9 +548,12 @@ endif
 ifneq (,$(IS_NNUE_EDITION))
 	ifeq ($(ENGINE_ARCH_UPPER),NNUE)
 	else
-		# NNUE_* または SFNN_* は標準NNUE型の亜種なので、とりあえず
-		# "YANEURAOU_ENGINE_NNUE"というシンボルを定義してやる。
-		CPPFLAGS += -DYANEURAOU_ENGINE_NNUE
+		# architecture名に応じて、従来NNUEとSFNNの構成を切り替える。
+		ifneq (,$(filter SFNN%,$(NNUE_ARCH_UPPER)))
+			CPPFLAGS += -DYANEURAOU_ENGINE_SFNN
+		else
+			CPPFLAGS += -DYANEURAOU_ENGINE_NNUE
+		endif
 
 		ifeq ($(ENGINE_ARCH_UPPER),NNUE_KP256)
 			CPPFLAGS += -DEVAL_NNUE_KP256
@@ -545,16 +575,17 @@ ifneq (,$(IS_NNUE_EDITION))
 
 		else ifeq ($(ENGINE_ARCH_UPPER),SFNN1536)
 			CPPFLAGS += -DYANEURAOU_ENGINE_SFNN1536
-			CPPFLAGS += -DSFNNwoPSQT
 		else
 			# 知らないNNUEのarchitectureなので、architecture headerを動的に生成する。
 			ARCH_HEADER_FILE = \"architectures/$(NNUE_ARCH).h\"
 			CPPFLAGS += -DNNUE_ARCHITECTURE_HEADER=$(ARCH_HEADER_FILE)
 			ARCH_GEN_SCRIPT = $(PYTHON) eval/nnue/architectures/nnue_arch_gen.py $(NNUE_ARCH) eval/nnue/architectures
 
-			# SFNN_* はPSQTなしSFNNなので、シンボル SFNNwoPSQT 定義しておく。
+			# SFNN_* の層形状に応じたSIMD経路を選択する。
 			ifneq (,$(filter SFNN%,$(NNUE_ARCH_UPPER)))
-				CPPFLAGS += -DSFNNwoPSQT
+				ifneq (,$(findstring _7_,$(NNUE_ARCH_UPPER)))
+					CPPFLAGS += -DNNUE_SFNN_HIDDEN1_7
+				endif
 			endif
 		endif
 	endif
@@ -583,6 +614,13 @@ ifneq (,$(IS_NNUE_EDITION))
 	endif
 	ifeq ($(EVAL_EMBEDDING),ON)
 		CPPFLAGS += -DNNUE_EMBEDDING
+		ifneq (,$(findstring em++,$(COMPILER)))
+			# 📝 incbin.hによるパラメーターの埋め込みは、.incbinで置いたデータシンボルを
+			#     wasm-ldがリンクできないため使えない。代わりに、パラメーターを文字列リテラルとして
+			#     持つembedded_nnue.cppをリンクする。このファイルはtools/build/wasm_build.jsが生成する。
+			SOURCES += \
+				eval/nnue/embedded_nnue.cpp
+		endif
 	endif
 	ifeq ($(HCE_EXPLAIN),ON)
 		CPPFLAGS += -DUSE_HCE_EXPLAIN
@@ -767,27 +805,40 @@ endif
 
 # 通常使用。
 normal: run_python_script
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS)' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
+	$(MAKE) CPPFLAGS=$(call shell_quote,$(CPPFLAGS) $(LTOFLAGS)) LDFLAGS=$(call shell_quote,$(LDFLAGS) $(LTOFLAGS)) $(TARGET)
 
 # トーナメント用
 tournament: run_python_script
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
+	$(MAKE) CPPFLAGS=$(call shell_quote,$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT) LDFLAGS=$(call shell_quote,$(LDFLAGS) $(LTOFLAGS)) $(TARGET)
 
-#　とりあえずPGOはAVX2とSSE4.2専用
+# gprof用の計測ビルド。
 prof:
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) -pg' tournament
 
+PGO_COMMAND = $(PYTHON) ../tools/build/pgo.py \
+	--make $(call shell_quote,$(MAKE)) \
+	--compiler $(call shell_quote,$(COMPILER)) \
+	--edition $(call shell_quote,$(YANEURAOU_EDITION)) \
+	--cpu $(call shell_quote,$(TARGET_CPU)) \
+	--target $(call shell_quote,$(TARGET)) \
+	--work-dir $(call shell_quote,$(PGO_DIR)) \
+	--cppflags=$(call shell_quote,$(EXTRA_CPPFLAGS)) \
+	--ldflags=$(call shell_quote,$(EXTRA_LDFLAGS)) \
+	--eval-dir $(call shell_quote,$(PGO_EVAL_DIR)) \
+	--bench $(call shell_quote,$(PGO_BENCH)) \
+	--timeout $(call shell_quote,$(PGO_TIMEOUT)) \
+	--profdata $(call shell_quote,$(PGO_PROFDATA))
+
+# 個別実行も可能。profgenの出力で手動訓練した後、同じ設定でprofuseを呼ぶ。
 profgen:
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) -fprofile-generate -lgcov' LDFLAGS='$(LDFLAGS) -fprofile-generate -lgcov'
+	+$(PGO_COMMAND) generate
 
 profuse:
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -fprofile-use -lgcov' LDFLAGS='$(LDFLAGS) -fprofile-use -lgcov $(LTOFLAGS)'
+	+$(PGO_COMMAND) use
 
+# 計測用ビルド→benchによる訓練→集約→本番ビルドをすべてtournamentで行う。
 pgo:
-	$(MAKE) profgen
-	@./$(TARGET) EvalDir ../build/eval , bench , quit
-	@touch $(SOURCES)
-	$(MAKE) profuse
+	+$(PGO_COMMAND) all
 
 clean:
 	rm -f $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS) $(DEPENDS) $(TARGET) ${OBJECTS:.o=.gcda}

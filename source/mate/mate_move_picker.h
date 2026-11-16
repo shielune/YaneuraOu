@@ -35,54 +35,36 @@ namespace Mate {
 	public:
 		explicit MovePicker(const Position& pos)
 		{
-			// givesCheckを呼び出すのかのフラグ
-			bool doGivesCheck = false;
-			if (or_node) {
-				// ORノードなのですべての王手の指し手を生成。
+			// 王手中の攻め方は、回避手から逆王手になる手を選ぶ。
+			constexpr bool doGivesCheck = or_node && INCHECK;
+			constexpr GenType type = or_node && !INCHECK ? (GEN_ALL ? CHECKS_ALL : CHECKS)
+			                                            : (GEN_ALL ? EVASIONS_ALL : EVASIONS);
 
-				// dlshogi、ここ、王手になる指し手を生成して、自玉に王手がかかっている場合、
-				// 回避手になっているかをpseudo_legal()でチェックしているが、
-				// pseudo_legal()のほうはわりと重い処理なので、自玉に王手がかかっているなら
-				// evasionの指し手を生成して、それがgives_check()で王手の指し手になっているか
-				// 見たほうが自然では？
+			last = moveList;
+			for (Move move : MoveList<type>(pos))
+			{
+				if ((doGivesCheck && !pos.gives_check(move)) || !pos.legal(move))
+					continue;
 
-				if (INCHECK)
-				{
-					last = GEN_ALL ? generateMoves<EVASIONS_ALL>(pos, moveList) : generateMoves<EVASIONS>(pos, moveList);
-					// これが王手になるかはのちほどチェックする。
-					doGivesCheck = true;
-				}
-				else {
-					last = GEN_ALL ? generateMoves<CHECKS_ALL>(pos, moveList) : generateMoves<CHECKS>(pos, moveList);
-				}
+				ASSERT_LV3(last < moveList + MaxCheckMoves);
+				*last++ = move;
 			}
-			else {
-				// ANDノードなので回避の指し手のみを生成
-				// (王手になる指し手も含まれる)
-				last = GEN_ALL ? generateMoves<EVASIONS_ALL>(pos, moveList): generateMoves<EVASIONS>(pos, moveList);
-			}
-
-			// 以下の２つの指し手は除外する。
-			// 1. doGivesCheck==trueなのに、王手になる指し手ではない。
-			// 2. legalではない。
-			last = std::remove_if(moveList, last, [&](const auto& ml) {
-				return (doGivesCheck && !pos.gives_check(ml)) || !pos.legal(ml);
-			});
 
 			// それぞれの指し手に対して点数をつける。
-			if (MoveOrdering)
+			if constexpr (MoveOrdering)
 			{
-#if !defined (USE_PIECE_VALUE)
-				std::cout << "Error! : define USE_PIECE_VALUE" << std::endl;
-#endif
-
 				// 現在の駒割りに、captureする指し手に対してcaptureする駒を加点して、
 				// あと、駒の移動先の升が受け方の玉から近いかに対して加点して、その指し手の価値として返す。
 				// 大雑把なオーダリングだが、異なる深さのleaf nodeの有望さの比較がそれによってきちんとできるなら
 				// わりとアリなのでは…。
 
 				// 先手から見た駒割
-				int value = pos.state()->materialValue;
+#if defined(USE_MATERIAL_VALUE)
+                int value = pos.state()->materialValue;
+#else
+                // 駒割りを保持しない構成では、オーダリングが必要なときだけ計算する。
+                int value = Eval::material(pos);
+#endif
 
 				// いまの手番側
 				auto us = pos.side_to_move();

@@ -1,13 +1,13 @@
 ﻿#ifndef PERFT_H_INCLUDED
 #define PERFT_H_INCLUDED
 
-//#include <cstdint>
+#include <cstdint>
+#include <variant>
 
 #include "movegen.h"
 #include "position.h"
 #include "types.h"
 #include "usi.h"
-#include "misc.h"
 
 namespace YaneuraOu::Benchmark {
 
@@ -22,11 +22,11 @@ namespace YaneuraOu::Benchmark {
 //     指し手生成が正常に行われているかや、生成速度等のテストとして有用。
 
 template<bool Root>
-uint64_t perft(Position& pos, Depth depth) {
+u64 perft(Position& pos, Depth depth) {
 
     StateInfo st;
 
-    uint64_t   cnt, nodes = 0;
+    u64   cnt, nodes = 0;
     const bool leaf = (depth == 2);
 
     for (const auto& m : MoveList<LEGAL_ALL>(pos))
@@ -51,26 +51,30 @@ uint64_t perft(Position& pos, Depth depth) {
 }
 
 #if STOCKFISH
-inline uint64_t perft(const std::string& fen, Depth depth , bool isChess960) {
+inline std::variant<u64, PositionSetError>
+perft(const std::string& fen, Depth depth , bool isChess960) {
 #else
-inline uint64_t perft(const std::string& fen, Depth depth /*, bool isChess960 */) {
+inline std::variant<u64, PositionSetError>
+perft(const std::string& fen, Depth depth /*, bool isChess960 */) {
 
-	ElapsedTimer time;
-    time.reset();
+    const auto start = now();
 #endif
 
-	Position  p;
     StateInfo st;
+	Position  p;
 
 #if STOCKFISH
-    p.set(fen, isChess960, &st);
+    if (auto err = p.set(fen, isChess960, &st))
+        return {*err};
+
     return perft<true>(p, depth);
 #else
-    p.set(fen, &st);
+    if (auto err = p.set(fen, &st))
+        return {*err};
 
 	// 🌈 やねうら王では、NPS(leaf nodeの数/elapsed)と計測に要した時間も出力する。
 	auto nodes = perft<true>(p, depth);
-    auto elapsed = time.elapsed() + 1; // ゼロ割防止のために +1
+    auto elapsed = now() - start + 1; // ゼロ割防止のために +1
 
 	sync_cout << "Elapsed Time = " << elapsed << " [ms]" << sync_endl;
     sync_cout << 1000 * nodes / elapsed << " NPS" << sync_endl;

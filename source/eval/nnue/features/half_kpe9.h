@@ -1,11 +1,11 @@
 ﻿// NNUE評価関数の入力特徴量HalfKPE9の定義
 
-#ifndef CLASSIC_NNUE_FEATURES_HALF_KPE9_H
-#define CLASSIC_NNUE_FEATURES_HALF_KPE9_H
+#ifndef CLASSIC_NNUE_FEATURES_HALF_KPE9_H_INCLUDED
+#define CLASSIC_NNUE_FEATURES_HALF_KPE9_H_INCLUDED
 
 #include "../../../config.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../../../evaluate.h"
 #include "features_common.h"
@@ -23,7 +23,7 @@ class HalfKPE9 {
   static constexpr const char* kName =
       (AssociatedKing == Side::kFriend) ? "HalfKPE9(Friend)" : "HalfKPE9(Enemy)";
   // 評価関数ファイルに埋め込むハッシュ値
-  static constexpr std::uint32_t kHashValue =
+  static constexpr u32 kHashValue =
       0x5D69D5B9u ^ (AssociatedKing == Side::kFriend);
   // 特徴量の次元数
   static constexpr IndexType kDimensions =
@@ -42,7 +42,7 @@ class HalfKPE9 {
 
   // 特徴量のうち、一手前から値が変化したインデックスのリストを取得する
   static void AppendChangedIndices(const Position& pos, Color perspective,
-                                   IndexList* removed, IndexList* added);
+                                   IndexList* removed, IndexList* added, const Eval::DirtyPiece& dp);
 
   // 玉の位置とBonaPieceと利き数から特徴量のインデックスを求める
   static IndexType MakeIndex(Square sq_k, BonaPiece p, int effect1, int effect2);
@@ -56,6 +56,6 @@ class HalfKPE9 {
 } // namespace Eval::NNUE::Features
 } // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif

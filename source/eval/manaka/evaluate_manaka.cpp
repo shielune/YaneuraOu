@@ -333,7 +333,7 @@ void add_options(OptionsMap& options, ThreadPool&) {
 	}));
 
 	// 評価関数ファイル名。NNUE は WASM の時だけ持つが、Manaka は常に持つ。
-	// 絶対パスなら EvalDir に関係なくその指定が使われる (Path::Combine の作法)。
+	// 絶対パスなら EvalDir に関係なくその指定が使われる (std::filesystem::path の operator/ の作法)。
 	options.add("EvalFile", Option(g_eval_file.c_str(), [](const Option& o) {
 		const std::string file = (std::string)o;
 		if (file != g_eval_file)
@@ -351,7 +351,10 @@ void load_eval() {
 	if (g_loaded)
 		return;
 
-	const std::string path = Path::Combine(Path::Combine(Directory::GetBinaryFolder(), g_eval_dir), g_eval_file);
+	// upstream で Path::Combine / Directory::GetBinaryFolder() が無くなったので std::filesystem で結合する。
+	// operator/ も右辺が絶対パスなら右辺だけになるので、EvalDir / EvalFile の扱いは従来と同じ。
+	const std::string path =
+	    (CommandLine::get_binary_directory() / path_from_utf8(g_eval_dir) / path_from_utf8(g_eval_file)).u8string();
 	sync_cout << "info string loading eval file : " << path << sync_endl;
 
 	std::string                      err;

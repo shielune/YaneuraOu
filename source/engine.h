@@ -3,13 +3,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include "misc.h"
 #include "evaluate.h"
 //#include "nnue/network.h"
 #include "numa.h"
@@ -18,6 +21,7 @@
 //#include "syzygy/tbprobe.h"  // for Stockfish::Depth
 #include "thread.h"
 #include "tt.h"
+#include "types.h"
 #include "usioption.h"
 
 namespace YaneuraOu {
@@ -92,7 +96,7 @@ public:
 			"usinewgame"コマンドが送られてきた時の応答。
 			毎局、開始時にGUI側から送られてくるので1局ごとに行う探索部の初期化などはここに書く。
 
-		verify_networks()
+		verify_network()
 			評価関数部の初期化が行えているかのチェックを行う。
 
 		save_network()
@@ -127,10 +131,11 @@ public:
     virtual ~IEngine() { wait_for_search_finished(); }
 
 	// "perft"コマンド。perftとは、performance testの略。
+	// 成功時はノード数、局面設定に失敗した場合はPositionSetErrorを返す。
 #if STOCKFISH
-    std::uint64_t perft(const std::string& fen, Depth depth, bool isChess960);
+    std::variant<u64, PositionSetError> perft(const std::string& fen, Depth depth, bool isChess960);
 #else
-    virtual std::uint64_t perft(const std::string& fen, Depth depth) = 0;
+    virtual std::variant<u64, PositionSetError> perft(const std::string& fen, Depth depth) = 0;
 #endif
 
 	// "go"コマンド。ThreadPoolのmain threadに対して探索を開始(start_searching)する。
@@ -158,7 +163,8 @@ public:
     // modifiers
 
 	// NumaConfigをエンジンオプションの"NumaPolicy"から設定する。
-    virtual void set_numa_config_from_option(const std::string& o) = 0;
+	// 値が不正な場合は構成を変更せずfalseを返す。
+    virtual bool set_numa_config_from_option(const std::string& o) = 0;
 
 	// options["Threads"]やoptions["NumaPolicy"]が変更になった時に呼び出され、
     // スレッドを必要な数だけ再生成するhandler。
@@ -173,7 +179,7 @@ public:
 
 	// options["USI_Hash"]などの置換表サイズに対して、それが変更された時に呼び出されるhandler。
     // 置換表的なものを使用するときは、これをoverrideすると便利。
-	virtual void set_tt_size(size_t mb) = 0;
+	virtual void set_tt_size(usize mb) = 0;
 
 	// USIの"ponderhit"に対するhandler。
 	// 💡 "ponderhit"に対して set_ponderhit(false)として呼び出される。
@@ -195,7 +201,8 @@ public:
     virtual void set_on_update_full(std::function<void(const InfoFull&)>&&) {}
     virtual void set_on_iter(std::function<void(const InfoIter&)>&&) {}
     virtual void set_on_bestmove(std::function<void(std::string_view, std::string_view)>&&) {}
-    virtual void set_on_verify_networks(std::function<void(std::string_view)>&&) {}
+    virtual void set_on_start(std::function<void()>&&) {}
+    virtual void set_on_verify_network(std::function<void(std::string_view)>&&) {}
 
 #if !STOCKFISH
     virtual void set_on_update_string(std::function<void(std::string_view)>&&) {}
@@ -210,23 +217,19 @@ public:
 	// ネットワーク(評価関数)関連
 
 	// ネットワークの読み込みができているか確認する。
-	// 読み込まれていなければload_networks()で読み込む。
-    virtual void verify_networks() const {}
+	// 読み込まれていなければload_network()で読み込む。
+    virtual void verify_network() const {}
 
 	// TODO あとで考える。
 #if STOCKFISH
     // 評価関数の読み込み
-    void load_networks();
-
-	// Stockfishは大きいnetworkと小さいnetworkとがある。それぞれの読み込み。
-
-    void load_big_network(const std::string& file);
-    void load_small_network(const std::string& file);
+    std::unique_ptr<Eval::NNUE::Network> get_default_network();
+    void load_network(const std::filesystem::path& file);
 #endif
     // 評価関数パラメーターを保存する。
     // "export_net"コマンドに対して呼び出される。
 #if STOCKFISH
-    void         save_network(const std::pair<std::optional<std::string>, std::string> files[2]);
+    void         save_network(const std::optional<std::filesystem::path>& file);
 #else
     // 評価関数をファイルに保存する。
     virtual void save_network(const std::string& path) = 0;
@@ -262,8 +265,8 @@ public:
 
 	// スレッド割り当てをした時などのメッセージ出力用handler。
 
-	virtual std::vector<std::pair<size_t, size_t>> get_bound_thread_count_by_numa_node() const {
-        return std::vector<std::pair<size_t, size_t>>();
+	virtual std::vector<std::pair<usize, usize>> get_bound_thread_count_by_numa_node() const {
+        return std::vector<std::pair<usize, usize>>();
     }
 	virtual std::string get_numa_config_as_string() const { return ""; }
     virtual std::string numa_config_information_as_string() const { return ""; }
@@ -276,7 +279,7 @@ public:
     // outputPathへ書き出す。対応していないEngine派生classではfalseを返す。
     virtual bool qsearch_psv(const std::string& inputPath,
                              const std::string& outputPath,
-                             size_t             workerCount,
+                             usize             workerCount,
                              std::string&       message) {
         message = "qsearch_psv is not supported by this engine.";
         return false;
@@ -303,10 +306,10 @@ public:
     OptionsMap                                         options;
     ThreadPool                                         threads;
     TranspositionTable                                 tt;
-    LazyNumaReplicatedSystemWide<Eval::NNUE::Networks> networks;
+    LazyNumaReplicatedSystemWide<Eval::NNUE::Network> network;
 
     Search::SearchManager::UpdateContext  updateContext;
-    std::function<void(std::string_view)> onVerifyNetworks;
+    std::function<void(std::string_view)> onVerifyNetwork;
     std::map<NumaIndex, SharedHistories>  sharedHists;
 #else
 	// スレッドプール(探索用スレッド)の取得
@@ -364,8 +367,8 @@ class Engine: public IEngine {
    public:
     Engine();
 
-    virtual std::uint64_t perft(const std::string& fen,
-                                Depth              depth /*, bool isChess960 */) override;
+    virtual std::variant<u64, PositionSetError>
+    perft(const std::string& fen, Depth depth /*, bool isChess960 */) override;
 
     virtual void go(Search::LimitsType& limits) override;
     virtual void stop() override;
@@ -374,9 +377,9 @@ class Engine: public IEngine {
     virtual std::optional<PositionSetError> set_position(const std::string&              sfen,
                                                          const std::vector<std::string>& moves) override;
 
-    virtual void set_numa_config_from_option(const std::string& o) override;
+    virtual bool set_numa_config_from_option(const std::string& o) override;
     virtual void resize_threads() override;
-    virtual void set_tt_size(size_t mb) override;
+    virtual void set_tt_size(usize mb) override;
     virtual void set_ponderhit(bool b) override;
     virtual void search_clear() override;
 
@@ -385,12 +388,13 @@ class Engine: public IEngine {
     virtual void set_on_iter(std::function<void(const InfoIter&)>&&) override final;
     virtual void
     set_on_bestmove(std::function<void(std::string_view, std::string_view)>&&) override final;
-    virtual void set_on_verify_networks(std::function<void(std::string_view)>&&) override;
+    virtual void set_on_start(std::function<void()>&&) override final;
+    virtual void set_on_verify_network(std::function<void(std::string_view)>&&) override;
     virtual void set_on_update_string(std::function<void(std::string_view)>&&) override final;
     virtual std::function<void(std::string_view, std::string_view)>
     get_on_bestmove() override final;
 
-    virtual void verify_networks() const override {}
+    virtual void verify_network() const override {}
     virtual void save_network(const std::string& path) override {}
 
     virtual void              trace_eval() const override;
@@ -403,7 +407,7 @@ class Engine: public IEngine {
     virtual std::string sfen() const override;
     virtual void        flip() override;
     virtual std::string visualize() const override;
-	virtual std::vector<std::pair<size_t, size_t>> get_bound_thread_count_by_numa_node() const override;
+	virtual std::vector<std::pair<usize, usize>> get_bound_thread_count_by_numa_node() const override;
     virtual std::string get_numa_config_as_string() const override;
     virtual std::string numa_config_information_as_string() const override;
     virtual std::string thread_allocation_information_as_string() const override;
@@ -414,7 +418,7 @@ class Engine: public IEngine {
     // 標準Engine基底classは未対応扱いとし、標準探索部(YaneuraOuEngine)でoverrideする。
     virtual bool qsearch_psv(const std::string& inputPath,
                              const std::string& outputPath,
-                             size_t             workerCount,
+                             usize             workerCount,
                              std::string&       message) override {
         message = "qsearch_psv is not supported by this engine.";
         return false;
@@ -451,6 +455,10 @@ class Engine: public IEngine {
 #endif   
     // 📌 エンジンを実装するために必要な最低限のコンポーネント
 
+    // 設定変更ではリソースを作り直さず、派生エンジンのisready()でまとめて反映する。
+    bool deferResourceOptions = false;
+    std::optional<NumaConfig> pendingNumaConfig;
+
     //const std::string binaryDirectory;
     // 📝 やねうら王では、CommandLine::gから取得できるので不要。
 
@@ -475,14 +483,14 @@ class Engine: public IEngine {
 	//     置換表を実際に確保しないなら、使用メモリは無視できると思うのでこうしておく。
     TranspositionTable tt;
 
-    //LazyNumaReplicated<Eval::NNUE::Networks> networks;
+    //LazyNumaReplicated<Eval::NNUE::Network> network;
     // TODO : あとで検討する
 
     // 読み筋を出力するためのlistener
     Search::UpdateContext updateContext;
 
     // TODO : あとで検討する
-    std::function<void(std::string_view)> onVerifyNetworks;
+    std::function<void(std::string_view)> onVerifyNetwork;
 
     std::map<NumaIndex, SharedHistories>  sharedHists;
 
@@ -522,8 +530,8 @@ class EngineWrapper: public IEngine {
     // Engineのoverride
     // 📌 すべてset_engine()で渡されたengineに委譲する。
 
-    virtual std::uint64_t perft(const std::string& fen,
-                                Depth              depth /*, bool isChess960 */) override {
+    virtual std::variant<u64, PositionSetError>
+    perft(const std::string& fen, Depth depth /*, bool isChess960 */) override {
         return engine->perft(fen, depth);
     }
 
@@ -536,9 +544,9 @@ class EngineWrapper: public IEngine {
         return engine->set_position(sfen, moves);
     }
 
-    virtual void set_numa_config_from_option(const std::string& o) override { engine->set_numa_config_from_option(o); }
+    virtual bool set_numa_config_from_option(const std::string& o) override { return engine->set_numa_config_from_option(o); }
     virtual void resize_threads() override { engine->resize_threads(); }
-    virtual void set_tt_size(size_t mb) override { engine->set_tt_size(mb); }
+    virtual void set_tt_size(usize mb) override { engine->set_tt_size(mb); }
     virtual void set_ponderhit(bool b) override { engine->set_ponderhit(b); }
     virtual void search_clear() override { engine->search_clear(); }
 
@@ -555,8 +563,11 @@ class EngineWrapper: public IEngine {
     set_on_bestmove(std::function<void(std::string_view, std::string_view)>&& f) override final {
         engine->set_on_bestmove(std::move(f));
     }
-    virtual void set_on_verify_networks(std::function<void(std::string_view)>&& f) override {
-        engine->set_on_verify_networks(std::move(f));
+    virtual void set_on_start(std::function<void()>&& f) override final {
+        engine->set_on_start(std::move(f));
+    }
+    virtual void set_on_verify_network(std::function<void(std::string_view)>&& f) override {
+        engine->set_on_verify_network(std::move(f));
     }
     virtual void set_on_update_string(std::function<void(std::string_view)>&& f) override final {
         engine->set_on_update_string(std::move(f));
@@ -565,7 +576,7 @@ class EngineWrapper: public IEngine {
         return engine->get_on_bestmove();
     }
 
-    virtual void verify_networks() const override { engine->verify_networks(); }
+    virtual void verify_network() const override { engine->verify_network(); }
     virtual void save_network(const std::string& path) override { engine->save_network(path); }
 
     virtual void trace_eval() const override { engine->trace_eval(); }
@@ -580,7 +591,7 @@ class EngineWrapper: public IEngine {
     virtual void        flip() override { return engine->flip(); }
     virtual std::string visualize() const override { return engine->visualize(); }
 
-    virtual std::vector<std::pair<size_t, size_t>>
+    virtual std::vector<std::pair<usize, usize>>
     get_bound_thread_count_by_numa_node() const override {
         return engine->get_bound_thread_count_by_numa_node();
     }
@@ -600,7 +611,7 @@ class EngineWrapper: public IEngine {
 #if !STOCKFISH
     virtual bool qsearch_psv(const std::string& inputPath,
                              const std::string& outputPath,
-                             size_t             workerCount,
+                             usize             workerCount,
                              std::string&       message) override {
         return engine->qsearch_psv(inputPath, outputPath, workerCount, message);
     }

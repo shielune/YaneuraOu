@@ -1,12 +1,14 @@
-﻿#ifndef __NN_ONNX_RUNTIME_H_INCLUDED__
-#define __NN_ONNX_RUNTIME_H_INCLUDED__
+﻿#ifndef NN_ONNX_RUNTIME_H_INCLUDED
+#define NN_ONNX_RUNTIME_H_INCLUDED
 #include "../../config.h"
+#include "../../extra/tools.h"
 
 #if defined(YANEURAOU_ENGINE_DEEP)
 #if defined(ONNXRUNTIME)
 
 // ONNX Runtimeを使う場合。
-// "docs/解説.txt"を確認すること。
+// やねうら王Wiki「ふかうら王のビルド手順」を確認すること。
+// https://github.com/yaneurao/YaneuraOu/wiki/ふかうら王のビルド手順
 
 #include <onnxruntime_cxx_api.h>
 
@@ -42,5 +44,5 @@ namespace Eval::dlshogi {
 
 #endif // defined(ONNXRUNTIME)
 #endif // defined(YANEURAOU_ENGINE_DEEP)
-#endif // ndef __NN_ONNX_RUNTIME_H_INCLUDED__
+#endif // ndef NN_ONNX_RUNTIME_H_INCLUDED
 

@@ -1,8 +1,10 @@
-﻿#ifndef __UCTSEARCH_H_INCLUDED__
-#define __UCTSEARCH_H_INCLUDED__
+﻿#ifndef UCTSEARCH_H_INCLUDED
+#define UCTSEARCH_H_INCLUDED
 
 #include "../../config.h"
 #if defined(YANEURAOU_ENGINE_DEEP)
+
+#include <mutex>
 #include "../../position.h"
 #include "../../mate/mate.h"
 
@@ -59,6 +61,9 @@ public:
 	// 各探索スレッドは探索開始時に(nn_forward()の呼び出しまでに)、この関数を呼び出してスレッドとGPUとを紐付けないといけない。
 	void set_device() { nn->set_device(gpu_id); }
 
+	// 同一デバイスのスレッド間でバッチ収集を直列化する。
+	std::unique_lock<std::mutex> acquire_gather_lock() { return std::unique_lock<std::mutex>(mutex_gather); }
+
 	// やねうら王では、スレッドの生成～解体はThreadクラスが行うので、これらはコメントアウト。
 
 	//	void Run();
@@ -113,6 +118,7 @@ private:
 
 	// ↑のnnにアクセスする時のmutex
 	std::mutex mutex_gpu;
+	std::mutex mutex_gather;
 
 	// --- やねうら王独自拡張
 
@@ -123,6 +129,11 @@ private:
 	// nnが保持している入力特徴量仕様。
 	std::string model_architecture;
 };
+
+#if defined(ENABLE_NN_CACHE)
+// NN推論結果cacheの容量指定。0なら無効。
+void SetDnnCacheSize(size_t capacity);
+#endif
 
 // leaf nodeまでに辿ったNodeを記録しておく構造体。
 // ※　dlshogiではtrajectory_t
@@ -166,6 +177,10 @@ struct BatchElement {
 	HASH_KEY key;       // この局面のhash key
 #endif
 
+#if defined(ENABLE_NN_CACHE)
+	HASH_KEY policy_value_cache_key; // NN推論結果cache用。HASH_KEY_BITSに応じたKey型。
+#endif
+
 	// 通常の探索では、このポインターはNodeVisitor::value_win を指している。
 	float* value_win; // leaf nodeでのvalue_winの値(これを辿ってきたNodeに対して符号を反転させながら伝播させていく)
 };
@@ -201,7 +216,7 @@ public:
 		policy_value_batch = new BatchElement[policy_value_batch_maxsize];
 
 #ifdef MAKE_BOOK
-		policy_value_book_key = new Key[policy_value_batch_maxsize];
+		policy_value_book_key = new HASH_KEY[policy_value_batch_maxsize];
 #endif
 	}
 
@@ -284,7 +299,7 @@ private:
 	ChildNumType SelectMaxUcbChild(ChildNode* parent, Node* current);
 
 	// Evaluateを呼び出すリスト(queue)に追加する。
-	void QueuingNode(const Position* pos, Node* node, float* value_win);
+	bool QueuingNode(const Position* pos, Node* node, float* value_win);
 
 	// ノードを評価
 	void EvalNode();
@@ -326,7 +341,7 @@ private:
 	BatchElement* policy_value_batch;
 
 #ifdef MAKE_BOOK
-	Key* policy_value_book_key;
+	HASH_KEY* policy_value_book_key;
 #endif
 
 	// features1[],features2[],policy_value_batch[],policy_value_book_key[],の次に使用するindexを示している。
@@ -354,4 +369,4 @@ void select_nth_child_node(const Node* uct_node, int n , int (&indices)[MAX_MOVE
 
 #endif
 
-#endif // ndef __UCTSEARCH_H_INCLUDED__
+#endif // ndef UCTSEARCH_H_INCLUDED

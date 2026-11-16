@@ -1,28 +1,48 @@
-﻿#include <cstdlib>
+﻿#include "usi.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <deque>
+#include <initializer_list>
+#include <iterator>
+#include <optional>
 #include <sstream>
-#include <queue>
+#include <string_view>
+#include <filesystem>
+#include <utility>
+#include <variant>
 #include <vector>
 
-#include "types.h"
-#include "usi.h"
-#include "position.h"
-#include "search.h"
-#include "thread.h"
-#include "misc.h"
-#include "testcmd/unit_test.h"
 #include "benchmark.h"
 #include "engine.h"
+#include "memory.h"
 #include "movegen.h"
 #include "evaluate.h"
+#include "position.h"
+#include "score.h"
+#include "search.h"
+#include "types.h"
+#include "usioption.h"
+
+#if !STOCKFISH
+#include "extra/system_io.h"
+#include "extra/tools.h"
+#include "testcmd/unit_test.h"
 
 #if defined(__EMSCRIPTEN__)
 // yaneuraou.wasm
 #include <emscripten.h>
 #endif
+#endif
 
 
 namespace YaneuraOu {
+
+using Time = std::chrono::steady_clock;
+using ms   = std::chrono::milliseconds;
 
 // benchmark用のコマンドその2
 constexpr auto BenchmarkCommand = "speedtest";
@@ -63,33 +83,19 @@ struct overload : Ts... {
 template<typename... Ts>
 overload(Ts...) -> overload<Ts...>;
 
-#if defined(__EMSCRIPTEN__)
-// yaneuraou.wasm
-// USIEngine::loop()から登録される、コマンドの宛先。
-// 📝 shipしている3種のentry point(YaneuraOuEngine / YaneuraOuMateEngine /
-//     TanukiMateEngine)のいずれから起動されても、loop()は必ず通るので
-//     ここ1箇所で受けられる。
-static USIEngine* g_wasm_usi = nullptr;
-#endif
-
 // string_viewで受け取ったものを"\n"で複数行に分割して、それをinfo stringとして出力する。
 void USIEngine::print_info_string(std::string_view str) {
 	sync_cout_start();
 	for (auto& line : split(str, "\n"))
-	{
 		if (!is_whitespace(line))
-		{
 			std::cout << "info string " << line << '\n';
-		}
-	}
 	sync_cout_end();
 }
 
 #if STOCKFISH
-UCIEngine::UCIEngine(int argc, char** argv) :
-    engine(argv[0]),
-    // 📌 やねうら王では、Engine engineは、あとからset_engine()で渡すように変更した。
-    cli(argc, argv) {
+USIEngine::USIEngine(CommandLine cli_) :
+    engine(cli_.argc > 0 ? std::optional{path_from_utf8(cli_.argv[0])} : std::nullopt),
+    cli(std::move(cli_)) {
     // 📌  やねうら王では、CommandLine::gが持つようになったのでこのclassには持たせない。
 
     engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
@@ -101,7 +107,7 @@ UCIEngine::UCIEngine(int argc, char** argv) :
     //     やねうら王では、この機能、サポートしない。
 
     // すべての読み筋出力listenerを初期化する。
-    //init_search_update_listeners();
+    init_search_update_listeners();
     // 📝 やねうら王では、外部からEngine派生classをset_engine()でセットするので、
     //     そのタイミングで呼び出さないと駄目。
 }
@@ -122,7 +128,7 @@ void USIEngine::set_engine(IEngine& _engine) {
     //     期待するコードになっているので呼び出して初期化してやる。
     //     また、その時にエンジンオプションを追加する。
 
-#if defined(USE_CLASSIC_EVAL)
+#if defined(USE_CLASSIC_EVAL) || defined(EVAL_SFNN)
     Eval::add_options(engine.get_options(), engine.get_threads());
 #endif
 
@@ -137,6 +143,12 @@ void USIEngine::set_engine(IEngine& _engine) {
             print_info_string(*str);
     });
 
+#if defined(ENGINE_OPTIONS)
+    // 🌈 ENGINE_OPTIONSマクロで指定されたエンジンオプションを反映させる。
+    //     上書き対象のオプションがすべて生えたあとに行う必要があるので、ここで呼び出す。
+    engine.get_options().set_engine_options(ENGINE_OPTIONS);
+#endif
+
     // 📝 セットされたEngineに対してlisterを設定する必要がある。
     //     Stockfishは、USIEngineのコンストラクタで行っているが、
     //     やねうら王ではEngineの差し替えができるのでこのタイミング。
@@ -149,18 +161,65 @@ void USIEngine::set_engine(IEngine& _engine) {
 void USIEngine::init_search_update_listeners() {
     engine.set_on_iter([](const auto& i) { on_iter(i); });
     engine.set_on_update_no_moves([](const auto& i) { on_update_no_moves(i); });
+#if STOCKFISH
     engine.set_on_update_full(
-      [this](const auto& i) { on_update_full(i /*, engine.get_options()["UCI_ShowWDL"] */); });
-    engine.set_on_bestmove([](const auto& bm, const auto& p) { on_bestmove(bm, p); });
+      [this](const auto& i) { on_update_full(i, engine.get_options()["UCI_ShowWDL"]); });
+#else
+    engine.set_on_update_full([](const auto& i) { on_update_full(i); });
+#endif
+#if !STOCKFISH
     engine.set_on_update_string([](const auto& i) { on_update_string(i); });
-    engine.set_on_verify_networks([](const auto& s) { print_info_string(s); });
+#endif
+    engine.set_on_start([]() {});
+    engine.set_on_bestmove([](const auto& bm, const auto& p) { on_bestmove(bm, p); });
+    engine.set_on_verify_network([](const auto& s) { print_info_string(s); });
 }
+
+#if !STOCKFISH
+// 標準入力から1行もらう。Ctrl+Zが来れば"quit"が来たものとする。
+// また先行入力でqueueに積んでおくことができる。(次のread_command()で取り出される)
+std::string USIEngine::read_command()
+{
+	std::string cmd;
+	if (pending_commands.empty())
+	{
+		if (!std::getline(std::cin, cmd)) // 入力が来るかEOFがくるまでここで待機する。
+			cmd = "quit";
+	} else {
+		// 積んであるコマンドがあるならそれを実行する。
+		// 尽きれば"quit"だと解釈してdoループを抜ける仕様にすることはできるが、
+		// そうしてしまうとgoコマンド(これはノンブロッキングなので)の最中にquitが送られてしまう。
+		// ただ、
+		// YaneuraOu-mid.exe bench,quit
+		// のようなことは出来るのでPGOの役には立ちそうである。
+		cmd = pending_commands.front();
+		pending_commands.pop();
+	}
+	return cmd;
+}
+#endif
 
 // USI応答部ループ
 void USIEngine::loop()
 {
+    set_console_utf8();
+#if STOCKFISH
+    std::string cmd; // diff:ignore
+
+    for (int i = 1; i < cli.argc; ++i)
+        cmd += std::string(cli.argv[i]) + " ";
+
+    do
+    {
+        // Wait for an input or an end-of-file (EOF) indication.
+        // 入力またはファイル終端を待つ。
+        if (cli.argc <= 1 // diff:ignore
+            && !getline(std::cin, cmd))  // Wait for an input or an end-of-file (EOF) indication
+            cmd = "quit";
+    } while (!usi_cmdexec(cmd) && cli.argc <= 1); // diff:ignore
+#else
     // 起動時コマンドは、マルチインスタンス時に注入先を選べるよう、
-    // 選択されたEngineのentry point側からstd_inputへ積む。
+    // 選択されたEngineのentry point側からコマンドキューへ積む。
 
 #if !defined(__EMSCRIPTEN__)
 
@@ -168,7 +227,7 @@ void USIEngine::loop()
 	while (true)
 	{
 		// 標準入力から1行取得。
-		std::string cmd = std_input.input();
+		std::string cmd = read_command();
 
 		// "quit"が来たらwhileを抜ける
 		if (usi_cmdexec(cmd))
@@ -181,38 +240,18 @@ void USIEngine::loop()
 #else
 	// yaneuraOu.wasm
 	// ここでループしてしまうと、ブラウザのメインスレッドがブロックされてしまう。
-	// 代わりに、このインスタンスをusi_command()から到達できるように登録しておく。
-	// 📝 このあとentry point(engine_main)へ戻り、そこでengine/usiのunique_ptrが
-	//     意図的にrelease()される。EXIT_RUNTIME=0なのでmain()を抜けても
-	//     ランタイムは動き続け、JS側からのccallでこのインスタンスが使われる。
-	g_wasm_usi = this;
 #endif
-}
+#endif // diff:ignore
+} // diff:ignore
 
 // USIEngine::loop()の下請け。
 // 📝 wasm版対応のため、関数を分離する必要があった。
-bool USIEngine::usi_cmdexec(const std::string& cmd) {
+bool USIEngine::usi_cmdexec(const std::string& cmd) { // diff:ignore
 
-#if STOCKFISH
-    string token, cmd;
-    for (int i = 1; i < cli.argc; ++i)
-        cmd += std::string(cli.argv[i]) + " ";
-
-    do
-    {
-
-        if (cli.argc == 1 && !getline(std::cin, cmd))  // Wait for an input or an end-of-file (EOF) indication
-                                                       // 入力またはファイル終端（EOF）の指示を待つ
-            cmd = "quit";
-
-        token.clear();  // Avoid a stale if getline() returns nothing or a blank line
-                        // getline() が何も返さない場合や空行を返す場合に備えて、古い（不正確な）データを回避する
-#else
-    std::string token;
-#endif
-
+    currentCmd = cmd;
     std::istringstream is(cmd);
-    is >> std::skipws >> token;
+    std::string token; // diff:ignore
+    is >> token;
 
 #if STOCKFISH
     if (token == "quit" || token == "stop")
@@ -250,9 +289,9 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
 #else
     {
         // Stochastic Ponder中にhitした。
-        if (engine.get_options().count("Stochastic_Ponder")
-            && engine.get_options()["Stochastic_Ponder"])
+        if (stochastic_ponder_rewound)
         {
+            const TimePoint ponderhitTime = now();
 			// 思考をいったん停止。このときbestmoveを出力されると困るので抑制してから。
             auto on_bestmove = engine.get_on_bestmove();
             engine.set_on_bestmove([](auto,auto) {});
@@ -265,11 +304,16 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
             std::istringstream iss1(last_position_cmd_string);
             iss1 >> token; // 先頭の"position"を捨てる。
             position(iss1);
+            stochastic_ponder_rewound = false;
 
 			std::istringstream iss2(last_go_cmd_string);
             iss2 >> token; // 先頭の"go"を捨てる。
-            iss2 >> token; // "ponder"の文字列も捨てる。("go ponder"と連続してきているはず。
-            go(iss2);
+            // ponderの位置に依存せず制限を読み直し、通常探索として再開する。
+            // 開始時刻は処理冒頭で保存したponderhit時刻とし、探索停止待ちや局面復元の時間も含める。
+            auto limits = parse_limits(iss2);
+            limits.startTime  = ponderhitTime;
+            limits.ponderMode = false;
+            engine.go(limits);
 		}
 		else
 	        engine.set_ponderhit(false);
@@ -348,7 +392,14 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
 
     // 📝 flipは盤面を180°回転させたsfenを出力する。
     else if (token == "flip")
+#if STOCKFISH
+    {
+        if (auto err = engine.flip())
+            terminate_on_critical_error(err->what());
+    }
+#else
         engine.flip();
+#endif
 
     // ベンチコマンド(これは常に使える)
     else if (token == "bench")
@@ -374,29 +425,30 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
     else if (token == "export_net")
     {
 #if STOCKFISH
-        std::pair<std::optional<std::string>, std::string> files[2];
+        std::optional<std::filesystem::path> file;
+        std::string                          filename;
 
-        if (is >> std::skipws >> files[0].second)
-            files[0].first = files[0].second;
+        if (is >> filename)
+            file = path_from_utf8(filename);
 
-        if (is >> std::skipws >> files[1].second)
-            files[1].first = files[1].second;
+        engine.save_network(file);
 #else
     std::string file;
-    is >> std::skipws >> file;
+    is >> file;
     engine.save_network(file);
 #endif
     }
 
 #if STOCKFISH
     else if (token == "--help" || token == "help" || token == "--license" || token == "license")
-        sync_cout << "\nStockfish is a powerful chess engine for playing and analyzing."
-                        "\nIt is released as free software licensed under the GNU GPLv3 License."
-                        "\nStockfish is normally used with a graphical user interface (GUI) and implements"
-                        "\nthe Universal Chess Interface (UCI) protocol to communicate with a GUI, an API, etc."
-                        "\nFor any further information, visit https://github.com/official-stockfish/Stockfish#readme"
-                        "\nor read the corresponding README.md and LICENSE files distributed along with this program.\n"
-                    << sync_endl;
+            sync_cout
+              << "\nStockfish is a powerful chess engine for playing and analyzing."
+                 "\nIt is released as free software licensed under the GNU GPLv3 License."
+                 "\nStockfish is normally used with a graphical user interface (GUI) and implements"
+                 "\nthe Universal Chess Interface (UCI) protocol to communicate with a GUI, an API, etc."
+                 "\nFor any further information, visit https://github.com/official-stockfish/Stockfish#readme"
+                 "\nor read the corresponding README.md and Copying.txt files distributed along with this program.\n"
+              << sync_endl;
 
     else if (!token.empty() && token[0] != '#')
         sync_cout << "Unknown command: '" << cmd << "'. Type help for more information." << sync_endl;
@@ -505,27 +557,23 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
 
 			auto ss = engine.get_options().set_option_if_exists(token, value);
             sync_cout << ss << sync_endl;
+
         }
     }
 #endif
 
-
 #if STOCKFISH
-    } while (token != "quit" && cli.argc == 1);  // The command-line arguments are one-shot
-#else
-    // "quit"に対しては、この関数はtrueを返す。
-    return token == "quit";
+	// diffを抑制するため
+		} while (token != "quit" && cli.argc <= 1);  // The command-line arguments are one-shot
 #endif
+
+    // "quit"に対しては、この関数はtrueを返す。
+    return token == "quit"; // diff:ignore
 }
 
 
 // コマンドラインを解析して、Search::LimitsTypeに反映させて返す。
 Search::LimitsType USIEngine::parse_limits(std::istream& is) {
-
-#if STOCKFISH
-#else
-    const auto& options = engine.get_options();
-#endif
 
 	Search::LimitsType limits;
 	std::string        token;
@@ -540,10 +588,14 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
     // エンジンオプションによる探索制限(0なら無制限)
     // このあと、depthもしくはnodesが指定されていたら、その値で上書きされる。(この値は無視される)
 
+#if !STOCKFISH
+    const auto& options = engine.get_options();
     limits.depth = options.count("DepthLimit") ? (int) options["DepthLimit"] : 0;
     limits.nodes = options.count("NodesLimit") ? (u64) options["NodesLimit"] : 0;
+#endif
 
 	while (is >> token)
+    {
 
 		/* 📓 searchmovesとは？
 		
@@ -560,7 +612,6 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
 		{
 			// 残りの指し手すべてをsearchMovesに突っ込む。
 			while (is >> token)
-			{
 #if STOCKFISH
 				limits.searchmoves.push_back(to_lower(token));
 #else
@@ -568,7 +619,7 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
 				// "P*5e"のように打ち駒の駒種を大文字で表すので、大文字小文字を保持する。
 				limits.searchmoves.push_back(token);
 #endif
-			}
+            break;
 		}
 
 		// 先手、後手の残り時間。[ms]
@@ -633,16 +684,22 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
 #else
         else if (token == "mate")
         {
-            token.clear();
-            is >> token;
-			// 💡 USIでは"infinite"が指定されることがある。
-			//     あるいは何も書かれていなければ"infinite"扱い。
-            if (token == "infinite" || token == "")
+            // USIでは引数を省略した場合も無制限として扱う。
+            if (!(is >> token))
+            {
+                limits.mate = INT32_MAX;
+                break;
+            }
+
+            if (token == "infinite")
                 limits.mate = INT32_MAX;
             else
-                // 📝 USIプロトコルでは、UCIと異なり、ここは手数ではなく、
-				//     探索に使う時間[ms]が指定されている。
-                limits.mate = stoi(token);
+            {
+                // USIのmateの数値は探索時間（ミリ秒）。
+                std::istringstream mateLimit(token);
+                if (!(mateLimit >> limits.mate) || !mateLimit.eof())
+                    terminate_on_critical_error("Invalid argument for 'mate'");
+            }
         }
 #endif
 
@@ -665,7 +722,17 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
 		else if (token == "explain")
 			limits.explain = true;
 
-	return limits;
+        if (is.fail())
+            terminate_on_critical_error("Invalid argument for '" + token + "'");
+    }
+
+    // Sanitize negative time values, zero for stm means no TM
+    // 負の残り時間と固定思考時間を補正する。手番側の残り時間がゼロなら時間管理を使わない。
+    for (auto* t : {&limits.time[WHITE], &limits.time[BLACK], &limits.movetime})
+        if (*t < 0)
+            *t = 1;
+
+    return limits;
 }
 
 // --------------------
@@ -689,23 +756,35 @@ void USIEngine::go(std::istringstream& is)
 		engine.go(limits);
 #else
 	{
-		// Stochastic Ponderが有効なときに"go ponder"が送られてきたら、
-		// last_position_cmd_stringから1手戻した局面に変更してからgo ponderする。
-		if (limits.ponderMode && engine.get_options().count("Stochastic_Ponder")
-			&& engine.get_options()["Stochastic_Ponder"])
-		{
-            auto s = last_position_cmd_string;
-			// 最初("position")と最後(最後の指し手)のtokenを捨てる。
+        stochastic_ponder_rewound = false;
+        // Stochastic Ponderでは、moves節の最後の指し手だけを除いて1手戻す。
+        // 履歴がなければ元の局面のまま通常のponderを行う。
+        if (limits.ponderMode && engine.get_options().count("Stochastic_Ponder")
+            && engine.get_options()["Stochastic_Ponder"])
+        {
+            std::istringstream command(last_position_cmd_string);
+            std::string token, previousPosition;
+            bool moves = false;
+            usize lastMove = std::string::npos;
+            while (command >> token)
+            {
+                if (moves)
+                    lastMove = previousPosition.size();
+                previousPosition += token + ' ';
+                if (token == "moves")
+                    moves = true;
+            }
 
-			// 最後のスペース位置
-			std::size_t last_space  = s.find_last_of(' ');
-			std::istringstream iss(s.substr(0,last_space));
-			// 先頭の"position"を捨てる
-            std::string             token;
-            iss >> token;
-
-            position(iss);
-		}
+            if (lastMove != std::string::npos)
+            {
+                previousPosition.resize(lastMove);
+                std::istringstream previous(previousPosition);
+                previous >> token;  // Skip "position".
+                                    // 先頭の"position"を読み飛ばす。
+                position(previous);
+                stochastic_ponder_rewound = true;
+            }
+        }
 
 		engine.go(limits);
 	}
@@ -716,8 +795,8 @@ void USIEngine::go(std::istringstream& is)
 void USIEngine::bench(std::istream& args) {
 
     std::string token;
-    uint64_t    num, nodes = 0, cnt = 1;
-    uint64_t    nodesSearched = 0;
+    u64         num, nodes = 0, cnt = 1;
+    u64         nodesSearched = 0;
     const auto& options       = engine.get_options();
 
     engine.set_on_update_full([&](const auto& i) {
@@ -742,12 +821,14 @@ void USIEngine::bench(std::istream& args) {
 
     for (const auto& cmd : list)
     {
+        currentCmd = cmd; // diff:ignore
         std::istringstream is(cmd);
-        is >> std::skipws >> token;
+        is >> token;
 
         if (token == "go" || token == "eval")
         {
-            std::cerr << "\nPosition: " << cnt++ << '/' << num << " (" << engine.sfen() << ")" << std::endl;
+            std::cerr << "\nPosition: " << cnt++ << '/' << num << " (" << engine.sfen() << ")"
+                      << std::endl;
             if (token == "go")
             {
                 Search::LimitsType limits = parse_limits(is);
@@ -813,15 +894,13 @@ void USIEngine::benchmark(std::istream& args) {
     static constexpr int NUM_WARMUP_POSITIONS = 3;
 
     std::string token;
-    uint64_t    nodes = 0, cnt = 1;
-    uint64_t    nodesSearched = 0;
+    u64         cnt = 1;
 
-    engine.set_on_update_full([&](const Engine::InfoFull& i) { nodesSearched = i.nodes; });
-
+    engine.set_on_update_full([](const auto&) {});
     engine.set_on_iter([](const auto&) {});
     engine.set_on_update_no_moves([](const auto&) {});
     engine.set_on_bestmove([](const auto&, const auto&) {});
-    engine.set_on_verify_networks([](const auto&) {});
+    engine.set_on_verify_network([](const auto&) {});
 
 #if !STOCKFISH
 	// USIEngine::isready()を呼び出してやらかないと"engine_options.txt"などの読み込みが行われない。
@@ -830,15 +909,8 @@ void USIEngine::benchmark(std::istream& args) {
 
     Benchmark::BenchmarkSetup setup = Benchmark::setup_benchmark(args);
 
-#if STOCKFISH
-    const int numGoCommands = count_if(setup.commands.begin(), setup.commands.end(), [](const std::string& s) { return s.find("go ") == 0; });
-#else
-	// 🤔 警告がでかねないので修正しておく。
-	const size_t numGoCommands = count_if(setup.commands.begin(), setup.commands.end(),
-                                       [](const std::string& s) { return s.find("go ") == size_t(0); });
-#endif
-
-    TimePoint totalTime = 0;
+    const auto numGoCommands = count_if(setup.commands.begin(), setup.commands.end(),
+                                             [](const std::string& s) { return s.find("go ") == 0; });
 
     // Set options once at the start.
     auto ss = std::istringstream("name Threads value " + std::to_string(setup.threads));
@@ -856,8 +928,9 @@ void USIEngine::benchmark(std::istream& args) {
     // Warmup
     for (const auto& cmd : setup.commands)
     {
+        currentCmd = cmd; // diff:ignore
         std::istringstream is(cmd);
-        is >> std::skipws >> token;
+        is >> token;
 
         if (token == "go")
         {
@@ -873,9 +946,7 @@ void USIEngine::benchmark(std::istream& args) {
         else if (token == "position")
             position(is);
         else if (token == "ucinewgame")
-        {
             engine.search_clear();  // search_clear may take a while
-        }
 
         if (cnt > NUM_WARMUP_POSITIONS)
             break;
@@ -883,18 +954,18 @@ void USIEngine::benchmark(std::istream& args) {
 
     std::cerr << "\n";
 
-    cnt   = 1;
-    nodes = 0;
+    cnt = 1;
 
-    int           numHashfullReadings                    = 0;
-    constexpr int hashfullAges[]                         = {0, 999};  // Only normal hashfull and touched hash.
-    int           totalHashfull[std::size(hashfullAges)] = {0};
-    int           maxHashfull[std::size(hashfullAges)]   = {0};
+    int           numHashfullReadings = 0;
+    constexpr int hashfullAges[]      = {0, 999};  // Only normal hashfull and touched hash.
+    constexpr int hashfullAgeCount    = std::size(hashfullAges);
+    int           totalHashfull[hashfullAgeCount] = {0};
+    int           maxHashfull[hashfullAgeCount]   = {0};
 
     auto updateHashfullReadings = [&]() {
         numHashfullReadings += 1;
 
-        for (int i = 0; i < static_cast<int>(std::size(hashfullAges)); ++i)
+        for (int i = 0; i < hashfullAgeCount; ++i)
         {
             const int hashfull = engine.get_hashfull(hashfullAges[i]);
             maxHashfull[i]     = std::max(maxHashfull[i], hashfull);
@@ -904,10 +975,33 @@ void USIEngine::benchmark(std::istream& args) {
 
     engine.search_clear();  // search_clear may take a while
 
+#if STOCKFISH || defined(YANEURAOU_ENGINE)
+    Time::time_point elapsed;
+#endif
+
+    Time::duration totalTime(0);
+    u64 nodes = 0, nodesSearched = 0;
+
+    engine.set_on_update_full([&](const Engine::InfoFull& i) { nodesSearched = i.nodes; });
+
+#if STOCKFISH || defined(YANEURAOU_ENGINE)
+    engine.set_on_start([&elapsed, &nodesSearched]() {
+        elapsed       = Time::now();
+        nodesSearched = 0;
+    });
+
+    engine.set_on_bestmove(
+      [&totalTime, &elapsed, &nodes, &nodesSearched](const auto&, const auto&) {
+          totalTime += Time::now() - elapsed;
+          nodes += nodesSearched;
+      });
+#endif
+
     for (const auto& cmd : setup.commands)
     {
+        currentCmd = cmd; // diff:ignore
         std::istringstream is(cmd);
-        is >> std::skipws >> token;
+        is >> token;
 
         if (token == "go")
         {
@@ -916,28 +1010,31 @@ void USIEngine::benchmark(std::istream& args) {
 
             Search::LimitsType limits = parse_limits(is);
 
+#if !STOCKFISH && !defined(YANEURAOU_ENGINE)
+            // 開始通知を送らない構成では、goから探索終了待ちまでを測る。
             nodesSearched = 0;
-            TimePoint elapsed = now();
+            const auto elapsed = Time::now();
+#endif
 
             // Run with silenced network verification
             engine.go(limits);
             engine.wait_for_search_finished();
 
-            totalTime += now() - elapsed;
-
-            updateHashfullReadings();
-
+#if !STOCKFISH && !defined(YANEURAOU_ENGINE)
+            totalTime += Time::now() - elapsed;
             nodes += nodesSearched;
+#endif
+            updateHashfullReadings();
         }
         else if (token == "position")
             position(is);
         else if (token == "ucinewgame")
-        {
             engine.search_clear();  // search_clear may take a while
-        }
     }
 
-    totalTime = std::max<TimePoint>(totalTime, 1);  // Ensure positivity to avoid a 'divide by zero'
+    // Ensure positivity to avoid a 'divide by zero'
+    // NPSの計算でゼロ除算しないよう、合計時間を最低1ミリ秒とする。
+    const auto totalTimeMs = std::max<i64>(std::chrono::duration_cast<ms>(totalTime).count(), 1LL);
 
     dbg_print();
 
@@ -971,8 +1068,8 @@ void USIEngine::benchmark(std::istream& args) {
               << "\n    single game            : " << maxHashfull[1] << ", "
               << totalHashfull[1] / numHashfullReadings
               << "\nTotal nodes searched       : " << nodes
-              << "\nTotal search time [s]      : " << totalTime / 1000.0
-              << "\nNodes/second               : " << 1000 * nodes / totalTime << std::endl;
+              << "\nTotal search time [s]      : " << totalTimeMs / 1000.0
+              << "\nNodes/second               : " << 1000 * nodes / totalTimeMs << std::endl;
 
     // clang-format on
 
@@ -983,19 +1080,25 @@ void USIEngine::benchmark(std::istream& args) {
 // "setoption"コマンド応答。
 void USIEngine::setoption(std::istringstream& is) {
     engine.wait_for_search_finished();
-    engine_options().setoption(is);
+    engine.get_options().setoption(is);
 }
 
-std::uint64_t USIEngine::perft(const Search::LimitsType& limits) {
-    auto nodes = engine.perft(engine.sfen(), limits.perft /*, engine.get_options()["UCI_Chess960"]*/);
+u64 USIEngine::perft(const Search::LimitsType& limits) {
+#if STOCKFISH
+    auto result = engine.perft(engine.fen(), limits.perft, engine.get_options()["UCI_Chess960"]);
+#else
+    auto result = engine.perft(engine.sfen(), limits.perft /*, engine.get_options()["UCI_Chess960"]*/);
+#endif
+    if (auto err = std::get_if<PositionSetError>(&result))
+        terminate_on_critical_error(err->what());
+
+    auto nodes = std::get<u64>(result);
     sync_cout << "\nNodes searched: " << nodes << "\n" << sync_endl;
     return nodes;
 }
 
 // "position"コマンドのhandler
 void USIEngine::position(std::istringstream& is) {
-    const std::string fullCommand = is.str();
-
 	std::string token, sfen;
 
     is >> token;
@@ -1012,7 +1115,7 @@ void USIEngine::position(std::istringstream& is) {
 #if STOCKFISH
     else if (token == "fen")
         while (is >> token && token != "moves")
-            fen += token + " ";
+            sfen += token + " ";
     else
         return;
 #else
@@ -1033,15 +1136,11 @@ void USIEngine::position(std::istringstream& is) {
 
 	// 指し手のリストをパースする(あるなら)
     while (is >> token)
-    {
         moves.push_back(token);
-	}
 
     auto err = engine.set_position(sfen, moves);
     if (err.has_value())
-    {
-        terminate_on_critical_error(fullCommand, err->what());
-    }
+        terminate_on_critical_error(err->what());
 }
 
 #if STOCKFISH
@@ -1055,14 +1154,15 @@ struct WinRateParams {
 
 WinRateParams win_rate_params(const Position& pos) {
 
-    int material = pos.count<PAWN>() + 3 * pos.count<KNIGHT>() + 3 * pos.count<BISHOP>() + 5 * pos.count<ROOK>() + 9 * pos.count<QUEEN>();
+    int material = pos.count<PAWN>() + 3 * pos.count<KNIGHT>() + 3 * pos.count<BISHOP>()
+                 + 5 * pos.count<ROOK>() + 9 * pos.count<QUEEN>();
 
     // The fitted model only uses data for material counts in [17, 78], and is anchored at count 58.
     double m = std::clamp(material, 17, 78) / 58.0;
 
     // Return a = p_a(material) and b = p_b(material), see github.com/official-stockfish/WDL_model
-    constexpr double as[] = {-13.50030198, 40.92780883, -36.82753545, 386.83004070};
-    constexpr double bs[] = {96.53354896, -165.79058388, 90.89679019, 49.29561889};
+    constexpr double as[] = {-142.72052667, 372.35176398, -340.71073572, 415.23490212};
+    constexpr double bs[] = {5.93832785, 15.61267078, -30.57816876, 69.63866711};
 
     double a = (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
     double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];
@@ -1086,7 +1186,9 @@ int win_rate_model(Value v, const Position& pos) {
 
 // Score構造体の内容をUSI形式のscoreとして出力する。
 std::string USIEngine::format_score(const Score& s) {
+#if STOCKFISH
     constexpr int TB_CP = 20000;
+#endif
     const auto    format =
       overload{[](Score::Mate mate) -> std::string {
 #if STOCKFISH
@@ -1099,8 +1201,7 @@ std::string USIEngine::format_score(const Score& s) {
                },
 #if STOCKFISH
                [](Score::Tablebase tb) -> std::string {
-                   return std::string("cp ")
-                        + std::to_string((tb.win ? TB_CP - tb.plies : -TB_CP - tb.plies));
+                   return std::string("cp ") + std::to_string((tb.win ? TB_CP : -TB_CP) - tb.plies);
                },
 #endif
                [](Score::InternalUnits units) -> std::string {
@@ -1110,15 +1211,11 @@ std::string USIEngine::format_score(const Score& s) {
     return s.visit(format);
 }
 
-// → やねうら王の場合、PawnValue = 90なので Value = 90なら 100として出力する必要がある。
-// Stockfish 16ではこの値は328になっている。
-constexpr int NormalizeToPawnValue = Eval::PawnValue;
-
-/// Turns a Value to an integer centipawn number,
-/// without treatment of mate and similar special scores.
+// Turns a Value to an integer centipawn number,
+// without treatment of mate and similar special scores.
 // 詰みやそれに類似した特別なスコアの処理なしに、Valueを整数のセントポーン数に変換する。
 #if STOCKFISH
-int UCIEngine::to_cp(Value v, const Position& pos) {
+int USIEngine::to_cp(Value v, const Position& pos) {
 
     // In general, the score can be defined via the WDL as
     // (log(1/L - 1) - log(1/W - 1)) / (log(1/L - 1) + log(1/W - 1)).
@@ -1126,10 +1223,10 @@ int UCIEngine::to_cp(Value v, const Position& pos) {
 
     auto [a, b] = win_rate_params(pos);
 
-    return std::round(100 * int(v) / a);
+    return int(std::round(100 * int(v) / a));
 }
 
-std::string UCIEngine::wdl(Value v, const Position& pos) {
+std::string USIEngine::wdl(Value v, const Position& pos) {
     std::stringstream ss;
 
     int wdl_w = win_rate_model(v, pos);
@@ -1142,6 +1239,9 @@ std::string UCIEngine::wdl(Value v, const Position& pos) {
 
 #else
 
+// → やねうら王の場合、PawnValue = 90なので Value = 90なら 100として出力する必要がある。
+constexpr int NormalizeToPawnValue = Eval::PawnValue;
+
 int USIEngine::to_cp(Value v) { return 100 * v / NormalizeToPawnValue; }
 
 #endif
@@ -1153,7 +1253,26 @@ std::string USIEngine::square(Square s) {
 
 // 指し手をUSI文字列に変換する。
 #if STOCKFISH
-std::string USIEngine::move(Move m , bool chess960) { return USIEngine::move(m.to_move16()); }
+std::string USIEngine::move(Move m, bool chess960) {
+    if (m == Move::none())
+        return "(none)";
+
+    if (m == Move::null())
+        return "0000";
+
+    Square from = m.from_sq();
+    Square to   = m.to_sq();
+
+    if (m.type_of() == CASTLING && !chess960)
+        to = make_square(to > from ? FILE_G : FILE_C, rank_of(from));
+
+    std::string move = square(from) + square(to);
+
+    if (m.type_of() == PROMOTION)
+        move += " pnbrqk"[m.promotion_type()];
+
+    return move;
+}
 
 #else
 
@@ -1199,7 +1318,7 @@ std::string USIEngine::move(const std::vector<Move>& moves)
 
 // string全体を小文字化して返す。
 std::string USIEngine::to_lower(std::string str) {
-	std::transform(str.begin(), str.end(), str.begin(), [](auto c) { return std::tolower(c); });
+	std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return std::tolower(c); });
 
 	return str;
 }
@@ -1214,7 +1333,7 @@ Move USIEngine::to_move(const Position& pos, std::string str) {
     //	  小文字化して比較することはできない。
 
     // 全合法手のなかからusi文字列に変換したときにstrと一致する指し手を探してそれを返す
-    for (const auto& m : MoveList<LEGAL>(pos))
+    for (const auto& m : MoveList<ALL>(pos))
         if (str == move(m, pos.is_chess960()))
             return m;
     // 📝 のコードは大変美しいコードではあるが、
@@ -1315,7 +1434,11 @@ void USIEngine::on_update_no_moves(const Engine::InfoShort& info) {
     sync_cout << "info depth " << info.depth << " score " << format_score(info.score) << sync_endl;
 }
 
-void USIEngine::on_update_full(const Engine::InfoFull& info /*, bool showWDL */) {
+#if STOCKFISH
+void USIEngine::on_update_full(const Engine::InfoFull& info, bool showWDL) {
+#else
+void USIEngine::on_update_full(const Engine::InfoFull& info) {
+#endif
 
 	std::stringstream ss;
 
@@ -1378,16 +1501,15 @@ void USIEngine::on_bestmove(std::string_view bestmove, std::string_view ponder) 
     std::cout << sync_endl;
 }
 
-void USIEngine::terminate_on_critical_error(const std::string& fullCommand,
-                                            const std::string& message) {
-    sync_cout << "info string CRITICAL ERROR: Command `" << fullCommand
+void USIEngine::terminate_on_critical_error(const std::string& message) {
+    sync_cout << "info string CRITICAL ERROR: Command `" << currentCmd
               << "` failed. Reason: " << message << '\n'
               << sync_endl;
     std::exit(1);
 }
 
+#if !STOCKFISH
 void USIEngine::on_update_string(std::string_view info) { sync_cout << "info string " << info << sync_endl; }
-
 
 // 🌈 以下、やねうら王独自 🌈
 
@@ -1411,8 +1533,8 @@ void USIEngine::isready() {
 	// "EvalDir"オプションが生えているなら..
 	if (options.count("EvalDir"))
     {
-        auto eval_options_path = Path::Combine(options["EvalDir"], "eval_options.txt");
-        options.read_engine_options(eval_options_path);
+        const auto eval_options_path = path_from_utf8(options["EvalDir"]) / "eval_options.txt";
+        options.read_engine_options(eval_options_path.u8string());
     }
 
 	// Engineの派生classのisready()を呼び出す。
@@ -1531,29 +1653,65 @@ void USIEngine::qsearch_psv(std::istringstream& is) {
 void USIEngine::unittest(std::istringstream& is) { Test::UnitTest(is, engine); }
 
 
-// コマンドラインに書かれているUSIコマンドをstd_inputに積む。
-void USIEngine::enqueue_command_line_commands(const CommandLine& cli) {
-    // コマンドラインから積まれたコマンドをstd_inputに積んでやる。
-    std_input.parse_args(cli);
+// コマンドラインに書かれているUSIコマンドをコマンドキューに積む。
+void USIEngine::enqueue_command_line_commands(const CommandLine& cli)
+{
+	// ファイルからコマンドの指定
+	if (cli.argc >= 3 && std::string(cli.argv[1]) == "file")
+	{
+		std::vector<std::string> cmds0;
+		SystemIO::ReadAllLines(cli.argv[2], cmds0);
+
+		// queueに変換する。
+		for (auto c : cmds0)
+			pending_commands.push(c);
+
+	} else {
+
+		std::string cmd;
+
+		// 引数として指定されたものを一つのコマンドとして実行する機能
+		// ただし、','が使われていれば、そこでコマンドが区切れているものとして解釈する。
+
+		for (int i = 1; i < cli.argc; ++i)
+		{
+			std::string s = cli.argv[i];
+
+			// sから前後のスペースを除去しないといけない。
+			while (!s.empty() && s.back() == ' ') s.pop_back();
+			while (!s.empty() && s.front() == ' ') s = s.substr(1, s.size() - 1);
+
+			if (s != ",")
+				cmd += s + " ";
+			else
+			{
+				pending_commands.push(cmd);
+				cmd = "";
+			}
+		}
+		if (cmd.size() != 0)
+			pending_commands.push(cmd);
+	}
 }
 
-// startup.txtなどのファイルに書かれているUSIコマンドをstd_inputに積む。
+
+// startup.txtなどのファイルに書かれているUSIコマンドをコマンドキューに積む。
 void USIEngine::enqueue_startup_file_commands(const std::string& filename) {
     std::vector<std::string> lines;
     if (SystemIO::ReadAllLines(filename, lines).is_ok())
     {
         for (auto& line : lines)
-            std_input.push(line);
+            pending_commands.push(line);
     }
 }
 
-// 単一エンジン起動用に、コマンドラインとstartup.txtのUSIコマンドをstd_inputに積む。
+// 単一エンジン起動用に、コマンドラインとstartup.txtのUSIコマンドをコマンドキューに積む。
 void USIEngine::enqueue_startup_commands(const CommandLine& cli) {
     enqueue_command_line_commands(cli);
     enqueue_startup_file_commands("startup.txt");
 }
 
-// ファイルからUSIコマンドをstd_inputに積む。
+// ファイルからUSIコマンドをコマンドキューに積む。
 void USIEngine::enqueue_command_from_file(std::istringstream& is) {
     std::string filename = "";
     is >> filename;
@@ -1565,7 +1723,7 @@ void USIEngine::enqueue_command_from_file(std::istringstream& is) {
         std::vector<std::string> lines;
         if (SystemIO::ReadAllLines(filename, lines).is_ok())
             for (auto& line : lines)
-                std_input.push(line);
+                pending_commands.push(line);
         else
             sync_cout << "Error : File Not Found." << sync_endl;
     }
@@ -1677,7 +1835,6 @@ void USIEngine::UnitTest(Test::UnitTester& tester, IEngine& engine) {
     }
 }
 
-
 // TODO : 🚧 工事中 🚧
 
 #if 0
@@ -1746,144 +1903,6 @@ bool parse_ponderhit(istringstream& is, Search::LimitsType& limits)
 // 🌈 USI拡張コマンド 🌈
 // --------------------
 
-#if 0
-// isreadyコマンド処理部
-void USIEngine::isready()
-{
-	// 対局ごとに"isready","usinewgame"の両方が来る。
-	// "isready"が起動後に1度だけしか来ないようなGUI実装は、
-	// 実装上の誤りであるから修正すべきである。)
-
-	// 少なくとも将棋のGUI(将棋所、ShogiGUI、将棋神やねうら王)では、
-	// "isready"が毎回来るようなので、"usinewgame"のほうは無視して、
-	// "isready"に応じて評価関数、定跡、探索部を初期化する。
-
-	auto& options = engine_options();
-
-	// EvalDirにある"eval_options.txt"を読み込む。
-	// ここに評価関数に応じた設定を書いておくことができる。
-
-	options.read_engine_options(Path::Combine(options["EvalDir"], "eval_options.txt"));
-
-	// yaneuraou.wasm
-	// ブラウザのメインスレッドをブロックしないよう、Keep Alive処理をコメントアウト
-#if !defined(__EMSCRIPTEN__)
-	// --- Keep Alive的な処理 ---
-
-	// "isready"を受け取ったあと、"readyok"を返すまで5秒ごとに改行を送るように修正する。(keep alive的な処理)
-	// →　これ、よくない仕様であった。
-	// cf. USIプロトコルでisready後の初期化に時間がかかる時にどうすれば良いのか？
-	//     http://yaneuraou.yaneu.com/2020/01/05/usi%e3%83%97%e3%83%ad%e3%83%88%e3%82%b3%e3%83%ab%e3%81%a7isready%e5%be%8c%e3%81%ae%e5%88%9d%e6%9c%9f%e5%8c%96%e3%81%ab%e6%99%82%e9%96%93%e3%81%8c%e3%81%8b%e3%81%8b%e3%82%8b%e6%99%82%e3%81%ab%e3%81%a9/
-	// cf. isready後のkeep alive用改行コードの送信について
-	//		http://yaneuraou.yaneu.com/2020/03/08/isready%e5%be%8c%e3%81%aekeep-alive%e7%94%a8%e6%94%b9%e8%a1%8c%e3%82%b3%e3%83%bc%e3%83%89%e3%81%ae%e9%80%81%e4%bf%a1%e3%81%ab%e3%81%a4%e3%81%84%e3%81%a6/
-
-	// これを送らないと、将棋所、ShogiGUIでタイムアウトになりかねない。
-	// ワーカースレッドを一つ生成して、そいつが5秒おきに改行を送信するようにする。
-	// このあと重い処理を行うのでスレッドの起動が遅延する可能性があるから、先にスレッドを生成して、そのスレッドが起動したことを
-	// 確認してから処理を行う。
-
-	// スレッドが起動したことを通知するためのフラグ
-	auto thread_started = false;
-
-	// この関数を抜ける時に立つフラグ(スレッドを停止させる用)
-	auto thread_end = false;
-
-	// 定期的な改行送信用のスレッド
-	auto th = std::thread([&] {
-		// スレッドが起動した
-		thread_started = true;
-
-		int count = 0;
-		while (!thread_end)
-		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			if (++count >= 50 /* 5秒 */)
-			{
-				count = 0;
-				sync_cout << sync_endl; // 改行を送信する。
-
-				// 定跡の読み込み部などで"info string.."で途中経過を出力する場合、
-				// sync_cout ～ sync_endlを用いて送信しないと、この改行を送るタイミングとかち合うと
-				// 変なところで改行されてしまうので注意。
-			}
-		}
-		});
-	SCOPE_EXIT({ thread_end = true; th.join(); });
-
-	// スレッド起動待ち
-	while (!thread_started)
-		Tools::sleep(100);
-
-	// --- Keep Alive的な処理ここまで ---
-#endif
-
-	// スレッドを先に生成しないとUSI_Hashで確保したメモリクリアの並列化が行われなくて困る。
-
-#if defined(YANEURAOU_ENGINE_DEEP)
-
-	// ここ、max_gpu == 8固定として扱っている。あとで修正する。(かも)
-	int threads_num =
-		(int)Options["UCT_Threads1"] + (int)Options["UCT_Threads2"] + (int)Options["UCT_Threads3"] + (int)Options["UCT_Threads4"] +
-		(int)Options["UCT_Threads5"] + (int)Options["UCT_Threads6"] + (int)Options["UCT_Threads7"] + (int)Options["UCT_Threads8"];
-
-	Threads.set(std::max(threads_num,1));
-#else
-	//Threads.set(size_t(options["Threads"]));
-#endif
-
-#if defined (USE_EVAL_HASH)
-	Eval::EvalHash_Resize(Options["EvalHash"]);
-#endif
-
-	// Engine側のisready callback
-	engine.isready();
-
-#if 0
-	// 評価関数の読み込み
-
-#if defined(YANEURAOU_ENGINE_DEEP)
-
-	// 毎回、load_eval()は呼び出すものとする。
-	// モデルファイル名に変更がなければ、再読み込みされないような作りになっているならばこの実装のほうがシンプル。
-	Eval::load_eval();
-	engine.engine.eval_loaded = true;
-
-#else
-
-	// 評価関数の読み込みなど時間のかかるであろう処理はこのタイミングで行なう。
-	// 起動時に時間のかかる処理をしてしまうと将棋所がタイムアウト判定をして、思考エンジンとしての認識をリタイアしてしまう。
-	engine.verify_networks();
-#endif
-
-	// isreadyに対してはreadyokを返すまで次のコマンドが来ないことは約束されているので
-	// このタイミングで各種変数の初期化もしておく。
-
-#if defined(YANEURAOU_ENGINE_DEEP)
-	// ふかうら王では置換表は用いない。
-#else
-	//TT.resize(size_t(options["USI_Hash"]));
-#endif
-
-	//Search::clear();
-
-#if defined (USE_EVAL_HASH)
-	Eval::EvalHash_Clear();
-#endif
-
-	//Threads.stop = false;
-
-	// Positionコマンドが送られてくるまで評価値の全計算をしていないの気持ち悪いのでisreadyコマンドに対して
-	// evalの値を返せるようにこのタイミングで平手局面で初期化してしまう。
-
-#endif
-
-	sync_cout << "readyok" << sync_endl;
-
-}
-#endif
-
-
-
 // --------------------
 //   やねうら王独自
 // --------------------
@@ -1892,7 +1911,6 @@ void USIEngine::isready()
 // スコアを歩の価値を100として正規化して出力する。
 //   MATEではないスコアなら"cp x"のように出力する。
 //   MATEのスコアなら、"mate x"のように出力する。
-// ⚠ USE_PIECE_VALUEが定義されていない時は正規化しようがないのでこの関数は呼び出せない。
 std::string USIEngine::value(Value v)
 {
 	ASSERT_LV3(-VALUE_INFINITE < v && v < VALUE_INFINITE);
@@ -1947,7 +1965,20 @@ std::string USIEngine::value(Value v)
 	エンジンの出力は Module.print 経由で addMessageListener に配られる。
 */
 
-// 全スレッドのworkerが生成済みか。
+namespace {
+// wasm_keep_alive()で保持するインスタンス。プロセス終了まで解放しない。(理由はusi.hを参照)
+std::unique_ptr<IEngine>   wasm_engine;
+std::unique_ptr<USIEngine> wasm_usi;
+}  // namespace
+
+void wasm_keep_alive(std::unique_ptr<IEngine> engine, std::unique_ptr<USIEngine> usi) {
+    wasm_engine = std::move(engine);
+    wasm_usi    = std::move(usi);
+}
+
+USIEngine* wasm_usi_instance() { return wasm_usi.get(); }
+
+// 全スレッドが起動し、idle_loop()で待機状態になったか。(threadStartedはthread.cppで立てる)
 bool USIEngine::wasm_threads_ready() const {
 	for (auto& th : const_cast<USIEngine*>(this)->engine.get_threads())
 		if (!th->threadStarted)
@@ -1955,23 +1986,34 @@ bool USIEngine::wasm_threads_ready() const {
 	return true;
 }
 
-EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char* c_cmd) {
-
-	// USIEngine::loop()がまだ呼ばれていない(= 起動途中)。
-	if (g_wasm_usi == nullptr)
-		return 1;
-
+int USIEngine::exec_command_from_js(const std::string& cmd) {
 	// スレッドの起動待ち。
 	// 📝 ここでブロックして待つことはできない。ワーカーの起動には
 	//     ブラウザのイベントループに制御を返す必要があるため、待つと
 	//     そのまま固まる。JS側に再送してもらう。
-	if (!g_wasm_usi->wasm_threads_ready())
+	if (!wasm_threads_ready())
 		return 1;
 
-	g_wasm_usi->wasm_exec(std::string(c_cmd));
+    // 💡 usi_cmdexec()の戻り値("quit"ならtrue)は使わない。
+    //     "quit"はwasm_pre.jsが先にModule.terminate()で処理するため、ここには届かない。
+    usi_cmdexec(cmd);
 
-	return 0;
+    return 0;
+}
+
+// USI応答部 emscriptenインターフェース
+// 💡 wasm_pre.jsからModule.ccall("usi_command", ...)で呼び出される。
+EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char* c_cmd) {
+    USIEngine* usi = wasm_usi_instance();
+
+    // engine_main()が未実行。JS側に再送してもらう。
+    if (usi == nullptr)
+        return 1;
+
+    return usi->exec_command_from_js(std::string(c_cmd));
 }
 #endif
+
+#endif // !STOCKFISH
 
 } // namespace YaneuraOu

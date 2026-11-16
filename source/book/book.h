@@ -1,13 +1,16 @@
-﻿#ifndef _BOOK_H_INCLUDED_
-#define _BOOK_H_INCLUDED_
+﻿#ifndef BOOK_H_INCLUDED
+#define BOOK_H_INCLUDED
 
 #include "../types.h"
+#include "../extra/tools.h"
 #include "../position.h"
 #include "../misc.h"
 #include "../usi.h"
 #include "../testcmd/unit_test.h"
 
+#include <fstream>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -331,9 +334,8 @@ struct BookMoveSelector
 			・定跡の指し手の選択は、思考エンジンのオプション設定に従う。
 			・定跡にhitしなかった場合はMOVE_NONEが返る。
 			・画面には何も表示しない。
-			・この関数自体はthread safeなのでread_book()したあとは非同期に呼び出して問題ない。
-	 　		ただし、on_the_flyのときは、ディスクアクセスが必要で、その部分がthread safeではないので
-			on_the_fly == falseでなければ、非同期にこの関数を呼び出してはならない。
+			・read_book()後、並列探索を開始する前に探索の制御スレッドから呼び出す。
+			・同じBookMoveSelectorに対して、複数スレッドから同時に呼び出してはならない。
 	*/
     ProbeResult probe(Position& pos, const Search::UpdateContext& updates);
 
@@ -389,7 +391,7 @@ protected:
     // 直近のrootのprobe_impl()がinfoに出した候補ごとのPV(go explain用)。
     std::vector<std::vector<Move16>> root_candidates;
 
-	AsyncPRNG prng;
+	PRNG prng;
 
 	// init()で渡されたOptionsMap
 	OptionsMapRef options;

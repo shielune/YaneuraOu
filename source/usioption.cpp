@@ -1,11 +1,21 @@
-﻿
-//#include "evaluate.h"
+﻿#include "usioption.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cctype>
+#include <cerrno>
+#include <cstdlib>
+#include <iostream>
+#include <sstream>
+#include <utility>
+
 #include "misc.h"
-//#include "search.h
-//#include "syzygy/tbprobe.h"
-#include "thread.h"
-//#include "tt.h"
-#include "usi.h"
+
+#if !STOCKFISH
+#include "extra/parser.h"
+#include "extra/system_io.h"
+#include "extra/tools.h"
+#endif
 
 namespace YaneuraOu {
 
@@ -16,7 +26,7 @@ bool CaseInsensitiveLess::operator()(const std::string& s1, const std::string& s
 
 	return std::lexicographical_compare(
 		s1.begin(), s1.end(), s2.begin(), s2.end(),
-		[](char c1, char c2) { return std::tolower(c1) < std::tolower(c2); });
+		[](unsigned char c1, unsigned char c2) { return std::tolower(c1) < std::tolower(c2); });
 }
 
 // option項目が変更されてon_change() handlerが呼び出された時に
@@ -30,10 +40,12 @@ void OptionsMap::setoption(std::istringstream& is) {
 	is >> token;  // Consume the "name" token
 
 	// Read the option name (can contain spaces)
+	// オプション名を読む（空白を含む場合もある）。
 	while (is >> token && token != "value")
 		name += (name.empty() ? "" : " ") + token;
 
 	// Read the option value (can contain spaces)
+	// オプション値を読む（空白を含む場合もある）。
 	while (is >> token)
 		value += (value.empty() ? "" : " ") + token;
 
@@ -69,7 +81,12 @@ void OptionsMap::add(const std::string& name, const Option& option) {
 	{
 		// 未追加なので追加してやる。
 
-		static size_t insert_order = 0;
+#if STOCKFISH
+        static usize insert_order = 0;
+#else
+        // 各Map内の登録順。別のエンジンやcombo検査用Mapの追加に影響されない。
+        usize insert_order = options_map.size();
+#endif
 
 		options_map[name] = option;
 
@@ -86,39 +103,28 @@ void OptionsMap::add(const std::string& name, const Option& option) {
 }
 
 // 保持しているOptionのなかで、このoption_nameを持つものの数。
-std::size_t OptionsMap::count(const std::string& name) const { return options_map.count(name); }
-
-Option::Option(const OptionsMap* map) :
-	parent(map) {
-}
+usize OptionsMap::count(const std::string& name) const { return options_map.count(name); }
 
 Option::Option(const char* v, OnChange f) :
 	type("string"),
-	min(0),
-	max(0),
 	on_change(std::move(f)) {
 	defaultValue = currentValue = v;
 }
 
 Option::Option(bool v, OnChange f) :
 	type("check"),
-	min(0),
-	max(0),
 	on_change(std::move(f)) {
 	defaultValue = currentValue = (v ? "true" : "false");
 }
 
 Option::Option(OnChange f) :
 	type("button"),
-	min(0),
-	max(0),
-	on_change(std::move(f)) {
-}
+	on_change(std::move(f)) {}
 
 #if STOCKFISH
 Option::Option(int v, int minv, int maxv, OnChange f) :
 #else
-Option::Option(int64_t v, int64_t minv, int64_t maxv, OnChange f) :
+Option::Option(i64 v, i64 minv, i64 maxv, OnChange f) :
 #endif
 	type("spin"),
 	min(minv),
@@ -131,8 +137,6 @@ Option::Option(int64_t v, int64_t minv, int64_t maxv, OnChange f) :
 
 Option::Option(const char* v, const char* cur, OnChange f) :
 	type("combo"),
-	min(0),
-	max(0),
 	on_change(std::move(f)) {
 	defaultValue = v;
 	currentValue = cur;
@@ -142,13 +146,9 @@ Option::Option(const char* v, const char* cur, OnChange f) :
 // 🤔 Stockfishのcombo optionの設定、すごく使いにくいので定義しなおす。
 Option::Option(const std::vector<std::string>& list, const std::string& cur, OnChange f) :
 	type("combo"),
-	min(0),
-	max(0),
 	on_change(std::move(f)) {
 
-	// listの文字列をスペース区切りで連結してdefaultValueに突っ込む。
-	//defaultValue = StringExtension::Join(list, " ");
-	// 📝 間違い。
+	// 単純なスペース区切りではなく、combo形式でdefaultValueを構築する。
 	//    {"A","B","C"}なるstd::vector<string>とcur = "B"から
 	//    "B var A var B var C"のような文字列を構築してdefaultValueに入れる必要がある。
     std::string s = cur;
@@ -159,7 +159,11 @@ Option::Option(const std::vector<std::string>& list, const std::string& cur, OnC
 }
 #endif
 
-Option::operator int64_t() const {
+#if STOCKFISH
+Option::operator int() const {
+#else
+Option::operator i64() const {
+#endif
 	ASSERT_LV1(type == "check" || type == "spin");
 #if STOCKFISH
 	return (type == "spin" ? std::stoi(currentValue) : currentValue == "true");
@@ -184,6 +188,22 @@ bool Option::operator==(const char* s) const {
 
 bool Option::operator!=(const char* s) const { return !(*this == s); }
 
+#if STOCKFISH
+static bool value_in_range(const std::string& v, int min, int max) {
+#else
+// やねうら王のspinオプションは64bitの範囲を持つ。
+static bool value_in_range(const std::string& v, i64 min, i64 max) {
+#endif
+    if (v.empty())
+        return false;
+    errno                  = 0;
+    char*           end    = nullptr;
+    const long long result = std::strtoll(v.c_str(), &end, 10);
+    if (errno == ERANGE || *end != '\0')
+        return false;
+    return result >= min && result <= max;
+}
+
 // Updates currentValue and triggers on_change() action. It's up to
 // the GUI to check for option's limits, but we could receive the new value
 // from the user by console window, so let's check the bounds anyway.
@@ -194,6 +214,14 @@ bool Option::operator!=(const char* s) const { return !(*this == s); }
 // 念のため範囲チェックを行いましょう。
 
 Option& Option::operator=(const std::string& v) {
+#if !STOCKFISH
+    bool accepted;
+    return assign(v, accepted);
+}
+
+Option& Option::assign(const std::string& v, bool& accepted) {
+    accepted = false;
+#endif
 
 #if STOCKFISH
     assert(!type.empty());
@@ -209,11 +237,7 @@ Option& Option::operator=(const std::string& v) {
 	// "EvalDir"などでstringの場合は空の文字列を設定したいことがあるので"string"に対して空の文字チェックは行わない。
 	if ((type != "button" && type != "string" && v.empty())
 		|| (type == "check" && v != "true" && v != "false")
-#if STOCKFISH
-		|| (type == "spin" && (std::stoi(v) < min || std::stoi(v) > max)))
-#else
-		|| (type == "spin" && (std::stoll(v) < min || std::stoll(v) > max)))
-#endif
+        || (type == "spin" && !value_in_range(v, min, max)))
 		return *this;
 
 	if (type == "combo")
@@ -266,12 +290,15 @@ Option& Option::operator=(const std::string& v) {
 			parent->info(ret);
 	}
 
+#if !STOCKFISH
+    accepted = true;
+#endif
 	return *this;
 }
 
 std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 	// OptionsMapへの登録順に出力されてほしいので、idxを0から増やしていき、Option::idxが一致したものを表示していく。
-	for (size_t idx = 0; idx < om.options_map.size(); ++idx)
+	for (usize idx = 0; idx < om.options_map.size(); ++idx)
 		for (const auto& it : om.options_map)
 			if (it.second.idx == idx)
 			{
@@ -305,15 +332,15 @@ std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 	return os;
 }
 
-
+#if !STOCKFISH
 #if 0
 	/// 'On change' actions, triggered by an option's value change
 	// オプションの値が変更された時に呼び出されるOn changeアクション。
 
 	//static void on_clear_hash(const Option&) { Search::clear(); }
-	//static void on_hash_size(const Option& o) { TT.resize(size_t(o)); }
+	//static void on_hash_size(const Option& o) { TT.resize(usize(o)); }
 	static void on_logger(const Option& o) { start_logger(o); }
-	//static void on_threads(const Option& o) { Threads.set(size_t(o)); }
+	//static void on_threads(const Option& o) { Threads.set(usize(o)); }
 	//static void on_tb_path(const Option& o) { Tablebases::init(o); }
 	//static void on_eval_file(const Option&) { Eval::NNUE::init(); }
 
@@ -322,7 +349,7 @@ std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 	// 前回のOptions["EvalDir"]
 	std::string last_eval_dir;
 
-#if defined(__EMSCRIPTEN__) && defined(EVAL_NNUE)
+#if defined(__EMSCRIPTEN__) && (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 	// WASM NNUE
 	// 前回のOptions["EvalFile"]
 	std::string last_eval_file;
@@ -331,7 +358,7 @@ std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 	std::ostream& operator<<(std::ostream& os, const OptionsMap& om)
 	{
 		// idxの順番を守って出力する
-		for (size_t idx = 0; idx < om.size(); ++idx)
+		for (usize idx = 0; idx < om.size(); ++idx)
 			for (const auto& it : om)
 				if (it.second.idx == idx)
 				{
@@ -344,7 +371,7 @@ std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 					if (o.type == "spin")
 						// この範囲はStockfishではfloatになっているが、
 						// やねうら王では、int64_tに変更する。
-						os << " default " << int64_t(stoll(o.defaultValue))
+						os << " default " << i64(stoll(o.defaultValue))
 						<< " min " << o.min
 						<< " max " << o.max;
 
@@ -369,18 +396,19 @@ std::ostream& operator<<(std::ostream& os, const OptionsMap& om) {
 	// 評価関数を読み込んだかのフラグ。これはevaldirの変更にともなってfalseにする。
 	bool load_eval_finished = false;
 
-	// エンジンオプションをコンパイル時に設定する機能
-	// "ENGINE_OPTIONS"で指定した内容を設定する。
-	// 例) #define ENGINE_OPTIONS "FV_SCALE=24;BookFile=no_book"
-	void set_engine_options(const std::string& options)
-	{
-		// ";"で区切って複数指定できるものとする。
-		auto v = StringExtension::Split(options, ";");
-		for (auto line : v)
-			build_option(std::string(line));
-	}
-
 #endif
+
+// エンジンオプションをコンパイル時に設定する機能
+// "ENGINE_OPTIONS"で指定した内容を設定する。
+// 例) #define ENGINE_OPTIONS "FV_SCALE=24;BookFile=no_book"
+// 📝 USIEngine::set_engine()から、すべてのオプションが生えたあとに呼び出される。
+void OptionsMap::set_engine_options(const std::string& options)
+{
+	// ";"で区切って複数指定できるものとする。
+	auto v = split(options, ";");
+	for (auto line : v)
+		build_option(std::string(line));
+}
 
 // --------------------
 //  やねうら王独自拡張
@@ -405,7 +433,8 @@ void OptionsMap::read_engine_option_profile(const std::string& filename)
 		if (line.size() >= 2 && line[0] == '/' && line[1] == '/')
 			continue;
 
-		const auto line2 = StringExtension::Replace(line, '=', ' ');
+		auto line2 = line;
+		std::replace(line2.begin(), line2.end(), '=', ' ');
 		Parser::LineScanner scanner(line2);
 		const std::string key = scanner.get_text();
 
@@ -452,78 +481,97 @@ void OptionsMap::read_engine_options(const std::string& filename)
 // このとき、Optionのhandlerとidxは書き換えない。
 void OptionsMap::build_option(const std::string& line)
 {
-	// 1. "option ..."の形式
+    // 「名前 値」「名前=値」「option name ... type ... default ...」を扱う。
+    // 値に含まれる空白や「=」はそのまま保持する。
+    auto trim = [](const std::string& value) {
+        const auto first = value.find_first_not_of(" \t\r\n");
+        return first == std::string::npos ? std::string()
+             : value.substr(first, value.find_last_not_of(" \t\r\n") - first + 1);
+    };
+    const auto text = trim(line);
+    if (text.empty() || text[0] == '#' || text.compare(0, 2, "//") == 0)
+        return;
 
-	// 2. エンジンオプション名と値だけを指定する形式で書かれているのかも知れない。
-	// (既存のオプションの値のoverrideがしたい場合)
+    std::string option_name, option_value;
+    const auto nameEnd = text.find_first_of("= \t");
+    if (text.substr(0, nameEnd) != "option")
+    {
+        option_name = text.substr(0, nameEnd);
+        if (nameEnd != std::string::npos)
+        {
+            option_value = trim(text.substr(nameEnd));
+            if (!option_value.empty() && option_value[0] == '=')
+                option_value = trim(option_value.substr(1));
+        }
+    }
+    else
+    {
+        std::istringstream scanner(text);
+        std::string token;
+        scanner >> token;  // "option"
+        if (!(scanner >> token) || token != "name")
+        {
+            sync_cout << "info string Error : invalid option declaration : " << line << sync_endl;
+            return;
+        }
+        while (scanner >> token && token != "type")
+            option_name += (option_name.empty() ? "" : " ") + token;
 
-	// 3. オプション名=値 のような形式かも知れない(dlshogiの.iniはそうなっている)
-	// その形式にも対応する必要がある。
-	// よって、最初に"="を" "に置換してしまう。そうすれば、3.は、2.の形式と同じになる。
+        std::string option_type;
+        if (token != "type" || !(scanner >> option_type))
+        {
+            sync_cout << "info string Error : invalid option declaration : " << line << sync_endl;
+            return;
+        }
+        while (scanner >> token)
+        {
+            if (token == "default")
+            {
+                auto it = options_map.find(option_name);
+                if (it != options_map.end() && it->second.type == "string")
+                {
+                    std::getline(scanner, option_value);
+                    option_value = trim(option_value);
+                    break;
+                }
+                scanner >> option_value;
+            }
+            else if (token == "min" || token == "max" || token == "var")
+                // 既存オプションの型・範囲・選択肢は変更しない。
+                scanner >> token;
+            else
+            {
+                sync_cout << "info string Error : invalid option declaration : " << line << sync_endl;
+                return;
+            }
+        }
+    }
 
-	auto& Options = options_map;
+    auto it = options_map.find(option_name);
+    if (it == options_map.end())
+    {
+        sync_cout << "info string Error : option name not found : " << option_name << sync_endl;
+        return;
+    }
 
-	const auto& line2 = StringExtension::Replace(line, '=', ' ');
+    auto& option = it->second;
+    const auto normalizedValue = option.type == "string" && option_value == "<empty>"
+                               ? std::string() : option_value;
+    // isreadyで同じ固定設定を再読込しても、変更やハンドラーの再実行は不要。
+    if (option.fixed && option.currentValue == normalizedValue)
+        return;
 
-	Parser::LineScanner scanner(line2);
-	std::string token = scanner.get_text();
-
-	std::string option_name, option_value;
-
-	if (token != "option")
-	{
-		// 空行は無視
-		if (token == "")
-			return;
-
-		auto it = Options.find(token);
-		if (it == Options.end())
-		{
-			// 違うのか。何の形式で書こうとしているのだろうか…。
-			std::cout << "Error : option name not found : " << token << std::endl;
-			return;
-		}
-
-		option_name  = token;
-		option_value = scanner.get_text();
-	}
-	else {
-
-		std::string name, value, option_type;
-		int64_t min_value = 0, max_value = 1;
-		std::vector<std::string> combo_list;
-		while (!scanner.eol())
-		{
-			std::string token = scanner.get_text();
-			if (token == "name") name = scanner.get_text();
-			else if (token == "type") option_type = scanner.get_text();
-			else if (token == "default") value = scanner.get_text();
-			else if (token == "min") min_value = stoll(scanner.get_text());
-			else if (token == "max") max_value = stoll(scanner.get_text());
-			else if (token == "var") {
-				auto varText = scanner.get_text();
-				combo_list.push_back(varText);
-			}
-			else {
-				std::cout << "Error : invalid command: " << token << std::endl;
-			}
-		}
-
-		if (Options.count(name) == 0)
-		{
-			std::cout << "Error : option name not found : " << name << std::endl;
-			return;
-		}
-
-		option_name  = name;
-		option_value = value;
-	}
-
-	Options[option_name] = option_value;
-	Options[option_name].fixed = true; // 次にsetoptionで再代入できないようにfixに変更しておく。
-
-	sync_cout << "info string engine option override. name = " << option_name << " , value = " << option_value << sync_endl;
-
+    bool accepted;
+    option.assign(option_value, accepted);
+    if (!accepted)
+    {
+        sync_cout << "info string Error : engine option override rejected. name = " << option_name
+                  << " , value = " << option_value << sync_endl;
+        return;
+    }
+    option.fixed = true;
+    sync_cout << "info string engine option override. name = " << option_name
+              << " , value = " << option_value << sync_endl;
 }
 
 
@@ -544,7 +592,7 @@ std::string OptionsMap::set_option_if_exists(const std::string& option_name, con
 }
 
 // idxを指定して、それに対応するOptionを取得する。
-std::pair<const std::string, const Option&> OptionsMap::get_option_by_idx(size_t idx) const
+std::pair<const std::string, const Option&> OptionsMap::get_option_by_idx(usize idx) const
 {
 	for (const auto& o : options_map)
 		if (o.second.idx == idx)
@@ -564,13 +612,13 @@ std::string OptionsMap::get_option(const std::string& option_name)
 	// キーの最大長を取得
 	// 💡 "=="のindentを揃えたいため
 
-	size_t max_key_length = 0;
+	usize max_key_length = 0;
 	for (const auto& o : options_map) {
 		max_key_length = std::max(max_key_length, o.first.length());
 	}
 
 	std::string result;
-	for (size_t idx = 0; idx < options_map.size(); ++idx)
+	for (usize idx = 0; idx < options_map.size(); ++idx)
 	{
 		auto it = get_option_by_idx(idx);
 
@@ -581,7 +629,7 @@ std::string OptionsMap::get_option(const std::string& option_name)
 				// "=="のindentを揃えるための処理
 				+ std::string(max_key_length - it.first.length() + 1, ' ')
 				+ "= "
-				+ std::string(it.second) + "\n";
+				+ it.second.currentValue + "\n";
 
 			if (!all)
 				return result;
@@ -592,5 +640,6 @@ std::string OptionsMap::get_option(const std::string& option_name)
 
 	return result;
 }
+#endif
 
 } // namespace YaneuraOu

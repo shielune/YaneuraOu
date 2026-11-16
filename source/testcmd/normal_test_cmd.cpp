@@ -18,6 +18,9 @@
 #if defined(EVAL_MANAKA)
 #include "../eval/manaka/evaluate_manaka.h"
 #endif
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
+#include "../eval/nnue/nnue_test_command.h"
+#endif
 
 namespace YaneuraOu {
 namespace {
@@ -322,7 +325,7 @@ namespace {
 				continue;
 			}
 
-			// IEngine::evaluate() は内部で verify_networks() + Eval::evaluate(pos) を
+			// IEngine::evaluate() は内部で verify_network() + Eval::evaluate(pos) を
 			// 呼ぶ。NNUE accumulator は set_from_packed_sfen 後に invalid 状態に
 			// なっているはずなので、Eval::evaluate 側で full refresh される (= 通常の
 			// 探索開始時と同じ経路)。
@@ -380,6 +383,9 @@ namespace Test
 	bool normal_test_cmd(IEngine& engine , std::istringstream& is, const std::string& token)
 	{
 		if (token == "genmoves")              gen_moves(engine, is);       // 現在の局面に対して指し手生成のテストを行う。
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
+		else if (token == "nn")              Eval::NNUE::TestCommand(engine.get_position(), is);
+#endif
 		else if (token == "autoplay")         auto_play(engine, is);       // 連続自己対局を行う。
 #if defined(YANEURAOU_ENGINE)
 		else if (token == "eval_accuracy")    eval_accuracy(engine, is);   // PSV に対し evaluate() の sign 一致率を測る。

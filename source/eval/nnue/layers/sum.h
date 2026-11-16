@@ -1,11 +1,12 @@
 ﻿// NNUE評価関数の層Sumの定義
 
-#ifndef CLASSIC_NNUE_LAYERS_SUM_H
-#define CLASSIC_NNUE_LAYERS_SUM_H
+#ifndef CLASSIC_NNUE_LAYERS_SUM_H_INCLUDED
+#define CLASSIC_NNUE_LAYERS_SUM_H_INCLUDED
 
 #include "../../../config.h"
+#include "../../../extra/tools.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../nnue_common.h"
 
@@ -149,6 +150,6 @@ class Sum<PreviousLayer> {
 } // namespace Layers::NNUE::Eval
 } // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif

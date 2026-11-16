@@ -18,17 +18,12 @@
 #include <utility>
 #include <variant>
 
-// 🌈 Stockfishはtypes.h で misc.hのincludeをしているが、
-//     やねうら王ではそこではやりたくないので…。
-#include "misc.h"
-
-#if defined(__linux__) && !defined(__ANDROID__)
-    #include "shm_linux.h"
-#endif
-
-#if defined(__ANDROID__)
-    #include <limits.h>
-    #define SF_MAX_SEM_NAME_LEN NAME_MAX
+// Unix系では匿名ファイルとUnixソケットで評価関数のパラメーターを共有する。
+// Androidは従来どおりローカルメモリにフォールバックする。
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__) || defined(__FreeBSD__) \
+  || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
+    #define USE_UNIX_SHM
+    #include "shm_unix.h"
 #endif
 
 #include "types.h"
@@ -40,6 +35,7 @@
     #if _WIN32_WINNT < 0x0601
         #undef _WIN32_WINNT
         #define _WIN32_WINNT 0x0601  // Force to include needed API prototypes
+        // 必要なAPIのプロトタイプ宣言が読み込まれるようにする。
     #endif
 
     #if !defined(NOMINMAX)
@@ -84,22 +80,30 @@ namespace YaneuraOu {
 // but it's not really that important at this point.
 // If the path is longer than 4095 bytes the hash will be computed from an unspecified
 // amount of bytes of the path; in particular it can a hash of an empty string.
+// 実行ファイルを識別する必要があるため、argv[0]は使えない。
+// argv[0]は起動時のコマンドであり、完全なパスが含まれるとは限らない。
+// パスだけで識別する方法も完全ではない。OSが実行ファイルをロックしていなければ、
+// その内容が変更される可能性がある。理想的には実行ファイル自体のハッシュを使うべきだが、
+// 現時点ではそこまで重要ではない。
+// パスが4095バイトを超える場合、パスの何バイト分からハッシュが計算されるかは未規定。
+// 空文字列のハッシュになる場合もある。
 
 inline std::string getExecutablePathHash() {
     char        executable_path[4096] = {0};
-    std::size_t path_length           = 0;
+    usize path_length           = 0;
 
 #if defined(_WIN32)
     path_length = GetModuleFileNameA(NULL, executable_path, sizeof(executable_path));
 
 #elif defined(__APPLE__)
-    uint32_t size = sizeof(executable_path);
+    u32 size = sizeof(executable_path);
     if (_NSGetExecutablePath(executable_path, &size) == 0)
     {
         path_length = std::strlen(executable_path);
     }
 
 #elif defined(__sun)  // Solaris
+// Solaris向け。
     const char* path = getexecname();
     if (path)
     {
@@ -108,7 +112,7 @@ inline std::string getExecutablePathHash() {
     }
 
 #elif defined(__FreeBSD__)
-    size_t size   = sizeof(executable_path);
+    usize size   = sizeof(executable_path);
     int    mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
     if (sysctl(mib, 4, executable_path, &size, NULL, 0) == 0)
     {
@@ -134,6 +138,7 @@ inline std::string getExecutablePathHash() {
 #endif
 
     // In case of any error the path will be empty.
+    // エラーが発生した場合、パスは空になる。
     return std::string(executable_path, path_length);
 }
 
@@ -147,31 +152,38 @@ enum class SystemWideSharedConstantAllocationStatus {
 
 inline std::string GetLastErrorAsString(DWORD error) {
     //Get the error message ID, if any.
+    // エラーメッセージのIDがあれば取得する。
     DWORD errorMessageID = error;
     if (errorMessageID == 0)
     {
         return std::string();  //No error message has been recorded
+        // エラーメッセージは記録されていない。
     }
 
     LPSTR messageBuffer = nullptr;
 
     //Ask Win32 to give us the string version of that message ID.
     //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
-    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
+    // Win32 APIに、メッセージIDに対応する文字列を取得するよう要求する。
+    // メッセージの長さがまだ分からないため、渡す引数でWin32側にバッファの確保も依頼する。
+    usize size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
                                    | FORMAT_MESSAGE_IGNORE_INSERTS,
                                  NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                                  (LPSTR) &messageBuffer, 0, NULL);
 
     //Copy the error message into a std::string.
+    // エラーメッセージをstd::stringにコピーする。
     std::string message(messageBuffer, size);
 
     //Free the Win32's string's buffer.
+    // Win32側で確保した文字列バッファを解放する。
     LocalFree(messageBuffer);
 
     return message;
 }
 
 // Utilizes shared memory to store the value. It is deduplicated system-wide (for the single user).
+// 値を共有メモリに格納し、同じユーザーのプロセス間でシステム全体の重複をなくす。
 template<typename T>
 class SharedMemoryBackend {
    public:
@@ -189,7 +201,7 @@ class SharedMemoryBackend {
     static constexpr DWORD IS_INITIALIZED_VALUE = 1;
 
     SharedMemoryBackend() :
-        status(Status::NotInitialized) {};
+        status(Status::NotInitialized) {}
 
     SharedMemoryBackend(const std::string& shm_name, const T& value) :
         status(Status::NotInitialized) {
@@ -264,12 +276,13 @@ class SharedMemoryBackend {
 
    private:
     void initialize(const std::string& shm_name, const T& value) {
-        const size_t total_size = sizeof(T) + sizeof(IS_INITIALIZED_VALUE);
+        const usize total_size = sizeof(T) + sizeof(IS_INITIALIZED_VALUE);
 
         // Try allocating with large pages first.
-        hMapFile = windows_try_with_large_page_priviliges(
-          [&](size_t largePageSize) {
-              const size_t total_size_aligned =
+        // 最初にラージページを使った確保を試す。
+        hMapFile = windows_try_with_large_page_privileges(
+          [&](usize largePageSize) {
+              const usize total_size_aligned =
                 (total_size + largePageSize - 1) / largePageSize * largePageSize;
 
     #if defined(_WIN64)
@@ -287,6 +300,7 @@ class SharedMemoryBackend {
           []() { return (void*) nullptr; });
 
         // Fallback to normal allocation if no large pages available.
+        // ラージページを利用できなければ、通常のメモリ確保にフォールバックする。
         if (!hMapFile)
         {
             hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
@@ -307,11 +321,12 @@ class SharedMemoryBackend {
             const DWORD err    = GetLastError();
             last_error_message = GetLastErrorAsString(err);
             status             = Status::MapViewError;
-            cleanup_partial();
+            cleanup();
             return;
         }
 
         // Use named mutex to ensure only one initializer
+        // 名前付きミューテックスを使い、初期化を行うプロセスが1つだけになるようにする。
         std::string mutex_name = shm_name + "$mutex";
         HANDLE      hMutex     = CreateMutexA(NULL, FALSE, mutex_name.c_str());
         if (!hMutex)
@@ -319,7 +334,7 @@ class SharedMemoryBackend {
             const DWORD err    = GetLastError();
             last_error_message = GetLastErrorAsString(err);
             status             = Status::MutexCreateError;
-            cleanup_partial();
+            cleanup();
             return;
         }
 
@@ -330,11 +345,12 @@ class SharedMemoryBackend {
             last_error_message = GetLastErrorAsString(err);
             status             = Status::MutexWaitError;
             CloseHandle(hMutex);
-            cleanup_partial();
+            cleanup();
             return;
         }
 
         // Crucially, we place the object first to ensure alignment.
+        // アラインメントを保証するため、オブジェクトを領域の先頭に配置することが重要。
         volatile DWORD* is_initialized =
           std::launder(reinterpret_cast<DWORD*>(reinterpret_cast<char*>(pMap) + sizeof(T)));
         T* object = std::launder(reinterpret_cast<T*>(pMap));
@@ -342,6 +358,7 @@ class SharedMemoryBackend {
         if (*is_initialized != IS_INITIALIZED_VALUE)
         {
             // First time initialization, message for debug purposes
+            // 初回の初期化。メッセージはデバッグ用。
             new (object) T{value};
             *is_initialized = IS_INITIALIZED_VALUE;
         }
@@ -354,24 +371,11 @@ class SharedMemoryBackend {
             const DWORD err    = GetLastError();
             last_error_message = GetLastErrorAsString(err);
             status             = Status::MutexReleaseError;
-            cleanup_partial();
+            cleanup();
             return;
         }
 
         status = Status::Success;
-    }
-
-    void cleanup_partial() {
-        if (pMap != nullptr)
-        {
-            UnmapViewOfFile(pMap);
-            pMap = nullptr;
-        }
-        if (hMapFile)
-        {
-            CloseHandle(hMapFile);
-            hMapFile = 0;
-        }
     }
 
     void cleanup() {
@@ -393,7 +397,7 @@ class SharedMemoryBackend {
     std::string last_error_message;
 };
 
-#elif defined(__linux__) && !defined(__ANDROID__)
+#elif defined(USE_UNIX_SHM)
 
 template<typename T>
 class SharedMemoryBackend {
@@ -408,7 +412,7 @@ class SharedMemoryBackend {
         return reinterpret_cast<void*>(const_cast<T*>(ptr));
     }
 
-    bool is_valid() const { return shm1 && shm1->is_open() && shm1->is_initialized(); }
+    bool is_valid() const { return shm1 && shm1->is_mapped() && shm1->is_serving(); }
 
     SystemWideSharedConstantAllocationStatus get_status() const {
         return is_valid() ? SystemWideSharedConstantAllocationStatus::SharedMemory
@@ -419,11 +423,11 @@ class SharedMemoryBackend {
         if (!shm1)
             return "Shared memory not initialized";
 
-        if (!shm1->is_open())
-            return "Shared memory is not open";
+        if (!shm1->is_mapped())
+            return "Shared memory is not mapped";
 
-        if (!shm1->is_initialized())
-            return "Not initialized";
+        if (!shm1->is_serving())
+            return "Shared memory is not serving to other processes";
 
         return std::nullopt;
     }
@@ -436,6 +440,8 @@ class SharedMemoryBackend {
 
 // For systems that don't have shared memory, or support is troublesome.
 // The way fallback is done is that we need a dummy backend.
+// 共有メモリがない環境や、そのサポートに問題がある環境向け。
+// フォールバック処理を行うために、ダミーのバックエンドを用意する。
 
 template<typename T>
 class SharedMemoryBackend {
@@ -495,6 +501,7 @@ struct SharedMemoryBackendFallback {
 };
 
 // Platform-independent wrapper
+// プラットフォームに依存しないラッパー。
 template<typename T>
 struct SystemWideSharedConstant {
    private:
@@ -507,6 +514,9 @@ struct SystemWideSharedConstant {
    public:
     // We can't run the destructor because it may be in a completely different process.
     // The object stored must also be obviously in-line but we can't check for that, other than some basic checks that cover most cases.
+    // オブジェクトが別のプロセスに存在する可能性があるため、デストラクターは実行できない。
+    // 格納するオブジェクトのデータは、すべてオブジェクト自身の領域内に収まっている必要もある。
+    // ただし、それを完全には検査できないため、大半のケースを確認できる基本的な検査だけを行う。
     static_assert(std::is_trivially_destructible_v<T>);
     static_assert(std::is_trivially_move_constructible_v<T>);
     static_assert(std::is_trivially_copy_constructible_v<T>);
@@ -516,20 +526,24 @@ struct SystemWideSharedConstant {
 
     // Content is addressed by its hash. An additional discriminator can be added to account for differences
     // that are not present in the content, for example NUMA node allocation.
-    SystemWideSharedConstant(const T& value, std::size_t discriminator = 0) {
-        std::size_t content_hash    = std::hash<T>{}(value);
-        std::size_t executable_hash = hash_string(getExecutablePathHash());
+    // 内容のハッシュで共有領域を識別する。NUMAノードへの配置など、内容には現れない違いを
+    // 区別するために、追加の識別値discriminatorを指定できる。
+    SystemWideSharedConstant(const T& value, usize discriminator = 0) {
+        usize content_hash    = std::hash<T>{}(value);
+        usize executable_hash = hash_string(getExecutablePathHash());
 
         char buf[1024];
         std::snprintf(buf, sizeof(buf), "Local\\sf_%zu$%zu$%zu", content_hash, executable_hash,
                       discriminator);
         std::string shm_name = buf;
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(USE_UNIX_SHM)
         // POSIX shared memory names must start with a slash
+        // POSIX共有メモリの名前はスラッシュで始める必要がある。
         shm_name = "/sf_" + createHashString(shm_name);
 
         // hash name and make sure it is not longer than SF_MAX_SEM_NAME_LEN
+        // 名前をハッシュ化し、その長さがSF_MAX_SEM_NAME_LENを超えないようにする。
         if (shm_name.size() > SF_MAX_SEM_NAME_LEN)
         {
             shm_name = shm_name.substr(0, SF_MAX_SEM_NAME_LEN - 1);

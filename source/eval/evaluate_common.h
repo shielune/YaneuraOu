@@ -1,5 +1,5 @@
-﻿#ifndef _EVALUATE_COMMON_H_
-#define _EVALUATE_COMMON_H_
+﻿#ifndef EVALUATE_COMMON_H_INCLUDED
+#define EVALUATE_COMMON_H_INCLUDED
 
 // いまどきの手番つき評価関数(EVAL_KPPTとEVAL_KPP_KKPT)の共用header的なもの。
 
@@ -23,11 +23,6 @@ namespace Eval
 
 #endif
 
-#if defined(USE_EVAL_HASH)
-	// prefetchする関数
-    using Key64 = uint64_t;
-	void prefetch_evalhash(const Key64 key);
-#endif
 
 	// 評価関数のそれぞれのパラメーターに対して関数fを適用してくれるoperator。
 	// パラメーターの分析などに用いる。

@@ -1,13 +1,13 @@
-﻿#ifndef USI_OPTION_H_INCLUDED
-#define USI_OPTION_H_INCLUDED
+﻿#ifndef USIOPTION_H_INCLUDED
+#define USIOPTION_H_INCLUDED
 
-#include <cstddef>
 #include <functional>
 #include <iosfwd>
 #include <map>
 #include <optional>
 #include <string>
-#include <cstdint>
+
+#include "misc.h"
 
 namespace YaneuraOu {
 
@@ -28,7 +28,6 @@ class Option {
     // 値が変更された時に呼び出されるevent handlerの型。
     using OnChange = std::function<std::optional<std::string>(const Option&)>;
 
-    Option(const OptionsMap*);
     Option(OnChange = nullptr);
 
     // bool
@@ -42,7 +41,7 @@ class Option {
 	Option(int v, int minv, int maxv, OnChange = nullptr);
 #else
 	// ⇨ 💡 やねうら王では、引数をint64_tに変更
-    Option(int64_t v, int64_t minv, int64_t maxv, OnChange = nullptr);
+    Option(i64 v, i64 minv, i64 maxv, OnChange = nullptr);
 #endif
 
     // combo
@@ -57,9 +56,12 @@ class Option {
 
     Option& operator=(const std::string&);
 
-    //operator int() const;
+#if STOCKFISH
+    operator int() const;
+#else
     // 📌 やねうら王では、int64_tに変更する。
-    operator int64_t() const;
+    operator i64() const;
+#endif
 
     operator std::string() const;
     bool operator==(const char*) const;
@@ -70,7 +72,8 @@ class Option {
     int operator<<(const Option&) = delete;
 
     // -- やねうら王独自
-
+#if !STOCKFISH
+    // "usi"コマンドの応答に出さない(setoptionでは受け付ける)オプションにする。(フォーク独自)
     Option& hidden() {
         visible_in_usi = false;
         return *this;
@@ -79,11 +82,17 @@ class Option {
     // 固定化フラグ。
     // これを true にすると、operator = で変更できなくなる。
     bool fixed = false;
+#endif
 
    private:
     friend class OptionsMap;
     friend class Engine;
     friend class Tune;
+
+#if !STOCKFISH
+    // 固定設定の読込用。代入の返却型を変えず、値を受理したかを呼出側へ返す。
+    Option& assign(const std::string&, bool& accepted);
+#endif
 
     // このオプション設定のdefaultの値、現在の値、type。
     // 💡 typeは USIプロトコルのsetoptionの時に指定できるオプションの型名。
@@ -103,14 +112,19 @@ class Option {
 
     // このオプション設定がint型であるときに、最小値と最大値。
     // 📒 Stockfishではintだが、やねうら王ではint64_tに変更。
-    int64_t min, max;
+
+#if STOCKFISH
+    int               min = 0, max = 0;
+#else
+    i64 min = 0, max = 0;
+#endif
 
     // 追加した順に0,1,2,…
     // 💡 これは、OptionsMap.add()で追加する時に設定される。
     // 📝 "usi"コマンド応答で、OptionsMapへの登録順に出力されてほしいので、
     //     カウンターを0から増やしていき、Option::idxが一致したものを表示していくようになっている。
     //     この変数は、そのためのもの。
-    size_t idx;
+    usize idx = 0;
 
     // このOptionの設定値が変更された時に呼び出されるevent handler。
     OnChange on_change;
@@ -144,11 +158,11 @@ class OptionsMap {
     const Option& operator[](const std::string&) const;
 
     // Optionを一つ追加する。options_mapに追加される。
-    void add(const std::string& option_name, const Option& option);
+    void add(const std::string& /* option_name */, const Option& option);
 
     // 保持しているOptionのなかで、このoption_nameを持つものの数。
     // 💡 ある名前のoption項目を持っているかどうかを調べるのに使う。
-    std::size_t count(const std::string& option_name) const;
+    usize count(const std::string& /* option_name */) const;
 
 #if !STOCKFISH
 
@@ -168,6 +182,13 @@ class OptionsMap {
     // 通常の"setoption"では変更できない。
     void read_engine_options(const std::string& filename);
 
+    // ENGINE_OPTIONSマクロで、コンパイル時にエンジンオプションを設定する機能。
+    // ";"区切りで複数指定できる。
+    // 例) #define ENGINE_OPTIONS "FV_SCALE=24;BookFile=no_book"
+    // ⚠ read_engine_options()と同様、ここで設定した値はfixedフラグが立ち、
+    //     そのあと通常の"setoption"では変更できない。
+    void set_engine_options(const std::string& options);
+
     // option名を指定して、その値を出力した文字列を構成する。
     // option名が省略された時は、すべてのオプションの値を出力した文字列を構成する。
     std::string get_option(const std::string& option_name);
@@ -179,7 +200,7 @@ class OptionsMap {
 
     // idxを指定して、それに対応するOptionを取得する。
     // ⚠ 値が存在しないidxを指定すると落ちる。
-    std::pair<const std::string, const Option&> get_option_by_idx(size_t idx) const;
+    std::pair<const std::string, const Option&> get_option_by_idx(usize idx) const;
 
 #endif
 
@@ -200,10 +221,10 @@ class OptionsMap {
     OptionsStore options_map;
     InfoListener info;
 
+#if !STOCKFISH
     // 指定がなければ従来互換のV1。
     int book_options_version = 1;
 
-#if !STOCKFISH
     // 思考エンジンがGUIからの"usi"に対して返す"option ..."文字列から
     // Optionオブジェクトを構築して、それを *this に突っ込む。
     // "engine_options.txt"というファイルの各行からOptionオブジェクト構築して
@@ -215,6 +236,7 @@ class OptionsMap {
 #endif
 };
 
+#if !STOCKFISH
 // OptionsMapを参照で使いたい時に使うproxy。(やねうら王独自拡張)
 // 📝 C++ではclass memberの参照型はコンストラクタで初期化(代入)しなければならない。コンストラクタ以外で代入するには、
 //     std::reference_wrapperを用いればいいのだが、これを用いる場合、operator[]がうまく処理できない。
@@ -230,13 +252,14 @@ public:
 
 	const Option& operator[](const std::string& option_name) const { return (*options)[option_name]; };
 	void add(const std::string& option_name, const Option& option) { return (*options).add(option_name, option); }
-	std::size_t count(const std::string& option_name) const { return (*options).count(option_name); }
+	usize count(const std::string& option_name) const { return (*options).count(option_name); }
 	bool book_options_v2() const { return (*options).book_options_v2(); }
 
 private:
 	OptionsMap* options = nullptr;
 };
+#endif
 
 } // namespace YaneuraOu
 
-#endif  // #ifndef USI_OPTION_H_INCLUDED
+#endif  // #ifndef USIOPTION_H_INCLUDED

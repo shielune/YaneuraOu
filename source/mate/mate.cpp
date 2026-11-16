@@ -1,4 +1,5 @@
 ﻿#include "mate.h"
+#include "../extra/tools.h"
 #if defined (USE_MATE_1PLY)
 #include "../position.h"
 #include "../movegen.h"
@@ -155,7 +156,8 @@ MateRepetitionState mate_repetition(const Position& pos,
             break;
 
         default :
-            UNREACHABLE;
+            ASSERT_LV3(false);
+            sf_unreachable();
         }
 
         if (plies_from_root < repetition_ply)
@@ -177,7 +179,8 @@ MateRepetitionState mate_repetition(const Position& pos,
                 break;
 
             default :
-                UNREACHABLE;
+                ASSERT_LV3(false);
+                sf_unreachable();
             }
         }
     }
@@ -201,7 +204,8 @@ MateRepetitionState mate_repetition(const Position& pos,
             break;
 
         default :
-            UNREACHABLE;
+            ASSERT_LV3(false);
+            sf_unreachable();
         }
 
         if (plies_from_root < repetition_ply)
@@ -222,7 +226,8 @@ MateRepetitionState mate_repetition(const Position& pos,
                 break;
 
             default :
-                UNREACHABLE;
+                ASSERT_LV3(false);
+                sf_unreachable();
             }
         }
     }
@@ -236,7 +241,7 @@ MateRepetitionState mate_repetition(const Position& pos,
 // ---------------------
 
 // このEntryに保存する。
-void MateHashEntry::save(Key                          board_key,
+void MateHashEntry::save(HASH_KEY                          board_key,
                          Color                        root_color,
                          /*Color side_to_move,*/ Hand hand,
                          bool                         is_mate,
@@ -309,7 +314,7 @@ void MateHashEntry::unlock() { mutex = false; }
 
 // 与えられたboard_keyを持つMateHashEntryの先頭アドレスを返す。
 // (現状、1つしか該当するエントリーはない)
-MateHashEntry* MateHashTable::first_entry(const Key board_key, Color side_to_move) const {
+MateHashEntry* MateHashTable::first_entry(const HASH_KEY board_key, Color side_to_move) const {
     uint64_t index = mul_hi64((u64) board_key >> 1, entryCount);
     return &table[(index << 1) | side_to_move];
 }

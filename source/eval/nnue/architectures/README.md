@@ -87,8 +87,10 @@ sparse input features
 
 SFNNは通常NNUEと同じくFeatureTransformerとaccumulatorを使うが、変換後特徴量と
 後段networkが通常NNUEと異なる。
+SFNNの累積値と着手の差分は探索Workerの`AccumulatorStack`で管理し、
+従来NNUEは`StateInfo`で管理する。`EVAL_SFNN`と`EVAL_NNUE`は排他的に定義する。
 
-`SFNN_*`でビルドすると`SFNNwoPSQT`が定義され、FeatureTransformerでは
+`SFNN_*`でビルドすると`EVAL_SFNN`が定義され、FeatureTransformerでは
 `USE_ELEMENT_WISE_MULTIPLY`が有効になる。この経路では、2視点分のaccumulatorを
 element-wise multiplyで混ぜて、最終的に`FT`次元の変換後特徴量を後段に渡す。
 そのため、SFNNのarchitecture名は`1024_7_64`のようになり、通常NNUEの
@@ -99,25 +101,36 @@ sparse input features
   -> FeatureTransformer
   -> transformed features
   -> selected LayerStack network
-       fc_0: FT -> H1 + 1
+       fc_0: FT -> H1 or H1 + 1
        ClippedReLU(fc_0[0..H1))
        SqrClippedReLU(fc_0[0..H1))
        concat: H1 * 2
        fc_1: H1 * 2 -> H2
        ClippedReLU
        fc_2: H2 -> 1
-       output += fc_0[H1]
+       if shortcut enabled: output += fc_0[H1]
 ```
 
-`H1 + 1`の最後の1次元は、`fc_2`の出力に加算されるshortcut項である。
-`SFNNwoPSQT`という古い名前が残っている箇所があるが、このarchitecture headerでは
-このshortcut項を含む。
+SFNNの`H1`は、shortcutの有無を次の規則で決める。
+
+```text
+H1 が 8n - 1: shortcutあり。fc_0出力は H1 + 1。
+H1 が 8n    : shortcutなし。fc_0出力は H1。
+```
+
+例えば`SFNN_halfka2_1024_7_64_k3k3`は`7`個のhidden出力と`1`個のshortcut出力を持つ。
+一方、`SFNN_halfka2_1024_8_64_k3k3`は`8`個のhidden出力だけを持ち、shortcutは使わない。
+shortcutの有無はこの`H1`規則で決まる。
 
 SFNNでは`LayerStacks`個の後段networkを`nn.bin`に持ち、局面ごとに1つを選んで使う。
 例えば`k3k3`なら9個、`k21k21`なら441個、`k29k29`なら841個、`hand64_k3k3`なら576個、
 `k3k3_progress8`なら72個の後段networkを持つ。
 FeatureTransformerはLayerStackごとに増えないが、`fc_0`以降の後段パラメータは
 基本的にLayerStack数に比例して増える。
+
+`kTransformedFeatureDimensions`が128未満の小幅SFNNでは、生成ヘッダが
+`NNUE_SMALL_SFNN_FT`を定義する。この場合だけFeatureTransformerのEWM変換で小幅専用経路を
+使う。従来幅のSFNNではこのマクロを定義せず、既存のAVX2/AVX512高速経路をそのまま使う。
 
 ### LayerStack Bucket
 
@@ -171,16 +184,14 @@ idx = idx * progress_bucket_count + progress_bucket
 progress_bucket = min(progress * progress_bucket_count / 256, progress_bucket_count - 1)
 ```
 
-進行度パラメータの置き場所は2通りある。
+進行度パラメータは`nn.bin`には格納せず、`EvalDir`の`progress.bin`から読む
+(形式は`tools/memo/progress-format.md`)。`nn.bin`にProgress sectionは無い。
 
-- suffixなし(`progress8`など): `nn.bin`の中に格納する。外部ファイルは使わない。
-- 末尾`x`(`progress8x`)または`ek`(`progress8ek`): `nn.bin`には進行度セクションを持たず、
-  外部の`progress.bin`から読む。エンジン側は`LS_PROGRESS_COEFF`オプションで
-  `progress.bin`を指定する。`x`は相入玉bucketなしで係数だけを外部化する指定、
-  `ek`は相入玉bucketを1つ足したうえで外部化する指定(`progress8ek`は9 bucket)。
-
-`progress.bin`は`double[81][1548]`(bias無し)で、`x`/`ek`のarchitectureでは
-`nn.bin`と別に配布される。
+- 末尾`x`(`progress8x`): 相入玉bucketなし。`progress8`と同じもので、このフォークの
+  edition名との互換のために残している。
+- 末尾`ek`(`progress8ek`): 相入玉bucketを1つ足す(`progress8ek`は9 bucket)。
+  エンジンオプション`LS_BUCKET_MODE`で、相入玉bucketを使うかを選ぶ。
+- エンジンオプション`LS_PROGRESS_COEFF`で、`progress.bin`以外のファイル名やパスを指定できる。
 
 #### つようら王11との名前の対応
 
@@ -195,20 +206,6 @@ progress_bucket = min(progress * progress_bucket_count / 256, progress_bucket_co
 
 `*_8_64_progress8*`は寸法が異なるため、つようら王11の`nn.bin`には使えない。
 
-`suffixなし`の場合、`nn.bin`のセクション順は次の通り。
-
-```text
-NNUE header
-FeatureTransformer section
-Progress section
-LayerStack network section 0
-LayerStack network section 1
-...
-```
-
-Progress sectionは、section hash、`int32 bias_q16`、`int32 weights_q16[81][1548]`の順に
-little-endianで保存する。`x`/`ek`ではこのsectionは`nn.bin`に存在しない。
-
 ### Progress 実装上の注意
 
 `progressN`は評価関数の一部なので、進行度計算用の型や読み書き処理は
@@ -220,7 +217,7 @@ little-endianで保存する。`x`/`ek`ではこのsectionは`nn.bin`に存在�
 囲む。
 
 ```cpp
-#if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+#if defined(EVAL_SFNN) && NNUE_SFNN_PROGRESS_BUCKETS != 1
 ```
 
 特に`StateInfo`に進行度計算キャッシュを追加する場合、progressを使わないarchitectureで
@@ -230,7 +227,7 @@ little-endianで保存する。`x`/`ek`ではこのsectionは`nn.bin`に存在�
 そのため、`position.h`側のprogress cacheも次のようにprogress有効時だけ定義する。
 
 ```cpp
-#if defined(SFNNwoPSQT) && defined(NNUE_SFNN_PROGRESS_BUCKETS) && NNUE_SFNN_PROGRESS_BUCKETS != 1
+#if defined(EVAL_SFNN) && defined(NNUE_SFNN_PROGRESS_BUCKETS) && NNUE_SFNN_PROGRESS_BUCKETS != 1
     Key nnue_progress_key;
     int64_t nnue_progress_sum;
     Square nnue_progress_sq_bk;
@@ -261,7 +258,7 @@ total  = 1024 + 256 * 8 = 3072
 ```
 
 全ての`fc_0`出力はcommon 1024次元を見る。一方、各出力groupは対応するshard
-256次元だけを見る。`H1 + 1 = 8`、`G = 8`なら、各出力は
+256次元だけを見る。fc0出力次元が8、`G = 8`なら、各出力は
 `common 1024 + shard 256 = 1280`次元だけを使う。
 
 `c0_s1024x8`のように`common = 0`も指定できる。この場合は、共通入力なしで、
@@ -271,7 +268,7 @@ total  = 1024 + 256 * 8 = 3072
 
 ```text
 C + S * G == FT
-(H1 + 1) % G == 0
+fc0出力次元 % G == 0
 C は64の倍数
 S は64の倍数
 G > 1
@@ -767,6 +764,88 @@ python3 source/eval/nnue/architectures/nnue_arch_gen.py \
 dummyのデフォルトは`random-small`である。完全に0で初期化したい場合は
 `--dummy-mode zero`を指定する。
 
+## Finny reset updates
+
+`-DUSE_LAZY_EVALUATE -DUSE_FINNY_TABLES`を指定すると、FT幅4096以下で
+玉位置別・視点別・スレッド別のFinnyキャッシュを使う。
+追加で`-DUSE_FINNY_RESET`を指定した場合のみ、通常の差分更新でresetになった視点も、
+`refresh_accumulator()`と同じキャッシュを参照する。
+`USE_FINNY_RESET`未定義時は従来のreset処理を使う。
+resetしない視点は従来どおり直前局面から差分更新する。
+
+キャッシュが未初期化の場合はbiasから全再計算する。`USE_FINNY_RESET`定義時は、
+remove/addする重み列の合計が全特徴量の加算本数以上になる場合も全再計算する。
+それ以外ではキャッシュから変化した特徴量だけを更新する。
+追加の重みテーブルやモデル形式の変更は不要である。
+
+`isready`後の`test nn test_accumulator 100`では、通常差分更新とFinnyによるrefreshを、
+キャッシュを通さない全再計算と比較する。accumulator全要素、評価値、undo/redoを検証する。
+
+変更前後の比較は、リポジトリルートから次のように実行できる。
+
+```sh
+python3 tools/memo/bench_finny_reset.py --build \
+  --extra-cppflags='-DUSE_LAZY_EVALUATE -DUSE_FINNY_TABLES' \
+  --eval-dir ../inbox/evalTuyo12-20261025 \
+  --arch SFNN_halfka2_2304_15_64_progress8 \
+  --nodes 2000000 --warmup-nodes 500000 --rounds 4
+```
+
+`finny_reset`だけに`USE_FINNY_RESET`を定義する。
+`baseline`には定義せず、従来のreset処理とFinny更新条件を使う。
+両方ともAVX512VNNI、Lazy Evaluate、Finny Tablesを有効にしてビルドする。
+オブジェクトと実行ファイルは構成ごとに分離する。
+
+`bench`標準4局面を使い、実行順を交互に入れ替える。モデル読み込み後に
+ウォームアップし、実測ノード数と時間からNPSを集計する。
+`build/finny-reset/`にバイナリ、生ログ、モデルとバイナリのハッシュ、`results.json`を保存する。
+4・8スレッドでは`--threads`と`--pin`を変更し、同じバイナリを`--bin-dir`で再利用する。
+`--checks-from build/finny-reset/results.json`で同じバイナリ・モデルの検証を再利用できる。
+再利用時も同じ`--extra-cppflags`を指定すること。
+
+## Additional SFNN experiments
+
+AVX512（`USE_AVX512`定義時）かつFT幅2304の場合は、FTタイルに24レジスタを使う。
+その他のFT幅・SIMDでは従来の本数を使う。次元数はC++の定数式で判定する。
+
+次の実験用指定で候補を個別に比較できる。モデル形式と評価値は変更しない。
+専用化・相殺・融合はデフォルトでは無効である。
+
+| EXTRA_CPPFLAGS | 対象 |
+| --- | --- |
+| `-DNNUE_FT_SPECIALIZED` | 通常更新のremove 1/add 1とremove 2/add 2を固定本数のループで処理する。 |
+| `-DNNUE_FT_SPARSE8` | AVX512・SFNN・FT幅2304専用。FT重みを8bit＋少数の補正値として格納し、差分更新の重み転送量を減らす。 |
+| `-DNNUE_FT_REGS=8` / `12` / `24` | AVX512かつFT幅2304のFTタイル用レジスタ数を上書きする。 |
+| `-DNNUE_FINNY_CANCEL` | Finnyで発生したremove/addを多重集合として比較し、相殺分を除く。 |
+| `-DNNUE_SFNN_FUSED_FT` | EWM変換と疎入力の第1層を融合する。生成architectureの16出力・FT幅128の倍数・8bit重み向け。 |
+
+`NNUE_FT_SPARSE8`は読み込み時の可逆な変換であり、モデルファイルと評価値は変更しない。
+重みの確保領域は従来のままで、よく読む重みをその前半に詰める。
+補正位置の索引として、入力特徴量ごとに4バイトを追加する。
+補正が必要な重みが全体の1/1024を超えるモデルでは、従来の16bit方式を使う。
+8bit方式では通常更新の1対1・2対2の専用処理も内部で使うため、`NNUE_FT_SPECIALIZED`の追加は不要。
+本方式はデフォルト無効。使用時は既存の`-DUSE_LAZY_EVALUATE -DUSE_FINNY_TABLES -DUSE_FINNY_RESET`に
+`-DNNUE_FT_SPARSE8`を追加する。AVX512以外ではこの指定を無視する。
+
+融合版は、既存の8出力用カーネルとは別にAVX512VNNIの16出力用カーネルを使う。
+`test nn test_accumulator`では、融合前後の第1層の生の整数出力も比較する。
+Finnyの相殺除去は重複する特徴量の個数を保ち、駒落ちなどの重複にも対応する。
+
+```sh
+python3 tools/memo/bench_sfnn_experiments.py --build \
+  --eval-dir ../inbox/evalTuyo12-20261025 \
+  --arch SFNN_halfka2_2304_15_64_progress8 \
+  --threads 1 --pin 2 --nodes 2000000 --warmup-nodes 500000 --rounds 4
+```
+
+全構成で`-DUSE_LAZY_EVALUATE -DUSE_FINNY_TABLES -DUSE_FINNY_RESET`とAVX512VNNIを使う。
+実験の基準は8レジスタに固定し、レジスタ数以外の候補も8レジスタで比較する。
+各バイナリをロードしたまま保持し、探索は1構成ずつ実行する。
+`bench`標準4局面を使い、各測定にウォームアップを付け、順序を入れ替えて比較する。
+`build/sfnn-experiments/`にバイナリ・生ログ・検証結果・`results.json`を保存する。
+8・32スレッドは同じバイナリを`--bin-dir`で指定し、`--checks-from`に
+最初の`results.json`を指定して検証を再利用する。CPU listとノード数も変更すること。
+
 ## Implementation
 
 探索時のbucket計算は`source/eval/nnue/evaluate_nnue.cpp`の
@@ -785,3 +864,26 @@ dummy `nn.bin`の生成処理は`source/eval/nnue/architectures/nnue_dummy_gen.p
 
 新しい入力特徴量やLayerStack方式を追加するときは、生成器、探索時bucket計算、
 学習器側のbucket計算を同時に更新すること。
+
+## SFNNのNUMAノード別重み複製（任意）
+
+`EXTRA_CPPFLAGS`に`-DENABLE_NUMA_NETWORK_REPLICATION`を追加すると、SFNNの重みを
+Stockfishと同じ`LazyNumaReplicatedSystemWide`でNUMAノード別に配置する。
+既定では無効で、従来の全スレッド共通の重みを使用する。
+
+```sh
+make -j tournament COMPILER=clang++ \
+  YANEURAOU_EDITION=YANEURAOU_ENGINE_SFNN_halfkahm2_2304_15_64_k9k9_progress8 \
+  TARGET_CPU=AVX512VNNI \
+  EXTRA_CPPFLAGS='-DUSE_LAZY_EVALUATE=4 -DUSE_FINNY_TABLES -DUSE_FINNY_RESET -DNNUE_FT_SPARSE8 -DENABLE_NUMA_NETWORK_REPLICATION'
+```
+
+`NumaPolicy`は従来どおり指定する。`auto`では必要に応じてバインドし、`none`では
+全Workerがノード0の重みを参照する。明示的なCPU割り当ても使用できる。
+FT、後段の全LayerStack、進行度パラメーターをまとめて複製し、探索前に
+各Workerが参照する複製を準備する。NUMA設定変更時には複製も作り直す。
+
+共有メモリはOSの物理NUMAノードを識別して使い分ける。同じOSノード内を
+L3や手動設定で分割した論理ノードでは、重みの実体を共有できる。
+実際に複数の物理ノードへ配置する場合は、その分のメモリを消費する。
+1物理ノードのPCでは、ノード間メモリアクセスを減らす効果は検証できない。

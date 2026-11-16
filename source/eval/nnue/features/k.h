@@ -1,11 +1,11 @@
 ﻿// NNUE評価関数の入力特徴量Kの定義
 
-#ifndef CLASSIC_NNUE_FEATURES_K_H
-#define CLASSIC_NNUE_FEATURES_K_H
+#ifndef CLASSIC_NNUE_FEATURES_K_H_INCLUDED
+#define CLASSIC_NNUE_FEATURES_K_H_INCLUDED
 
 #include "../../../config.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../../../evaluate.h"
 #include "features_common.h"
@@ -19,10 +19,10 @@ class K {
   // 特徴量名
   static constexpr const char* kName = "K";
   // 評価関数ファイルに埋め込むハッシュ値
-  static constexpr std::uint32_t kHashValue = 0xD3CEE169u;
+  static constexpr u32 kHashValue = 0xD3CEE169u;
 
   // 特徴量の次元数
-  static constexpr IndexType kDimensions = uint32_t(SQ_NB) * 2;
+  static constexpr IndexType kDimensions = u32(SQ_NB) * 2;
 
   // 特徴量のうち、同時に値が1となるインデックスの数の最大値
   static constexpr IndexType kMaxActiveDimensions = 2;
@@ -35,12 +35,12 @@ class K {
 
   // 特徴量のうち、一手前から値が変化したインデックスのリストを取得する
   static void AppendChangedIndices(const Position& pos, Color perspective,
-                                   IndexList* removed, IndexList* added);
+                                   IndexList* removed, IndexList* added, const Eval::DirtyPiece& dp);
 };
 
 } // Eval::NNUE::Features
 } // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif

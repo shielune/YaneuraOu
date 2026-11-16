@@ -1,4 +1,5 @@
 ﻿#include "../../config.h"
+#include "../../extra/tools.h"
 
 #if defined(USER_ENGINE)
 
@@ -121,7 +122,7 @@ class UserEngine : public Engine
             return LargePagePtr<Worker>(p.release());  // Worker* に upcast
         };
 
-        threads.set(numaContext.get_numa_config(), {options, threads, tt, sharedHists /*, networks*/ },
+        threads.set(numaContext.get_numa_config(), {options, threads, tt, sharedHists /*, network*/ },
 					updateContext, options["Threads"], worker_factory);
 
 		// 📌 NUMAの設定
@@ -148,13 +149,14 @@ namespace {
 		usi->set_engine(*engine);  // エンジン実装を差し替える。
 		usi->enqueue_startup_commands(CommandLine::g);
 
+#if defined(__EMSCRIPTEN__)
+		// 🌈 wasmではloop()が即座にreturnするので、インスタンスを保持したうえでJS側に制御を返す。
+		//     以後のコマンドはusi_command()経由で実行される。
+		wasm_keep_alive(std::move(engine), std::move(usi));
+#else
 		// USIコマンドの応答のためのループ
 		usi->loop();
-
-		#if defined(__EMSCRIPTEN__)
-		// yaneuraou.wasm: loop()は即returnするので、ここで解体させない。
-		wasm_retain_engine(engine, usi);
-		#endif
+#endif
 	}
 
 	// このentry pointを登録しておく。

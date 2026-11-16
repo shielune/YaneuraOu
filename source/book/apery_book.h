@@ -19,8 +19,8 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef APERY_BOOK_HPP
-#define APERY_BOOK_HPP
+#ifndef APERY_BOOK_H_INCLUDED
+#define APERY_BOOK_H_INCLUDED
 
 #include <unordered_map>
 #include "../types.h"
@@ -40,20 +40,20 @@ class AperyBook {
 public:
 	explicit AperyBook(const std::string& filename);
 	const std::vector<AperyBookEntry>& get_entries(const Position& pos) const;
-	static Key bookKey(const Position& pos);
+	static HASH_KEY bookKey(const Position& pos);
 	size_t size() const { return book_.size(); }
 	static void init();
 
 private:
 	std::vector<AperyBookEntry> empty_entries_;
-	std::unordered_map<Key, std::vector<AperyBookEntry>> book_;
+	std::unordered_map<HASH_KEY, std::vector<AperyBookEntry>> book_;
 
-	static Key ZobPiece[PIECE_NB - 1][SQ_NB];
-	static Key ZobHand[PIECE_HAND_NB - 1][19];
-	static Key ZobTurn;
+	static HASH_KEY ZobPiece[PIECE_NB - 1][SQ_NB];
+	static HASH_KEY ZobHand[PIECE_HAND_NB - 1][19];
+	static HASH_KEY ZobTurn;
 };
 
 } // namespace Book
 } // namespace YaneuraOu
 
-#endif // #ifndef APERY_BOOK_HPP
+#endif // #ifndef APERY_BOOK_H_INCLUDED

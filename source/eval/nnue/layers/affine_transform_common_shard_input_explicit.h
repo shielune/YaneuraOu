@@ -5,8 +5,9 @@
 #define NNUE_LAYERS_AFFINE_TRANSFORM_COMMON_SHARD_INPUT_EXPLICIT_H_INCLUDED
 
 #include "../../../config.h"
+#include "../../../extra/tools.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../nnue_common.h"
 #include "simd.h"
@@ -27,8 +28,8 @@ template <IndexType InputDimensions,
           IndexType ShardGroupCount>
 class AffineTransformCommonShardInputExplicit {
    public:
-	using InputType  = std::uint8_t;
-	using OutputType = std::int32_t;
+	using InputType  = u8;
+	using OutputType = i32;
 
 	static constexpr IndexType kInputDimensions        = InputDimensions;
 	static constexpr IndexType kOutputDimensions       = OutputDimensions;
@@ -55,8 +56,8 @@ class AffineTransformCommonShardInputExplicit {
 
 	using OutputBuffer = OutputType[kPaddedOutputDimensions];
 
-	static constexpr std::uint32_t GetHashValue(std::uint32_t prevHash) {
-		std::uint32_t hash_value = 0xCC03DAE4u;
+	static constexpr u32 GetHashValue(u32 prevHash) {
+		u32 hash_value = 0xCC03DAE4u;
 		hash_value += kOutputDimensions;
 		hash_value ^= prevHash >> 1;
 		hash_value ^= prevHash << 31;
@@ -71,11 +72,11 @@ class AffineTransformCommonShardInputExplicit {
 	}
 
 	Tools::Result ReadParameters(std::istream& stream) {
-		for (std::size_t i = 0; i < kOutputDimensions; ++i)
+		for (usize i = 0; i < kOutputDimensions; ++i)
 			biases_[i] = read_little_endian<BiasType>(stream);
 
 		WeightType zero{};
-		for (std::size_t i = 0; i < kOutputDimensions * kPaddedEffectiveInputDimensions; ++i)
+		for (usize i = 0; i < kOutputDimensions * kPaddedEffectiveInputDimensions; ++i)
 			weights_[i] = zero;
 
 		for (IndexType out = 0; out < kOutputDimensions; ++out) {
@@ -221,7 +222,7 @@ class AffineTransformCommonShardInputExplicit {
 
    private:
 	using BiasType   = OutputType;
-	using WeightType = std::int8_t;
+	using WeightType = i8;
 
 #if defined(USE_AVX512)
 	template <IndexType HalfDimensions, typename AccumulationType>
@@ -257,6 +258,6 @@ class AffineTransformCommonShardInputExplicit {
 }  // namespace Eval::NNUE::Layers
 }  // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif  // NNUE_LAYERS_AFFINE_TRANSFORM_COMMON_SHARD_INPUT_EXPLICIT_H_INCLUDED

@@ -22,21 +22,21 @@ namespace Eval::NNUE {
     // 変換後の入力特徴量の次元数
     constexpr IndexType kTransformedFeatureDimensions = 4096;
 
+    // 小幅SFNN専用。従来幅のSFNNでは定義せず、既存の高速経路をそのまま使う。
+    
+
     // Number of networks stored in the evaluation file
     constexpr int LayerStacks = 8;
 
     #define NNUE_SFNN_HAND_BUCKETS 1
+    #define NNUE_SFNN_HAND_BUCKET_TYPE 0
     #define NNUE_SFNN_KING_BUCKETS 1
+    #define NNUE_SFNN_KING_BUCKET_TYPE 0
     #define NNUE_SFNN_PROGRESS_BUCKETS 8
 
-    // 1なら、進行度バケットの最後の1つを相入玉局面専用にする。
+    // 1なら、進行度バケットの最後の1つを相入玉局面専用にする。(フォーク独自)
     // 💡 NAGISA_V3 の評価関数 (progress8ek) がこの形。
     #define NNUE_SFNN_PROGRESS_ENTERING_KING 0
-
-    // 1なら、進行度係数を nn.bin ではなく外部ファイルから読む。
-    // 💡 progress8ek / progress8x 系は係数を progress.bin として別配布しているのでこちら。
-    //    このとき nn.bin には進行度セクションが無いので、hashにも含めない。
-    #define NNUE_SFNN_PROGRESS_EXTERNAL 1
 
     // Number of groups for the first affine layer of SFNN.
     // common+shard fc_0でのみ2以上になる。
@@ -50,12 +50,20 @@ namespace Eval::NNUE {
     // 各層の次元数
     constexpr IndexType kInputDims   = kTransformedFeatureDimensions;
     constexpr IndexType kHidden1Dims = 7;
+    constexpr bool kUseShortcut = true;
+    constexpr IndexType kHidden1OutputDims = kHidden1Dims + (kUseShortcut ? 1 : 0);
     constexpr IndexType kHidden2Dims = 64;                              
 
+    #if !defined(ENABLE_SFNN_16BIT_WEIGHT)
     
+    #endif
 
-    using Fc0Layer = Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1Dims + 1>;
-    using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims>;
+    using Fc0Layer = Layers::AffineTransformSparseInputExplicit<kInputDims, kHidden1OutputDims>;
+    #if defined(ENABLE_SFNN_16BIT_WEIGHT)
+    using NetworkBase = SfnnNetwork16<kInputDims, kHidden1Dims, kHidden2Dims, kUseShortcut>;
+    #else
+    using NetworkBase = SfnnNetwork<Fc0Layer, kInputDims, kHidden1Dims, kHidden2Dims, kUseShortcut>;
+    #endif
 
     struct Network : NetworkBase {
         static std::string GetStructureString() {

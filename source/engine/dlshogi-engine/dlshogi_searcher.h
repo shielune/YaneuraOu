@@ -1,8 +1,10 @@
-﻿#ifndef __DLSHOGI_SEARCHER_H_INCLUDED__
-#define __DLSHOGI_SEARCHER_H_INCLUDED__
+﻿#ifndef DLSHOGI_SEARCHER_H_INCLUDED
+#define DLSHOGI_SEARCHER_H_INCLUDED
 #include "../../config.h"
 
 #if defined(YANEURAOU_ENGINE_DEEP)
+
+#include <mutex>
 
 #include "../../position.h"
 #include "../../book/book.h"
@@ -120,7 +122,7 @@ namespace dlshogi {
 	private:
 		// ある局面のHASH_KEY(Position::key()にて取得できる)に対応するmutexを返す。
 		// →　これ外から呼び出して使わなくていいっぽいのでとりまprivateにしておく。
-		std::mutex& get_mutex(const Key key)
+		std::mutex& get_mutex(const HASH_KEY key)
 		{
 			return mutexes[key & (MUTEX_NUM - 1)];
 		}
@@ -355,4 +357,4 @@ namespace dlshogi {
 } // namespace dlshogi
 
 #endif // defined(YANEURAOU_ENGINE_DEEP)
-#endif // ndef __DLSHOGI_SEARCHER_H_INCLUDED__
+#endif // ndef DLSHOGI_SEARCHER_H_INCLUDED

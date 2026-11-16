@@ -1,12 +1,12 @@
 // NNUE評価関数の入力特徴量A2の定義
 // 玉を含む全駒のBonaPiece。後手玉を自玉と同じplaneにマージするv2エンコーディング。
 
-#ifndef CLASSIC_NNUE_FEATURES_A2_H
-#define CLASSIC_NNUE_FEATURES_A2_H
+#ifndef CLASSIC_NNUE_FEATURES_A2_H_INCLUDED
+#define CLASSIC_NNUE_FEATURES_A2_H_INCLUDED
 
 #include "../../../config.h"
 
-#if defined(EVAL_NNUE)
+#if (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #include "../../../evaluate.h"
 #include "features_common.h"
@@ -19,7 +19,7 @@ namespace Eval::NNUE::Features {
 class A2 {
  public:
   static constexpr const char* kName = "A2";
-  static constexpr std::uint32_t kHashValue = 0xA20DCB9Bu;
+  static constexpr u32 kHashValue = 0xA20DCB9Bu;
   static constexpr IndexType kDimensions = e_king;
   static constexpr IndexType kMaxActiveDimensions = PIECE_NUMBER_NB;
   static constexpr TriggerEvent kRefreshTrigger = TriggerEvent::kNone;
@@ -28,12 +28,12 @@ class A2 {
                                   IndexList* active);
 
   static void AppendChangedIndices(const Position& pos, Color perspective,
-                                   IndexList* removed, IndexList* added);
+                                   IndexList* removed, IndexList* added, const Eval::DirtyPiece& dp);
 };
 
 }  // namespace Eval::NNUE::Features
 }  // namespace YaneuraOu
 
-#endif  // defined(EVAL_NNUE)
+#endif  // (defined(EVAL_NNUE) || defined(EVAL_SFNN))
 
 #endif

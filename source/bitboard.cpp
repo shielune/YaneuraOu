@@ -1,12 +1,13 @@
 ﻿#include "bitboard.h"
+
+#include <iostream>
+#include <ostream>
+
+#include "misc.h"
 #include "extra/long_effect.h"
 #include "mate/mate.h"
 #include "testcmd/unit_test.h"
-#include "misc.h"
 
-#include <sstream>
-
-using namespace std;
 namespace YaneuraOu {
 
 // ----- Bitboard const
@@ -117,17 +118,20 @@ using namespace BB_Table;
 
 // ----------------------------------------------------------------------------------------------
 
-// Bitboardを表示する(USI形式ではない) デバッグ用
+// Prints an ASCII representation of a bitboard to the output stream.
+// Useful for debugging.
+// 標準出力でのデバッグに使う、BitboardのASCII表現を出力する。
+// StockfishのBitboards::pretty()に対応し、将棋側では従来どおりostreamへ直接書き込む。
 std::ostream& operator<<(std::ostream& os, const Bitboard& board)
 {
 	for (Rank rank = RANK_1; rank <= RANK_9; ++rank)
 	{
 		for (File file = FILE_9; file >= FILE_1; --file)
 			os << ((board & (file | rank)) ? " *" : " .");
-		os << endl;
+		os << std::endl;
 	}
 	// 連続して表示させるときのことを考慮して改行を最後に入れておく。
-	os << endl;
+	os << std::endl;
 	return os;
 }
 
@@ -141,7 +145,7 @@ void Bitboards::init()
 	// 1) SquareWithWallテーブルの初期化。
 
 	for (auto sq : SQ)
-		sqww_table[sq] = SquareWithWall(SQWW_11 + (int32_t)file_of(sq) * SQWW_L + (int32_t)rank_of(sq) * SQWW_D);
+		sqww_table[sq] = SquareWithWall(SQWW_11 + (i32)file_of(sq) * SQWW_L + (i32)rank_of(sq) * SQWW_D);
 
 
 	// 2) direct_tableの初期化
@@ -631,7 +635,7 @@ std::ostream& operator<<(std::ostream& os, const Bitboard256& board)
 		print_rank(b1,r);
 		os << ' ';
 		print_rank(b2,r);
-		os << endl;
+		os << std::endl;
 	}
 	return os;
 }
@@ -815,7 +819,7 @@ Bitboard effects_from(Piece pc, Square sq)
 	//case B_QUEEN:  case W_QUEEN:  return bishopStepEffect(sq) | rookStepEffect(sq); // 角+飛でいいや。(馬+龍は王の利きを2回合成して損)
 	case NO_PIECE: case PIECE_WHITE: return Bitboard(ZERO); // これも入れておかないと初期化が面倒になる。
 
-	default: UNREACHABLE; return Bitboard(1);
+	default: ASSERT_LV3(false); sf_unreachable(); return Bitboard(1);
 	}
 }
 
@@ -845,7 +849,7 @@ Bitboard effects_from(Piece pc, Square sq, const Bitboard& occ)
 	//case B_QUEEN:  case W_QUEEN:  return bishopEffect (sq, occ) | rookEffect(sq, occ); // 角+飛でいいや。(馬+龍は王の利きを2回合成して損)
 	case NO_PIECE: case PIECE_WHITE: return Bitboard(ZERO); // これも入れておかないと初期化が面倒になる。
 
-	default: UNREACHABLE; return Bitboard(1);
+	default: ASSERT_LV3(false); sf_unreachable(); return Bitboard(1);
 	}
 }
 
@@ -892,6 +896,33 @@ Bitboard rookRankEffect(Square sq, const Bitboard& occupied)
 // 角の利き
 Bitboard bishopEffect(const Square sq, const Bitboard& occupied)
 {
+#if defined(USE_AVX512)
+    // Compute all four diagonal rays in one register, preserving 128-bit borrows.
+    // 4本の斜め方向を1レジスタにまとめ、各128bit整数の桁借りを保って計算する。
+    const __m512i masks = _mm512_loadu_si512(&QUGIY_BISHOP_MASK[sq][0]);
+    const __m512i order = _mm512_setr_epi64(0, 1, 0, 1, 1, 0, 1, 0);
+    const __m512i reverseOdd = _mm512_broadcast_i64x2(
+      _mm_setr_epi8(0,1,2,3,4,5,6,7,15,14,13,12,11,10,9,8));
+    const __m512i occ = _mm512_and_si512(masks, _mm512_shuffle_epi8(
+      _mm512_permutexvar_epi64(order, _mm512_broadcast_i64x2(occupied.m)), reverseOdd));
+    const __mmask8 borrow = __mmask8(0x0f | ((_mm512_cmpeq_epi64_mask(occ,
+                                                     _mm512_setzero_si512()) & 0x0f) << 4));
+    const __m512i decremented = _mm512_mask_sub_epi64(occ, borrow, occ, _mm512_set1_epi64(1));
+    const __m512i changed = _mm512_ternarylogic_epi64(occ, decremented, masks, 0x28);
+    const __m512i restoreOrder = _mm512_setr_epi64(0, 4, 2, 6, 5, 1, 7, 3);
+    const __m512i restoreBytes = _mm512_setr_epi64(
+      0x0706050403020100LL, 0x0f0e0d0c0b0a0908LL,
+      0x0706050403020100LL, 0x0f0e0d0c0b0a0908LL,
+      0x0001020304050607LL, 0x08090a0b0c0d0e0fLL,
+      0x0001020304050607LL, 0x08090a0b0c0d0e0fLL);
+    const __m512i rays = _mm512_shuffle_epi8(
+      _mm512_permutexvar_epi64(restoreOrder, changed), restoreBytes);
+    const __m256i merged = _mm256_or_si256(_mm512_castsi512_si256(rays),
+                                         _mm512_extracti64x4_epi64(rays, 1));
+    Bitboard result;
+    result.m = _mm_or_si128(_mm256_castsi256_si128(merged), _mm256_extracti128_si256(merged, 1));
+    return result;
+#else
 	const Bitboard256 mask_lo =  QUGIY_BISHOP_MASK[sq][0];
 	const Bitboard256 mask_hi =  QUGIY_BISHOP_MASK[sq][1];
 
@@ -919,6 +950,7 @@ Bitboard bishopEffect(const Square sq, const Bitboard& occupied)
 	// byte_reverseして元の状態に戻して、重ね合わせる。
 	// hiの方には、右方向の利き、loは左方向の利きが得られている。
 	return (hi.byte_reverse() | lo).merge();
+#endif
 }
 
 // === 大駒の部分利き(SEEなどで用いる) ===
@@ -936,7 +968,7 @@ Bitboard directEffect(Square sq, Effect8::Direct d, const Bitboard& occupied)
 	case Effect8::DIRECT_LU : return rayEffect<Effect8::DIRECT_LU>(sq, occupied);
 	case Effect8::DIRECT_L  : return rayEffect<Effect8::DIRECT_L >(sq, occupied);
 	case Effect8::DIRECT_LD : return rayEffect<Effect8::DIRECT_LD>(sq, occupied);
-	default: UNREACHABLE; return Bitboard(ZERO);
+	default: ASSERT_LV3(false); sf_unreachable(); return Bitboard(ZERO);
 	}
 }
 
@@ -944,8 +976,8 @@ Bitboard directEffect(Square sq, Effect8::Direct d, const Bitboard& occupied)
 void Bitboard::UnitTest(Test::UnitTester& tester, IEngine& engine)
 {
 	//Bitboard b(SQ_75);
-	//cout << lanceEffect<WHITE>(SQ_71, b) << endl;
-	//cout << lanceEffect<WHITE>(SQ_72, b) << endl;
+	//std::cout << lanceEffect<WHITE>(SQ_71, b) << std::endl;
+	//std::cout << lanceEffect<WHITE>(SQ_72, b) << std::endl;
 
 	auto section1 = tester.section("Bitboard");
 
@@ -1004,14 +1036,14 @@ void Bitboard::UnitTest(Test::UnitTester& tester, IEngine& engine)
 				bool ok0 = (p0 == p0_table[(int)pt]);
 				if (!ok0)
 				{
-					cout << "Effect " << pc  << "(" << pretty(pc) << ")" << " on SQ_55 in Bitboard(ZERO) , pop_count = " << p0 << endl;
-					cout << bb0 << endl;
+					std::cout << "Effect " << pc  << "(" << pretty(pc) << ")" << " on SQ_55 in Bitboard(ZERO) , pop_count = " << p0 << std::endl;
+					std::cout << bb0 << std::endl;
 				}
 				bool ok1 = (p1 == p1_table[(int)pt]);
 				if (!ok1)
 				{
-					cout << "Effect " << pc  << "(" << pretty(pc) << ")" << " on SQ_55 in Bitboard(1) , pop_count = " << p1 << endl;
-					cout << bb1 << endl;
+					std::cout << "Effect " << pc  << "(" << pretty(pc) << ")" << " on SQ_55 in Bitboard(1) , pop_count = " << p1 << std::endl;
+					std::cout << bb1 << std::endl;
 				}
 				all_ok &= ok0 & ok1;
 			}
