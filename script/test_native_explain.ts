@@ -54,6 +54,57 @@ for (const moves of [['7g7f', '3c3d'], ['7g7f', '3c3d', '8h2b+', '3a2b']]) {
   assert.deepEqual(plain[0].parts, ['material', 'tempo', 'threat', 'king_safety', 'mobility']);
   for (const row of plain.filter(r => 'ply' in r))
     for (const key of ['black_pov', 'linear_material', 'linear_mobility', 'top', 'd_linear_material']) assert(!(key in row), key);
+  // Default off: no pass / mate_threat keys.
+  for (const row of plain.filter(r => 'ply' in r)) assert(!('pass' in row) && !('mate_threat' in row));
+  {
+    const runWith = (options: string[], explain: string, position = 'startpos') => {
+      const result = spawnSync(resolve(binary), [], {
+        input: ['usi', `setoption name HceProgressFile value ${resolve(models, 'hce-progress.bin')}`,
+          `setoption name HceExplainFile value ${resolve(models, 'hce-explain.bin')}`,
+          ...options.map(o => `setoption name ${o}`), `position ${position.startsWith('startpos') ? position : 'sfen ' + position}`, explain, 'quit', ''].join('\n'),
+        encoding: 'utf8', timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      return result.stdout.split(/\r?\n/).filter(l => l.startsWith('{"ply"')).map(l => JSON.parse(l));
+    };
+    const keys = ['king_safety', 'material', 'mobility', 'tempo', 'threat'];
+    const moves = 'explain moves 7g7f 3c3d 8h2b+ 3a2b';
+    const base = runWith([], moves);
+    // HcePass alone: pass is {moves_left, parts}, mate_threat is absent, the other keys are unchanged.
+    const withPass = runWith(['HcePass value true'], moves);
+    assert.equal(withPass.length, base.length);
+    for (const [i, row] of withPass.entries()) {
+      assert(!('mate_threat' in row));
+      assert.deepEqual(Object.keys(row.pass.parts).sort(), keys);
+      assert(Number.isFinite(row.pass.moves_left));
+      const { pass: _pass, ...rest } = row;
+      assert.deepEqual(rest, base[i]);
+      // Passing flips the tempo term.
+      assert.equal(row.pass.parts.tempo === 0, row.parts.tempo === 0);
+    }
+    // HceMateThreat alone: null on quiet positions, no pass key.
+    const withMate = runWith(['HceMateThreat value true'], moves);
+    for (const [i, row] of withMate.entries()) {
+      assert(!('pass' in row) && 'mate_threat' in row);
+      assert.equal(row.mate_threat, null);
+      const { mate_threat: _mate, ...rest } = row;
+      assert.deepEqual(rest, base[i]);
+    }
+    // A side in check cannot pass: both are null (the white king faces the rook on the same file).
+    const checked = runWith(['HcePass value true', 'HceMateThreat value true'], 'explain',
+      '4k4/9/9/9/9/9/9/9/4R1K2 w - 1');
+    assert.equal(checked.length, 1);
+    assert.equal(checked[0].pass, null);
+    assert.equal(checked[0].mate_threat, null);
+    // A real tsumero: if Black passes, White mates in 7 (the start position and quiet positions give null above).
+    const tsumero = runWith(['HcePass value true', 'HceMateThreat value true'], 'explain',
+      '3gk1snl/3ss1g2/p3pp2p/2+B6/9/9/P1SPP1P1P/2G2+rp2/LNK1+n2GL b RNL7Pbp 58');
+    assert.equal(tsumero.length, 1);
+    assert(tsumero[0].mate_threat !== null && tsumero[0].mate_threat.moves.length === 7);
+    assert(tsumero[0].mate_threat.nodes > 0);
+    assert.deepEqual(Object.keys(tsumero[0].pass.parts).sort(), keys);
+  }
   const legacy = run('explain legacy top 3 moves 7g7f 3c3d');
   assert.equal(legacy[0].route, 'linear');
   assert.equal(legacy.at(-1).positions, 3);
