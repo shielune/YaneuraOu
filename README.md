@@ -117,8 +117,14 @@ Release を作成・変更しない。手動実行のアーカイブ名ではタ
 
 ## 性能 — ネイティブと比べてどうか
 
-「WASM だから遅い」ということはない。同一マシン・同一評価関数・同一探索条件で測ると、
-**WASM はネイティブ SIMD ビルドの約 92% の探索速度**が出る。
+WASM の速さは、比べるネイティブ版の SIMD の幅で大きく変わる。
+WASM SIMD は 128 bit なので、同じ 128 bit の NEON (aarch64) や SSE4.2 には近いが、
+256 bit の AVX2 (x86-64) とは差が開く。
+
+### aarch64 (2026-07-28 測定)
+
+同一マシン・同一評価関数・同一探索条件で、**WASM はネイティブ NEON ビルドの約 92%** の
+探索速度が出た。WASM は emscripten 6.0.4 でビルドしたもの。
 
 | ビルド | nps | 対 native NEON |
 |---|---|---|
@@ -146,6 +152,41 @@ Release を作成・変更しない。手動実行のアーカイブ名ではタ
 
 計測条件と生データは
 [`docs/reports/2026-07-28_wasm_v96x_performance.md`](docs/reports/2026-07-28_wasm_v96x_performance.md)。
+
+### x86-64 (2026-11-16 測定)
+
+Intel Core Ultra 7 265KF で、上と同じ局面・同じ探索条件を測ると、
+**ブラウザの WASM はネイティブ AVX2 の約半分、SSE4.2 の 6〜8 割**だった。
+
+KP256 (水匠 petite):
+
+| ビルド | nps | 対 native AVX2 | 対 native SSE4.2 |
+|---|---|---|---|
+| native g++ 13 (AVX2) | 1,852k | 100% | 121% |
+| native clang 18 (AVX2) | 1,938k | 105% | 127% |
+| native g++ 13 (SSE4.2) | 1,527k | 82% | 100% |
+| native clang 18 (SSE4.2) | 1,583k | 85% | 104% |
+| **ブラウザ WASM (Chromium 155、emscripten 5.0.5)** | **953k** | **51%** | **62%** |
+| Node 向けパッケージ (Node 26、emscripten 3.1.43) | 956k | 52% | 63% |
+
+NAGISA V4 (SFNN HalfKA_hm2 2304x2-15-64):
+
+| ビルド | nps | 対 native AVX2 | 対 native SSE4.2 |
+|---|---|---|---|
+| native g++ 13 (AVX2) | 580k | 100% | 138% |
+| native g++ 13 (SSE4.2) | 420k | 72% | 100% |
+| **ブラウザ WASM (Chromium 155、emscripten 5.0.5)** | **324k** | **56%** | **77%** |
+| Node 向けパッケージ (Node 26、emscripten 3.1.43) | 325k | 56% | 77% |
+
+`Threads=1` / `go nodes 1000000` / `USI_Hash 256` / CPU 4 コアに固定 / 5回の中央値。
+ネイティブは `make tournament`。どのビルドもノード数まで一致する
+(KP256 で 1,000,242、V4 で 1,000,538)。
+
+- aarch64 で 92% 出たのは、比べる相手が WASM SIMD と同じ 128 bit 幅の NEON だから。
+  x86-64 の AVX2 は 256 bit 幅なので差が開く。WASM が通るのは SSE4.2 と同じ経路で、
+  比べるならこちらが近い
+- ブラウザと Node の差は 1% 未満。emscripten 5.0.5 では両者の `.wasm` はバイト単位で同一
+- `USE_WASM_SIMD` は上流に合わせて定義していない。x86-64 では定義しないほうが 5〜15% 速かった
 
 ## 使い方 (Node.js)
 
