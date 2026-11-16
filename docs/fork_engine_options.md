@@ -136,6 +136,25 @@ info string NNUE header version mismatch: expected 2062757654 got 3735928559 (co
 
 ---
 
+## Manaka エディション
+
+`YANEURAOU_ENGINE_MANAKA` 専用。NNUE とは別の整数評価関数を使う。
+
+| オプション | 型 | 既定値 | 用途 |
+|---|---|---|---|
+| `EvalDir` | `string` | `eval` | 評価関数ファイルのディレクトリ |
+| `EvalFile` | `string` | `nn.bin` | 評価関数ファイル名 |
+| `ManakaRequireChecksum` | `check` | `false` | チェックサムの無い旧 `SYMq16` を拒否 |
+
+`SYMq16c` は常に CRC32C を照合する。旧 `SYMq16` は内容未検証の警告を表示する。
+オプションを変えると、次の `isready` で読み直す。読み込みに失敗したら `Error!` と終了コード 1 で
+終了し、`readyok` は返さない。
+
+形式はこのフォーク専用で、上流のやねうら王では読めない。
+対応構造、ビルド方法、重みの作り方は [Manaka エディション](manaka.md) を参照。
+
+---
+
 ## 出自
 
 `FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化の 3 点は

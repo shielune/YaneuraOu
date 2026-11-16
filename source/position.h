@@ -15,6 +15,10 @@
 #include "eval/nnue/nnue_accumulator.h"
 #endif
 
+#if defined(EVAL_MANAKA)
+#include "eval/manaka/manaka_accumulator.h"
+#endif
+
 #include "extra/key128.h"
 #include "extra/long_effect.h"
 #include "misc.h"
@@ -207,6 +211,12 @@ struct StateInfo {
 
 #if defined(EVAL_NNUE)
 	Eval::NNUE::Accumulator accumulator;
+#endif
+
+#if defined(EVAL_MANAKA)
+	// Manaka。do_move()でコピーされない領域に置く(do_move()の冒頭で旗を倒す)。
+	// 中身の約束は eval/manaka/API.md。
+	Eval::Manaka::Accumulator manaka_accumulator;
 #endif
 
 #if defined (USE_EVAL_LIST)

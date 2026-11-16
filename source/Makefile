@@ -22,6 +22,7 @@
 # YANEURAOU_ENGINE_KPPT          : KPPT型評価関数
 # YANEURAOU_ENGINE_KPP_KKPT      : KPP_KKPT型評価関数
 # YANEURAOU_ENGINE_MATERIAL      : 駒得のみの評価関数(複数変種あり。MATERIAL_LEVELで選択できる)
+# YANEURAOU_ENGINE_MANAKA        : Manaka評価関数(トークン集合のpower sumとpairの和。nn.binを読む。eval/manaka/API.md)
 # TANUKI_MATE_ENGINE             : tanuki- 詰め将棋solver  (2017/05/06～)
 # YANEURAOU_MATE_ENGINE          : やねうら王 詰将棋solver (2020/12/29～)
 # USER_ENGINE                    : USER定義エンジン
@@ -42,6 +43,7 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_KPP_KKPT
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_MATERIAL
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_MANAKA
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_DEEP_TENSOR_RT_UBUNTU
 #YANEURAOU_EDITION = TANUKI_MATE_ENGINE
 #YANEURAOU_EDITION = YANEURAOU_MATE_ENGINE
@@ -431,6 +433,35 @@ ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_KIKI)
 		eval/hce/mobility_weights_embedded.cpp                                 \
 		eval/humanlike/humanlike_eval.cpp                                      \
 		engine/yaneuraou-engine/yaneuraou-search.cpp
+endif
+
+ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_MANAKA)
+	# Manaka edition: nn.bin (SYMq16c と旧 SYMq16) を読むトークン集合の評価。NNUE も humanlike も使わない。
+	# eval/manaka/core/ は YaneuraOu の型に依存しない純 C++17 の評価の本体。
+	SOURCES  +=                                                                \
+		eval/manaka/evaluate_manaka.cpp                                        \
+		eval/manaka/manaka_net_mnw.cpp                                         \
+		eval/manaka/manaka_net_q16.cpp                                         \
+		eval/manaka/manaka_output_map.cpp                                      \
+		eval/manaka/core/tokens.cpp                                            \
+		eval/manaka/core/q16.cpp                                               \
+		engine/yaneuraou-engine/yaneuraou-search.cpp
+
+	# 開発用の MNW1 (f32、公開物ではない) は EXTRA_CPPFLAGS=-DMANAKA_DEV_MNW1 のときだけ読み込む。
+	# そのときだけ f32 の評価の翻訳単位も入れる。
+	ifneq (,$(findstring MANAKA_DEV_MNW1,$(EXTRA_CPPFLAGS)))
+		SOURCES  +=                                                            \
+			eval/manaka/core/mnw.cpp                                           \
+			eval/manaka/core/eval_f32.cpp
+	endif
+
+	# core は浮動小数の演算順を保ち、Rust の manaka-core と結果を揃えるため、
+	# -ffast-math を外し、乗算と加算の FMA への融合を禁じる。q16.cpp の dense の後処理 (inv_k * acc + b) も
+	# 融合すると別の f32 になる。manaka_net_*.cpp と manaka_output_map.cpp も同じ扱いにする: -ffinite-math-only の下では
+	# isfinite が消えうるので、pre の有限性の判定と float から int への変換はこの 3 種の翻訳単位に置く。
+	# 他の翻訳単位と他のエディションのフラグは変えない。
+	# normal ターゲットは CPPFLAGS をコマンドラインで渡すので、上書きには override が要る。
+$(OBJDIR)/eval/manaka/core/%.o $(OBJDIR)/eval/manaka/manaka_net_%.o $(OBJDIR)/eval/manaka/manaka_output_map.o: override CPPFLAGS += -fno-fast-math -ffp-contract=off
 endif
 
 ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))

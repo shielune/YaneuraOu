@@ -78,7 +78,24 @@ bool Model::load(const std::string& path, std::string& error) {
 	for (int i = 1; i < 5; ++i)
 		if (!(knots->v[i] > knots->v[i - 1])) return bad("knots are not ascending");
 
+	// 倍率の節は無くてもよい (無ければ 1)。あるなら 7 つの位置が昇順で、倍率は正の有限値。
+	bool  has_gain = false;
+	float gain_at[GAIN_KNOTS] = {}, gain_value[GAIN_KNOTS] = {};
+	if (const auto it = sections.find("gain"); it != sections.end()) {
+		const Section& g = it->second;
+		if (g.v.size() != size_t(2 * GAIN_KNOTS)) return bad("section gain is not 7 positions and 7 gains");
+		for (int i = 0; i < GAIN_KNOTS; ++i) {
+			gain_at[i]    = g.v[size_t(i)];
+			gain_value[i] = g.v[size_t(GAIN_KNOTS + i)];
+			if (!(gain_value[i] > 0.0f)) return bad("a gain is not positive");
+			if (i > 0 && !(gain_at[i] > gain_at[i - 1])) return bad("gain positions are not ascending");
+		}
+		has_gain = true;
+	}
+
 	sections_    = std::move(sections);
+	has_gain_    = has_gain;
+	for (int i = 0; i < GAIN_KNOTS; ++i) { gain_at_[i] = gain_at[i]; gain_value_[i] = gain_value[i]; }
 	fingerprint_ = uint64_t(progress->p[0]) | (uint64_t(progress->p[1]) << 32);
 	for (int i = 0; i < 5; ++i) knots_[i] = knots->v[i];
 	for (int f = 0; f < NUM_FACTORS; ++f)
@@ -87,6 +104,16 @@ bool Model::load(const std::string& path, std::string& error) {
 	tempo_  = tempo->v[0];
 	loaded_ = true;
 	return true;
+}
+
+float Model::gain(float total_abs) const {
+	if (!has_gain_) return 1.0f;
+	const float x = std::min(std::max(total_abs, gain_at_[0]), gain_at_[GAIN_KNOTS - 1]);
+	int hi = 1;
+	while (hi < GAIN_KNOTS - 1 && gain_at_[hi] <= x) ++hi;
+	const int   lo   = hi - 1;
+	const float frac = (x - gain_at_[lo]) / (gain_at_[hi] - gain_at_[lo]);
+	return (1.0f - frac) * gain_value_[lo] + frac * gain_value_[hi];
 }
 
 const Model::Section* Model::find(const char* name) const {

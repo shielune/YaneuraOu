@@ -389,7 +389,7 @@ Parts compute_parts(const Position& pos, float left, const int* speed_cols) {
 	material *= (double)g_model.curve(Model::MATERIAL, left);
 
 	const double side = pos.side_to_move() == BLACK ? 1.0 : -1.0;
-	const double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
+	double tempo = side * (double)g_model.tempo_value() * (double)g_model.curve(Model::TEMPO, left);
 
 	// 速度、玉の安全度、駒の働きは、それぞれ倍率を掛けたあとの値。
 	double speed = 0.0, king = 0.0, activity = 0.0;
@@ -439,6 +439,16 @@ Parts compute_parts(const Position& pos, float left, const int* speed_cols) {
 	shift(p.has_speed,    speed,    g_nets.moved_speed);
 	shift(p.has_king,     king,     g_nets.moved_king);
 	shift(p.has_activity, activity, g_nets.moved_activity);
+
+	// 合計の大きさに応じた倍率を、5 つの要素すべてに同じだけ掛ける。足した値が合計の倍率倍になる。
+	// 倍率は掛ける前の合計から求める (節 "gain" が無ければ 1)。
+	{
+		const double before = material + tempo + (p.has_speed ? speed : 0.0)
+		                    + (p.has_king ? king : 0.0) + (p.has_activity ? activity : 0.0);
+		const double g = (double)g_model.gain((float)std::fabs(before));
+		material *= g; tempo *= g;
+		speed *= g; king *= g; activity *= g;
+	}
 
 	p.material = material;
 	p.tempo    = tempo;

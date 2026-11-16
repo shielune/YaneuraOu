@@ -1734,6 +1734,12 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     st->accumulator.computed_accumulation = false;
     st->accumulator.computed_score        = false;
 #endif
+#if defined(EVAL_MANAKA)
+    // newSt は board_key より前しかコピーされないので、兄弟手で再利用された StateInfo の
+    // manaka_accumulator は前の手の残り。通常手ごとに必ず旗を倒す。
+    st->manaka_accumulator.computed_accumulation = false;
+    st->manaka_accumulator.computed_score        = false;
+#endif
 
 #if defined(USE_BOARD_EFFECT_PREV)
     // NNUE-HalfKPE9
@@ -2462,6 +2468,12 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 #if defined(USE_CLASSIC_EVAL) && defined(EVAL_NNUE)
     // NNUEの場合、KPPT型と違って、手番が違う場合、計算なしに済ますわけにはいかない。
     st->accumulator.computed_score = false;
+#endif
+#if defined(USE_CLASSIC_EVAL) && defined(EVAL_MANAKA)
+    // Manaka のトークン集合は手番に依らないので、StateInfo 全体のコピーで引き継いだ
+    // accumulator の中身はそのまま使える(computed_accumulation は倒さない)。
+    // 倒すのは score だけ。W1 に入れる枠の順(手番側が先)が変わるため。
+    st->manaka_accumulator.computed_score = false;
 #endif
 
 	// このタイミングでアドレスが確定するのでprefetchしたほうが良い。(かも)

@@ -62,6 +62,10 @@ void add_options(OptionsMap& options, ThreadPool& threads) {
 bool        eval_loaded   = false;
 std::string last_eval_dir = "None";
 
+// いま読み込もうとしている評価関数ファイルの名前。LoadAndShare() が拒否の理由を言うときに使う。
+// 読み込みは load_eval() から一度に一つずつしか走らないので、排他は要らない。
+static std::string eval_source = "<unknown>";
+
 #if defined(SFNNwoPSQT) && NNUE_SFNN_PROGRESS_ENTERING_KING
 // LS_BUCKET_MODE が progress8ek か。既定は本家 NAGISA_V3 と同じ progress8kpabs。
 bool progress_entering_king_bucket = false;
@@ -473,6 +477,16 @@ namespace {
 		std::string architecture;
 		Tools::Result result = ReadHeader(stream, &hash_value, &architecture, nullptr);
 		if (result.is_not_ok()) return result;
+		// Manaka のネットワーク (ModelType=SYM で始まるもの。SYMq16c、SYMq16、不採用の SYM2 を含む) は NNUE ではない。
+		// ヘッダー (version、hash、アーキテクチャ文字列) が NNUE と同じ形で、上の ReadHeader も
+		// version の不一致も hash の不一致も警告で済ませるので、ここで名前を見て拒否しないと、
+		// 本文を NNUE のパラメータとして読み進める。消費したバイト数が偶然合えば受理されうる。
+		if (architecture.rfind("ModelType=SYM", 0) == 0) {
+			sync_cout << "info string Refusing eval file " << eval_source << ": "
+				<< architecture.substr(0, architecture.find(';'))
+				<< " is a Manaka network, not an NNUE one, and this build does not read it" << sync_endl;
+			return Tools::ResultCode::FileMismatch;
+		}
 		if (hash_value != kHashValue) {
 			sync_cout << "info string Warning: NNUE hash mismatch: expected " << kHashValue
 				<< " got " << hash_value
@@ -911,6 +925,7 @@ void load_eval() {
 				if (!stream.is_open())
 					return Tools::Result(Tools::ResultCode::FileNotFound);
 
+                eval_source = file_path;
                 return NNUE::ReadParameters(stream);
             }
             else {
@@ -931,6 +946,7 @@ void load_eval() {
                 std::istream stream(&buffer);
                 sync_cout << "info string loading eval file : <internal>" << sync_endl;
 
+                eval_source = "<internal>";
                 return NNUE::ReadParameters(stream);
             }
         }();

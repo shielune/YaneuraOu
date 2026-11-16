@@ -55,15 +55,16 @@ macOS Intel / Apple Silicon の実行ファイルを作り、同じタグの Rel
 
 取得するアーカイブは
 `yaneuraou-<環境>-<network>-<tag>-explain.tar.gz`。
-例えば `yaneuraou-linux-amd64-kp256-v9.61.1-explain.tar.gz` に入る実行ファイルは
-`yaneuraou-linux-amd64-kp256-explain`。この名前は新しいワークフローの出力規則であり、
-v9.61.1 の既存 Release にネイティブ版が追加済みという意味ではない。
+例えば `yaneuraou-linux-amd64-kp256-v9.61.6-explain.tar.gz` に入る実行ファイルは
+`yaneuraou-linux-amd64-kp256-explain`。
 アーカイブには GPL ライセンスとソースのタグへのリンクを含める。
 Linux 版は動的リンクなので、ビルド用 runner と互換性のある glibc / libstdc++ が必要。
 
-`hce-progress.bin` と `hce-explain.bin` は既存の v9.61.1 Release から別途取得して、
-展開した実行ファイルと同じディレクトリに置く。モデルの再配布条件を変更せず、
-アーカイブには同梱しない。そのディレクトリで実行ファイルを起動し、標準入力に送る。
+`hce-progress.bin` と `hce-explain.bin` は、取得したアーカイブと同じタグの Release に
+別の資産として載っている。その 2 つを取得して、展開した実行ファイルと同じディレクトリに置く。
+2 つは同じ Release のものを組で使う（進行度ファイルとの指紋が合わないと内訳は出ない）。
+モデルの再配布条件を変更せず、アーカイブには同梱しない。
+そのディレクトリで実行ファイルを起動し、標準入力に送る。
 
 ```text
 usi
@@ -181,7 +182,8 @@ Node で正しく動かせることを確認できている唯一のバージョ
 | 文書 | 内容 |
 |---|---|
 | [`docs/wasm_client_usage.md`](docs/wasm_client_usage.md) | WASM パッケージの利用ガイド (最初に読む) |
-| [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike) |
+| [`docs/fork_engine_options.md`](docs/fork_engine_options.md) | 独自エンジンオプション (`FullTimeMode` / 隠しオプション / NNUE ヘッダ寛容化 / HumanLike / Manaka) |
+| [`docs/manaka.md`](docs/manaka.md) | Manaka エディションのビルドと SYMq16c / SYMq16 の読み込み (フォーク専用) |
 | [`docs/wasm_release_workflow.md`](docs/wasm_release_workflow.md) | WASM パッケージのリリース手順 |
 | [`docs/releases/`](docs/releases/README.md) | 各リリースのリリースノート (本文の生成元) |
 | [`docs/wasm_upgrade_changelog.md`](docs/wasm_upgrade_changelog.md) | emscripten / upstream 追従作業の記録 |
