@@ -482,7 +482,12 @@ MateThreat find_mate_threat(Position& pos, u64 nodes_limit) {
 	static Mate::Dfpn::MateDfpnSolver solver(Mate::Dfpn::DfpnSolverType::Node32bit);
 	static u64 allocated = 0;
 	if (allocated != nodes_limit) {
-		solver.alloc_by_nodes_limit((size_t)nodes_limit);
+		// The node pool counts as full once fewer than MaxCheckMoves (100) nodes are left, and
+		// expanding the root does not check for that, so a pool of 100 nodes or fewer makes the
+		// first new_node() return nullptr. Give small limits a pool of at least kMinPool nodes;
+		// the search itself still stops at nodes_limit, and limits >= kMinPool are unchanged.
+		constexpr u64 kMinPool = 1024;
+		solver.alloc_by_nodes_limit((size_t)std::max<u64>(nodes_limit, kMinPool));
 		allocated = nodes_limit;
 	}
 	solver.set_max_game_ply(0);
