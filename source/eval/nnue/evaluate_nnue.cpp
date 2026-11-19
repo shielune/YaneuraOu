@@ -739,9 +739,13 @@ namespace {
 #elif NNUE_SFNN_PROGRESS_ENTERING_KING
         // progress8kpabs のときは相入玉バケットを取り分けず、進行度だけで分類する。
         // このとき最後の1バケットは使われない (本家 NAGISA_V3 と同じ挙動)。
+#if defined(NAGISA_V4_TUNING)
+        return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS - 1);
+#else
         if (!progress_entering_king_bucket)
             return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS - 1);
         return networks().progress.BucketIndexWithEnteringKing(pos, NNUE_SFNN_PROGRESS_BUCKETS);
+#endif
 #else
         return networks().progress.BucketIndex(pos, NNUE_SFNN_PROGRESS_BUCKETS);
 #endif

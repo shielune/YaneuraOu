@@ -338,8 +338,16 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
 			// → しかしこのあとsee_ge()の引数に使うのだが、see_ge()ではpromotionの価値を考慮してないので、
 			//    ここでpromotionの価値まで足し込んでしまうとそこと整合性がとれなくなるのか…。
 
+#if defined(NAGISA_V4_TUNING)
+			// capture historyと駒価値をQ8のまま加算してから整数へ戻す。
+			const int captureScoreQ8 =
+			  256 * int((*captureHistory)[pc][to][type_of(capturedPiece)])
+			  + 2269 * int(Eval::PieceValue[capturedPiece]);
+			m.value = captureScoreQ8 / 256;
+#else
 			m.value = (*captureHistory)[pc][to][type_of(capturedPiece)]
 						+ 7 * int(Eval::PieceValue[capturedPiece]);
+#endif
 			// →　係数を掛けてるのは、
 			// このあと、GOOD_CAPTURE で、
 			//	return pos.see_ge(*cur, Value(-cur->value))
@@ -359,6 +367,16 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
 			// →　指し手オーダリングは、quietな指し手の間での優劣を付けたいわけで、
 			//    駒を成るような指し手はどうせevaluate()で大きな値がつくからそっちを先に探索することになる。
 
+#if defined(NAGISA_V4_TUNING)
+			// 項ごとの丸めを避け、privateと同じQ8の合算順序を保持する。
+			int quietScoreQ8 = 442 * int((*mainHistory)[us][m.raw()]);
+            quietScoreQ8 += 488 * int(sharedHistory->pawn_entry(pos)[pc][to]);
+			quietScoreQ8 += 256 * int((*continuationHistory[0])[pc][to]);
+			quietScoreQ8 += 256 * int((*continuationHistory[1])[pc][to]);
+			quietScoreQ8 += 256 * int((*continuationHistory[2])[pc][to]);
+			quietScoreQ8 += 256 * int((*continuationHistory[3])[pc][to]);
+			quietScoreQ8 += 256 * int((*continuationHistory[5])[pc][to]);
+#else
 			m.value  =  2 * (*mainHistory)[us][m.raw()];
             m.value +=  2 * sharedHistory->pawn_entry(pos)[pc][to];
 			m.value +=      (*continuationHistory[0])[pc][to];
@@ -366,9 +384,16 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
 			m.value +=      (*continuationHistory[2])[pc][to];
 			m.value +=      (*continuationHistory[3])[pc][to];
 			m.value +=      (*continuationHistory[5])[pc][to];
+#endif
 
+#if defined(NAGISA_V4_TUNING)
+			// 王手のボーナスも同じQ8単位で加算する。
+			quietScoreQ8 += ((pos.check_squares(pt) & to) && pos.see_ge(m, -62)) * 256 * 16326;
+			m.value = quietScoreQ8 / 256;
+#else
 			// bonus for checks
 			m.value += ((pos.check_squares(pt) & to) && pos.see_ge(m, -75)) * 16384;
+#endif
 			// これ、効果があるのか検証したほうが良さげ。
 
 #if STOCKFISH
@@ -389,7 +414,11 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
 
 			// lowPlyHistoryも加算
 			if (ply < LOW_PLY_HISTORY_SIZE)
+#if defined(NAGISA_V4_TUNING)
+                m.value += 1941 * int((*lowPlyHistory)[ply][m.raw()]) / (256 * (1 + ply));
+#else
                 m.value += 8 * (*lowPlyHistory)[ply][m.raw()] / (1 + ply);
+#endif
 			
 		}
 		else // Type == EVASIONS || EVASIONS_ALL
@@ -456,7 +485,11 @@ Move MovePicker::select(Pred filter) {
 Move MovePicker::next_move() {
 
 	// 💡 good Quietの閾値
+#if defined(NAGISA_V4_TUNING)
+	constexpr int goodQuietThreshold = -10165;
+#else
 	constexpr int goodQuietThreshold = -14000;
+#endif
 
 top:
     switch (stage)
@@ -509,7 +542,11 @@ top:
 	case GOOD_CAPTURE:
 		if (select([&]() {
 				// moveは駒打ちではないからsee()の内部での駒打ちは判定不要だが…。
+#if defined(NAGISA_V4_TUNING)
+				if (pos.see_ge(*cur, -cur->value / 13))
+#else
 				if (pos.see_ge(*cur, -cur->value / 18))
+#endif
 					return true;
 				std::swap(*endBadCaptures++, *cur);
 				// 損をする捕獲する指し手はあとのほうで試行されるようにendBadCapturesに移動させる
@@ -602,7 +639,11 @@ top:
 			*/
 
 
+#if defined(NAGISA_V4_TUNING)
+			partial_insertion_sort(cur, endCur, -2986 * depth);
+#else
 			partial_insertion_sort(cur, endCur, -3560 * depth);
+#endif
 		}
 
 		++stage;
