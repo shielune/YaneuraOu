@@ -773,7 +773,11 @@ int correction_value(const YaneuraOuWorker& w, const Position& pos, const Stack*
                 + (*(ss - 4)->continuationCorrectionHistory)[pos.piece_on(m.to_sq())][m.to_sq()]
                  : 8;
 
+#if defined(NAGISA_V4_TUNING)
+    return 6984 * pcv + 5372 * micv + 9107 * (wnpcv + bnpcv) + 13604 * cntcv;
+#else
     return 12153 * pcv + 8620 * micv + 12355 * (wnpcv + bnpcv) + 7982 * cntcv;
+#endif
 }
 
 // Add correctionHistory value to raw staticEval and guarantee evaluation
@@ -791,12 +795,20 @@ void update_correction_history(const Position&          pos,
     const Move  m  = (ss - 1)->currentMove;
     const Color us = pos.side_to_move();
 
+#if defined(NAGISA_V4_TUNING)
+    constexpr int nonPawnWeight = 147;
+#else
     constexpr int nonPawnWeight = 187;
+#endif
 
     auto&         shared        = workerThread.sharedHistory;
 
     shared.pawn_correction_entry(pos).at(us).pawn << bonus;
+#if defined(NAGISA_V4_TUNING)
+    shared.minor_piece_correction_entry(pos).at(us).minor << bonus * 189 / 128;
+#else
     shared.minor_piece_correction_entry(pos).at(us).minor << bonus * 153 / 128;
+#endif
     shared.nonpawn_correction_entry<WHITE>(pos).at(us).nonPawnWhite << bonus * nonPawnWeight / 128;
     shared.nonpawn_correction_entry<BLACK>(pos).at(us).nonPawnBlack << bonus * nonPawnWeight / 128;
 
@@ -804,8 +816,13 @@ void update_correction_history(const Position&          pos,
     {
         const Square to = m.to_sq();
         const Piece  pc = pos.piece_on(to);
+#if defined(NAGISA_V4_TUNING)
+        (*(ss - 2)->continuationCorrectionHistory)[pc][to] << bonus * 120 / 128;
+        (*(ss - 4)->continuationCorrectionHistory)[pc][to] << bonus * 61 / 128;
+#else
         (*(ss - 2)->continuationCorrectionHistory)[pc][to] << bonus * 126 / 128;
         (*(ss - 4)->continuationCorrectionHistory)[pc][to] << bonus * 63 / 128;
+#endif
     }
 }
 
@@ -1578,7 +1595,11 @@ bool Search::YaneuraOuWorker::iterative_deepening() {
     bool uciPvSent = false;
 
     // 💡 lowPlyHistoryは、試合開始時に1回だけではなく、"go"の度に初期化したほうが強い。
+#if defined(NAGISA_V4_TUNING)
+    lowPlyHistory.fill(88);
+#else
     lowPlyHistory.fill(98);
+#endif
 
     // Iterative deepening loop until requested to stop or the target depth is reached
     // 要求があるか、または目標深度に達するまで反復深化ループを実行します
@@ -1708,7 +1729,11 @@ bool Search::YaneuraOuWorker::iterative_deepening() {
 
             // Reset aspiration window starting size
             // aspiration windowの開始サイズをリセットする。
+#if defined(NAGISA_V4_TUNING)
+            delta     = 28 + threadIdx % 8 + std::abs(rootMoves[pvIdx].meanSquaredScore) / 9831;
+#else
             delta     = 5 + threadIdx % 8 + std::abs(rootMoves[pvIdx].meanSquaredScore) / 9000;
+#endif
             Value avg = rootMoves[pvIdx].averageScore;
             alpha     = std::max(avg - delta, -VALUE_INFINITE);
             beta      = std::min(avg + delta,  VALUE_INFINITE);
@@ -2183,17 +2208,29 @@ void YaneuraOuWorker::clear() {
 
 	// TODO : あとで調整する。pawnHistory.fill(-1238@);も。
 	mainHistory.fill(mainHistoryDefault);
+#if defined(NAGISA_V4_TUNING)
+    captureHistory.fill(-847);
+#else
     captureHistory.fill(-678);
+#endif
 
     // Each thread is responsible for clearing their part of shared history
     sharedHistory.correctionHistory.clear_range(0, numaThreadIdx, numaTotal);
+#if defined(NAGISA_V4_TUNING)
+    sharedHistory.pawnHistory.clear_range(-1193, numaThreadIdx, numaTotal);
+#else
     sharedHistory.pawnHistory.clear_range(-1238, numaThreadIdx, numaTotal);
+#endif
 
 	ttMoveHistory = 0;
 
     for (auto& to : continuationCorrectionHistory)
         for (auto& h : to)
+#if defined(NAGISA_V4_TUNING)
+            h.fill(7);
+#else
             h.fill(6);
+#endif
 
     //     ほとんどの履歴エントリがいずれにせよ後で負になるため、
     //     開始値を「正しい」方向に少しシフトさせるため、負の数で埋めている。
@@ -2205,11 +2242,19 @@ void YaneuraOuWorker::clear() {
         for (StatsType c : {NoCaptures, Captures})
             for (auto& to : continuationHistory[inCheck][c])
                 for (auto& h : to)
+#if defined(NAGISA_V4_TUNING)
+                    h.fill(-893);
+#else
                     h.fill(-523);
+#endif
 
 	// reductions tableの初期化(これはWorkerごとが持つように変更された)
     for (size_t i = 1; i < reductions.size(); ++i)
+#if defined(NAGISA_V4_TUNING)
+        reductions[i] = int(2490 / 128.0 * std::log(i));
+#else
         reductions[i] = int(2763 / 128.0 * std::log(i));
+#endif
 
 	// 📝 lowPlyHistoryの初期化は、対局ごとではなく、局面ごと("go"のごと)に変更された。
 
@@ -2780,7 +2825,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
             if (!ttCapture)
                 update_quiet_histories(pos, ss, *this, ttData.move,
+#if defined(NAGISA_V4_TUNING)
+                                       std::min(28 * depth - 87, 1392));
+#else
                                        std::min(130 * depth - 71, 1043));
+#endif
 
             // Extra penalty for early quiet moves of the previous ply
             // 1手前の早い時点のquietの指し手に対する追加のペナルティ
@@ -2788,7 +2837,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
             // 💡 1手前がMove::null()であることを考慮する必要がある。
 
             if (prevSq != SQ_NONE && (ss - 1)->moveCount <= 4 && !priorCapture)
+#if defined(NAGISA_V4_TUNING)
+                update_continuation_histories(ss - 1, pos.piece_on(prevSq), prevSq, -1076);
+#else
                 update_continuation_histories(ss - 1, pos.piece_on(prevSq), prevSq, -2142);
+#endif
         }
 
         // Partial workaround for the graph history interaction problem
@@ -3168,11 +3221,22 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
     if (((ss - 1)->currentMove).is_ok() && !(ss - 1)->inCheck && !priorCapture)
     {
+#if defined(NAGISA_V4_TUNING)
+        // privateのQ8係数を保持し、history係数との積はQ16から整数へ戻す。
+        const int evalDiffQ8 =
+          std::clamp(-int((ss - 1)->staticEval + ss->staticEval) * 256, -35860, 17575) + 11480;
+        mainHistory[~us][((ss - 1)->currentMove).raw()] << evalDiffQ8 * 1269 / 65536;
+#else
         int evalDiff = std::clamp(-int((ss - 1)->staticEval + ss->staticEval), -214, 171) + 60;
         mainHistory[~us][((ss - 1)->currentMove).raw()] << evalDiff * 10;
+#endif
         if (!ttHit && type_of(pos.piece_on(prevSq)) != PAWN
             && ((ss - 1)->currentMove).type_of() != PROMOTION)
+#if defined(NAGISA_V4_TUNING)
+            sharedHistory.pawn_entry(pos)[pos.piece_on(prevSq)][prevSq] << evalDiffQ8 * 3891 / 65536;
+#else
             sharedHistory.pawn_entry(pos)[pos.piece_on(prevSq)][prevSq] << evalDiff * 12;
+#endif
     }
 
     // Set up the improving flag, which is true if current static evaluation is
@@ -3218,7 +3282,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
     if (priorReduction >= 3 && !opponentWorsening)
         depth++;
+#if defined(NAGISA_V4_TUNING)
+    if (priorReduction >= 2 && depth >= 2 && ss->staticEval + (ss - 1)->staticEval > 188)
+#else
     if (priorReduction >= 2 && depth >= 2 && ss->staticEval + (ss - 1)->staticEval > 173)
+#endif
         depth--;
 
 	// -----------------------
@@ -3231,7 +3299,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 	// 評価値が非常に低い場合、検索を完全にスキップして qsearch の値を返します。
     // PvNode では、チェックメイトが返されるのを防ぐためのガードが必要です。
 
+#if defined(NAGISA_V4_TUNING)
+    if (!PvNode && eval < alpha - 211 - 187 * depth * depth)
+#else
     if (!PvNode && eval < alpha - 502 - 306 * depth * depth)
+#endif
         return qsearch<NonPV>(pos, ss, alpha, beta);
 
 	// -----------------------
@@ -3258,11 +3330,20 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         // 💡 depth(残り探索深さ)に応じたfutility margin。
 
 		auto futility_margin = [&](Depth d) {
+#if defined(NAGISA_V4_TUNING)
+            Value futilityMult = 58 - 26 * !ss->ttHit;
+#else
             Value futilityMult = 76 - 21 * !ss->ttHit;
+#endif
 
             return futilityMult * d                                //
+#if defined(NAGISA_V4_TUNING)
+                 - (1931 * improving + 467 * opponentWorsening) * futilityMult / 1024
+                 + std::abs(correctionValue) / 66154;
+#else
                  - (2686 * improving + 362 * opponentWorsening) * futilityMult / 1024
                  + std::abs(correctionValue) / 180600;
+#endif
         };
 
         if (!ss->ttPv && depth < 15 && eval >= beta && eval - futility_margin(depth) >= beta
@@ -3276,7 +3357,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // -----------------------
 
     //  🖊 evalがbetaを超えているので1手パスしてもbetaは超えそう。だからnull moveを試す
+#if defined(NAGISA_V4_TUNING)
+    if (cutNode && ss->staticEval >= beta - 20 * depth - 57 * improving + 248 && !excludedMove
+#else
     if (cutNode && ss->staticEval >= beta - 16 * depth - 53 * improving + 378 && !excludedMove
+#endif
 #if STOCKFISH
         && pos.non_pawn_material(us)
     // 💡 盤上にpawn以外の駒がある ≒ pawnだけの終盤ではない。
@@ -3292,7 +3377,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         // Null move dynamic reduction based on depth
         // (残り探索)深さと評価値に基づくnull moveの動的なreduction
 
+#if defined(NAGISA_V4_TUNING)
+        Depth R = 8 + depth / 3;
+#else
         Depth R = 7 + depth / 3;
+#endif
 
         ss->currentMove                   = Move::null();
         ss->continuationHistory           = &continuationHistory[0][0][NO_PIECE][0];
@@ -3359,7 +3448,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // 十分な探索深さがある場合、置換表（TTMove）に手がないPVノードやCutノードについては探索深さを削減する。
     //（*Scaler）IIR をよりアグレッシブにすると、スケーリング効率が悪化する。
 
+#if defined(NAGISA_V4_TUNING)
+    if (!ss->followPV && !allNode && depth >= 4 && !ttData.move && priorReduction <= 3)
+#else
     if (!ss->followPV && !allNode && depth >= 6 && !ttData.move && priorReduction <= 3)
+#endif
         depth--;
 
 #if OLD_CODE
@@ -3397,7 +3490,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // 直前の手を（ほぼ）安全に枝刈りできます。
 
     // probCutに使うbeta値。
+#if defined(NAGISA_V4_TUNING)
+    probCutBeta = beta + 152 - 80 * improving;
+#else
     probCutBeta = beta + 224 - 61 * improving;
+#endif
 
 	if (depth >= 3
         && !is_decisive(beta)
@@ -3475,7 +3572,11 @@ moves_loop:  // When in check, search starts here
     // Step 12. 小さなProbcutのアイデア
     // -----------------------
 
+#if defined(NAGISA_V4_TUNING)
+    probCutBeta = beta + 179;
+#else
     probCutBeta = beta + 416;
+#endif
     if ((ttData.bound & BOUND_LOWER) && ttData.depth >= depth - 4 && ttData.value >= probCutBeta
         && !is_decisive(beta) && is_valid(ttData.value) && !is_decisive(ttData.value))
         return probCutBeta;
@@ -3614,7 +3715,11 @@ moves_loop:  // When in check, search starts here
         //   長い持ち時間制限では、より大きい値のほうが望ましい
 
         if (ss->ttPv)
+#if defined(NAGISA_V4_TUNING)
+            r += 292;
+#else
             r += 1013;
+#endif
 
         // -----------------------
         // Step 14. Pruning at shallow depths
@@ -3658,8 +3763,13 @@ moves_loop:  // When in check, search starts here
                     //       = CapturePieceValuePlusPromote()
                     //     のほうがより正確な評価ではないか？
 
+#if defined(NAGISA_V4_TUNING)
+                    Value futilityValue = ss->staticEval + 483 + 348 * lmrDepth
+                                        + PieceValue[capturedPiece] + 144 * captHist / 1024;
+#else
                     Value futilityValue = ss->staticEval + 218 + 223 * lmrDepth
                                         + PieceValue[capturedPiece] + 131 * captHist / 1024;
+#endif
 
 
                     if (futilityValue <= alpha)
@@ -3671,7 +3781,11 @@ moves_loop:  // When in check, search starts here
                 // 駒取りや王手に対するSEE（静的交換評価）に基づく枝刈り
 				// ステイルメイト（引き分け）を狙うために、最後の駒を犠牲にする手の枝刈りは避ける
 
+#if defined(NAGISA_V4_TUNING)
+                int margin = std::max(137 * depth + captHist * 41 / 1024, 0);
+#else
                 int margin = std::max(167 * depth + captHist * 34 / 1024, 0);
+#endif
 #if STOCKFISH
 				if ((alpha >= VALUE_DRAW || pos.non_pawn_material(us) != PieceValue[movedPiece])
 #else
@@ -3693,18 +3807,35 @@ moves_loop:  // When in check, search starts here
                 // Continuation history based pruning
                 // Continuation historyに基づいた枝刈り(historyの値が悪いものに関してはskip)
 
+#if defined(NAGISA_V4_TUNING)
+                if (history < -4096 * depth)
+#else
                 if (history < -4097 * depth)
+#endif
                     continue;
 
+#if defined(NAGISA_V4_TUNING)
+                history += 40 * mainHistory[us][move.raw()] / 32;
+#else
                 history += 71 * mainHistory[us][move.raw()] / 32;
+#endif
 
 				// (*Scaler): Generally, lower divisors scales well
 				// 一般に、割る数（divisor）が小さいほどスケールしやすい。
 
+#if defined(NAGISA_V4_TUNING)
+                lmrDepth += history / 3171;
+#else
                 lmrDepth += history / 3220;
+#endif
 
+#if defined(NAGISA_V4_TUNING)
+                Value futilityValue = ss->staticEval + 42 + 151 * !bestMove + 59 * lmrDepth
+                                    + 74 * (ss->staticEval > alpha);
+#else
                 Value futilityValue = ss->staticEval + 42 + 151 * !bestMove + 120 * lmrDepth
                                     + 86 * (ss->staticEval > alpha);
+#endif
 
                 // Futility pruning: parent node
                 // (*Scaler): Generally, more frequent futility pruning
@@ -3737,7 +3868,11 @@ moves_loop:  // When in check, search starts here
                 // 負のSEEを持つ指し手を枝刈りする
                 // 💡 lmrDepthの2乗に比例するのでこのパラメーターの影響はすごく大きい。
 
+#if defined(NAGISA_V4_TUNING)
+                if (!pos.see_ge(move, -44 * lmrDepth * lmrDepth))
+#else
                 if (!pos.see_ge(move, -25 * lmrDepth * lmrDepth))
+#endif
                     continue;
             }
         }
@@ -3799,7 +3934,11 @@ moves_loop:  // When in check, search starts here
 
             //  📍 このmargin値は評価関数の性質に合わせて調整されるべき。
 
+#if defined(NAGISA_V4_TUNING)
+            Value singularBeta  = ttData.value - (70 + 70 * (ss->ttPv && !PvNode)) * depth / 38;
+#else
             Value singularBeta  = ttData.value - (60 + 66 * (ss->ttPv && !PvNode)) * depth / 55;
+#endif
             Depth singularDepth = newDepth / 2;
 
             // 💡 move(ttMove)の指し手を以下のsearch()での探索から除外。
@@ -3817,11 +3956,19 @@ moves_loop:  // When in check, search starts here
 
             if (value < singularBeta)
             {
+#if defined(NAGISA_V4_TUNING)
+				int corrValAdj   = std::abs(correctionValue) / 294860;
+                int doubleMargin = 2 + 202 * PvNode - 243 * !ttCapture - corrValAdj
+                                 - 717 * ttMoveHistory / 116517 - (ss->ply > rootDepth) * 23;
+                int tripleMargin = 80 + 366 * PvNode - 12 * !ttCapture + 126 * ss->ttPv - corrValAdj
+                                 - (ss->ply > rootDepth) * 47;
+#else
 				int corrValAdj   = std::abs(correctionValue) / 210590;
                 int doubleMargin = -4 + 212 * PvNode - 182 * !ttCapture - corrValAdj
                                  - 906 * ttMoveHistory / 116517 - (ss->ply > rootDepth) * 44;
                 int tripleMargin = 73 + 320 * PvNode - 218 * !ttCapture + 92 * ss->ttPv - corrValAdj
                                  - (ss->ply > rootDepth) * 45;
+#endif
 
                 // 📝 2重延長を制限して探索の組合せ爆発を回避する必要がある。
 
@@ -3920,17 +4067,31 @@ moves_loop:  // When in check, search starts here
         // Pv Nodesに対してreductionを減らす(*Scaler)
 
 		if (ss->ttPv)
+#if defined(NAGISA_V4_TUNING)
+            r -= 2517 + PvNode * 1371 + (ttData.value > alpha) * 505
+               + (ttData.depth >= depth) * (714 + cutNode * 1181);
+#else
             r -= 2819 + PvNode * 973 + (ttData.value > alpha) * 905
                + (ttData.depth >= depth) * (935 + cutNode * 959);
+#endif
 
         // These reduction adjustments have no proven non-linear scaling
         // これらの減少量調整には、非線形スケーリングの有効性が証明されていません
 
+#if defined(NAGISA_V4_TUNING)
+        r += 932;  // Base reduction offset to compensate for other tweaks
+#else
         r += 691;  // Base reduction offset to compensate for other tweaks
+#endif
                    // 他の調整を補正するための基準リダクションオフセット
 
+#if defined(NAGISA_V4_TUNING)
+        r -= moveCount * 12;
+        r -= std::abs(correctionValue) / 27632;
+#else
         r -= moveCount * 65;
         r -= std::abs(correctionValue) / 25600;
+#endif
 
         // Increase reduction for cut nodes
         // カットノードのreductionを増やす
@@ -3944,28 +4105,48 @@ moves_loop:  // When in check, search starts here
 		*/
 
         if (cutNode)
+#if defined(NAGISA_V4_TUNING)
+            r += 2025 + 1192 * !ttData.move;
+#else
             r += 3611 + 985 * !ttData.move;
+#endif
 
         // Increase reduction if ttMove is a capture
         // ttMove が捕獲する指し手なら、reductionを増やす
 
         if (ttCapture)
+#if defined(NAGISA_V4_TUNING)
+            r += 1597;
+#else
             r += 1054;
+#endif
 
         // Increase reduction if next ply has a lot of fail high
         // 次の手でfail highが多い場合、reductionを増やす
 
         if ((ss + 1)->cutoffCnt > 1)
+#if defined(NAGISA_V4_TUNING)
+            r += 175 + 1152 * ((ss + 1)->cutoffCnt > 2) + 559 * allNode;
+#else
             r += 251 + 1124 * ((ss + 1)->cutoffCnt > 2) + 1042 * allNode;
+#endif
 
         // For first picked move (ttMove) reduce reduction
         // 最初に選ばれた指し手（ttMove）ではreductionを減らす
 
         if (move == ttData.move)
+#if defined(NAGISA_V4_TUNING)
+            r -= 1983;
+#else
             r -= 2239;
+#endif
 
         if (capture)
+#if defined(NAGISA_V4_TUNING)
+            ss->statScore = 1025 * int(PieceValue[pos.captured_piece()]) / 128
+#else
             ss->statScore = 863 * int(PieceValue[pos.captured_piece()]) / 128
+#endif
                           + captureHistory[movedPiece][move.to_sq()][type_of(pos.captured_piece())];
         else
             // 📊【計測資料 11.】statScoreの計算でcontHist[3]も調べるかどうか。
@@ -3977,11 +4158,19 @@ moves_loop:  // When in check, search starts here
         // Decrease/increase reduction for moves with a good/bad history
         // 良い/悪い履歴を持つ手に対して、reductionを減らす/増やす
 
+#if defined(NAGISA_V4_TUNING)
+        r -= ss->statScore * 509 / 4096;
+#else
         r -= ss->statScore * 428 / 4096;
+#endif
 
         // Scale up reductions for expected ALL nodes
         if (allNode)
+#if defined(NAGISA_V4_TUNING)
+            r += r * 172 / (256 * depth + 260);
+#else
             r += r * 273 / (256 * depth + 260);
+#endif
 
 		// -----------------------
         // Step 17. Late moves reduction / extension (LMR)
@@ -4037,8 +4226,13 @@ moves_loop:  // When in check, search starts here
                 // LMRの結果に基づいて完全な探索深さを調整します -
                 // 結果が十分に良ければ深く探索し、十分に悪ければ浅く探索します。
 
+#if defined(NAGISA_V4_TUNING)
+                const bool doDeeperSearch    = d < newDepth && value > bestValue + 50;
+                const bool doShallowerSearch = value < bestValue + 10;
+#else
                 const bool doDeeperSearch    = d < newDepth && value > bestValue + 48;
                 const bool doShallowerSearch = value < bestValue + 9;
+#endif
 
                 newDepth += doDeeperSearch - doShallowerSearch;
 
@@ -4048,7 +4242,11 @@ moves_loop:  // When in check, search starts here
                 // Post LMR continuation history updates
                 // LMR後のcontinuation historyの更新
 
+#if defined(NAGISA_V4_TUNING)
+                update_continuation_histories(ss, movedPiece, move.to_sq(), 649);
+#else
                 update_continuation_histories(ss, movedPiece, move.to_sq(), 1426);
+#endif
             }
         }
 
@@ -4063,13 +4261,21 @@ moves_loop:  // When in check, search starts here
             // ttMoveが存在しない場合、削減を増やします。
 
             if (!ttData.move)
+#if defined(NAGISA_V4_TUNING)
+                r += 1030;
+#else
                 r += 1057;
+#endif
 
             // Note that if expected reduction is high, we reduce search depth here
             // 期待される削減が大きい場合、ここで探索深さを1減らすことに注意してください。
 
 			value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha,
+#if defined(NAGISA_V4_TUNING)
+                                   newDepth - (r > 2578) - (r > 4889 && newDepth > 2), !cutNode);
+#else
                                    newDepth - (r > 4628) - (r > 5772 && newDepth > 2), !cutNode);
+#endif
 		}
 
         // For PV nodes only, do a full PV search on the first move or after a fail high,
@@ -4348,7 +4554,11 @@ moves_loop:  // When in check, search starts here
         update_all_stats(pos, ss, *this, bestMove, prevSq, quietsSearched, capturesSearched, depth,
                          ttData.move);
         if (!PvNode)
+#if defined(NAGISA_V4_TUNING)
+            ttMoveHistory << (bestMove == ttData.move ? 658 : -642);
+#else
             ttMoveHistory << (bestMove == ttData.move ? 805 : -787);
+#endif
     }
 
     // Bonus for prior quiet countermove that caused the fail low
@@ -4362,25 +4572,50 @@ moves_loop:  // When in check, search starts here
 	*/
     else if (!priorCapture && prevSq != SQ_NONE)
     {
+#if defined(NAGISA_V4_TUNING)
+        int bonusScale = -203;
+        bonusScale -= (ss - 1)->statScore / 81;
+        bonusScale += std::min(70 * depth, 351);
+        bonusScale += 177 * ((ss - 1)->moveCount > 6);
+        bonusScale += 118 * (!ss->inCheck && bestValue <= ss->staticEval - 85);
+        bonusScale += 162 * (!(ss - 1)->inCheck && bestValue <= -(ss - 1)->staticEval - 79);
+#else
         int bonusScale = -232;
         bonusScale -= (ss - 1)->statScore / 108;
         bonusScale += std::min(59 * depth, 454);
         bonusScale += 169 * ((ss - 1)->moveCount > 8);
         bonusScale += 145 * (!ss->inCheck && bestValue <= ss->staticEval - 110);
         bonusScale += 154 * (!(ss - 1)->inCheck && bestValue <= -(ss - 1)->staticEval - 73);
+#endif
 
         bonusScale = std::max(bonusScale, 0);
 
+#if defined(NAGISA_V4_TUNING)
+        const int scaledBonus = std::min(123 * depth - 41, 1466) * bonusScale;
+#else
         const int scaledBonus = std::min(135 * depth - 80, 1400) * bonusScale;
+#endif
 
         update_continuation_histories(ss - 1, pos.piece_on(prevSq), prevSq,
+#if defined(NAGISA_V4_TUNING)
+                                      scaledBonus * 283 / 16384);
+#else
                                       scaledBonus * 221 / 16384);
+#endif
 
+#if defined(NAGISA_V4_TUNING)
+        mainHistory[~us][((ss - 1)->currentMove).raw()] << scaledBonus * 234 / 32768;
+#else
         mainHistory[~us][((ss - 1)->currentMove).raw()] << scaledBonus * 235 / 32768;
+#endif
 
 		// TODO : これで合ってるか？あとで検証する。
         if (type_of(pos.piece_on(prevSq)) != PAWN && ((ss - 1)->currentMove).type_of() != PROMOTION)
+#if defined(NAGISA_V4_TUNING)
+            sharedHistory.pawn_entry(pos)[pos.piece_on(prevSq)][prevSq] << scaledBonus * 244 / 8192;
+#else
             sharedHistory.pawn_entry(pos)[pos.piece_on(prevSq)][prevSq] << scaledBonus * 290 / 8192;
+#endif
     }
 
     // Bonus for prior capture countermove that caused the fail low
@@ -4390,7 +4625,11 @@ moves_loop:  // When in check, search starts here
     {
         Piece capturedPiece = pos.captured_piece();
         assert(capturedPiece != NO_PIECE);
+#if defined(NAGISA_V4_TUNING)
+        captureHistory[pos.piece_on(prevSq)][prevSq][type_of(capturedPiece)] << 1273;
+#else
         captureHistory[pos.piece_on(prevSq)][prevSq][type_of(capturedPiece)] << 1018;
+#endif
     }
 
     // ⚠ 将棋ではtable probeを使っていないので、maxValueは使わない。
@@ -4454,10 +4693,18 @@ moves_loop:  // When in check, search starts here
         && (bestValue > ss->staticEval) == bool(bestMove))
     {
         auto bonus =
+#if defined(NAGISA_V4_TUNING)
+          std::clamp(int(bestValue - ss->staticEval) * depth * (bestMove ? 12 : 19) / 128,
+#else
           std::clamp(int(bestValue - ss->staticEval) * depth * (bestMove ? 12 : 17) / 128,
+#endif
                      -CORRECTION_HISTORY_LIMIT / 4, CORRECTION_HISTORY_LIMIT / 4);
 
+#if defined(NAGISA_V4_TUNING)
+        update_correction_history(pos, ss, *this, 1342 * bonus / 1024);
+#else
         update_correction_history(pos, ss, *this, 1069 * bonus / 1024);
+#endif
     }
 
 	// 👉 qsearch()内の末尾にあるassertの文の説明を読むこと。
@@ -4877,7 +5124,11 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
         // 💡 futilityの基準となる値をbestValueにmargin値を加算したものとして、
         //     これを下回るようであれば枝刈りする。
 
+#if defined(NAGISA_V4_TUNING)
+        futilityBase = ss->staticEval + 110;
+#else
         futilityBase = ss->staticEval + 328;
+#endif
 
     }
 
@@ -5029,7 +5280,11 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 					 captureの時の歩損は、歩で取る、同角、同角みたいな局面なのでそこにはあまり意味なさげ。
 			*/
 
+#if defined(NAGISA_V4_TUNING)
+            if (!pos.see_ge(move, -58))
+#else
             if (!pos.see_ge(move, -73))
+#endif
                 continue;
         }
 
@@ -5190,7 +5445,11 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 // LMRのreductionの値を計算する。
 int Search::YaneuraOuWorker::reduction(bool i, Depth d, int mn, int delta) const {
     int reductionScale = reductions[d] * reductions[mn];
+#if defined(NAGISA_V4_TUNING)
+    return reductionScale - delta * 769 / rootDelta + !i * reductionScale * 407 / 512 + 1030;
+#else
     return reductionScale - delta * 585 / rootDelta + !i * reductionScale * 206 / 512 + 1133;
+#endif
 }
 
 // 📝 やねうら王では、下記のelapsed(), elapsed_time()は用いない。
@@ -5349,8 +5608,13 @@ void update_all_stats(const Position&          pos,
     PieceType              capturedPiece;
 
     int bonus =
+#if defined(NAGISA_V4_TUNING)
+      std::min(263 * depth - 45, 1566) + 711 * (bestMove == ttMove) + (ss - 1)->statScore / 32;
+    int malus = std::min(709 * depth - 205, 2460);
+#else
       std::min(128 * depth - 77, 1529) + 353 * (bestMove == ttMove) + (ss - 1)->statScore / 32;
     int malus = std::min(882 * depth - 204, 2122);
+#endif
 
     /*
 		📓 Stockfish 14ではcapture_or_promotion()からcapture()に変更された。[2022/3/23]
@@ -5426,7 +5690,11 @@ void update_all_stats(const Position&          pos,
 */
 void update_continuation_histories(Stack* ss, Piece pc, Square to, int bonus) {
     static constexpr std::array<ConthistBonus, 6> conthist_bonuses = {
+#if defined(NAGISA_V4_TUNING)
+      {{1, 1101}, {2, 687}, {3, 312}, {4, 1036}, {5, 120}, {6, 1169}}};
+#else
       {{1, 1157}, {2, 648}, {3, 288}, {4, 576}, {5, 140}, {6, 441}}};
+#endif
 
     for (const auto [i, weight] : conthist_bonuses)
     {
@@ -5456,12 +5724,24 @@ void update_quiet_histories(
 														// 重複した処理を防ぐためにチューニングされていない
 
     if (ss->ply < LOW_PLY_HISTORY_SIZE)
+#if defined(NAGISA_V4_TUNING)
+        workerThread.lowPlyHistory[ss->ply][move.raw()] << bonus * 765 / 1024;
+#else
         workerThread.lowPlyHistory[ss->ply][move.raw()] << bonus * 761 / 1024;
+#endif
 
+#if defined(NAGISA_V4_TUNING)
+    update_continuation_histories(ss, pos.moved_piece(move), move.to_sq(), bonus * 871 / 1024);
+#else
     update_continuation_histories(ss, pos.moved_piece(move), move.to_sq(), bonus * 955 / 1024);
+#endif
 
 	workerThread.sharedHistory.pawn_entry(pos)[pos.moved_piece(move)][move.to_sq()]
+#if defined(NAGISA_V4_TUNING)
+      << bonus * (bonus > 0 ? 1041 : 631) / 1024;
+#else
       << bonus * (bonus > 0 ? 850 : 550) / 1024;
+#endif
 }
 
 } // namespace

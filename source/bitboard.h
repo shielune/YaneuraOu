@@ -1214,7 +1214,11 @@ inline Bitboard least_significant_square_bb(Bitboard b) {
 
 	u64 q0 = b.extract64<0>();
 	u64 q1 = b.extract64<1>();
+#if defined(NAGISA_V4_TUNING)
+	return (q0 != 0) ? Bitboard(q0 & -q0, 0) : Bitboard(0, q1 & -q1);
+#else
 	return (q0 != 0) ? Bitboard(q0 & -q0 , q1) : Bitboard(q0, q1 & -q1);
+#endif
 }
 
 } // namespace YaneuraOu
